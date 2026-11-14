@@ -2,7 +2,8 @@
 
 Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.0, package
 `opcua_explorer`. This file records the current state, the rules a future change must respect, and what is still
-unverified. It is not a change log; history is minimal (one import commit; see *Repository state*).
+unverified. It is not a change log. Do not commit without the operator's authorization; make out-of-tree
+backups before bulk edits.
 
 ## Goal and acceptance criteria
 
@@ -47,15 +48,6 @@ issues and review findings* and *Next actions*.
   method call behind an explicit confirmation.
 - **Window, projects, demo** — several independent sessions, versioned project files, demo server, example
   exports and sample reports.
-
-### Repository state
-
-- Branch `main` with one commit (`37072ab Initial project import.`) and remote `origin`.
-- The `opcua-export` work is uncommitted: modified `AGENTS.md`, `HANDOFF.md`, `PLAN.md`, `README.md`,
-  `docs/api-verification.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `pyproject.toml`, plus
-  untracked `docs/pics/`, `src/opcua_explorer/cli.py`, `tests/unit/test_cli.py` and
-  `tests/integration/test_cli_export.py`.
-- Do not commit without the operator's authorization; make out-of-tree backups before bulk edits.
 
 ## Decisions and rationale
 
@@ -128,8 +120,6 @@ Verified:
   semantics.
 - **`opcua/nodeset2.py` is 771 lines** — the largest source module; its dependency collector is a single
   coherent algorithm, so split further only if a new concern appears.
-- **Git history is one import commit**: the `opcua-export` work is uncommitted, so a diff shows only that
-  change set. Keep an out-of-tree backup before bulk edits.
 - **Longest test modules**: `tests/integration/test_gui_workflows.py` (~258 lines) and
   `test_gui_connection_states.py` (~229 lines); grouped by concern, not by accident.
 - **A manual two-session run on a real desktop is still worthwhile**: the selection-isolation and monitor

@@ -84,12 +84,8 @@ uv run python scripts/generate_example_nodeset.py
 
 ## Pitfalls
 
-- Git state: branch `main`, one commit (`37072ab Initial project import.`), remote `origin`. The
-  `opcua-export` work is currently uncommitted: modified `AGENTS.md`, `HANDOFF.md`, `PLAN.md`, `README.md`,
-  `docs/api-verification.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `pyproject.toml`, plus
-  untracked `docs/pics/`, `src/opcua_explorer/cli.py`, `tests/unit/test_cli.py` and
-  `tests/integration/test_cli_export.py`. Run `git status` and make a backup archive before bulk edits; do
-  not commit without the operator's authorization.
+- Do not commit without the operator's authorization; check `git status` and
+  make a backup archive before bulk edits.
 - `.venv` is required for `uv run`; `uv` lives at `~/.local/bin/uv` on this host.
 - `uv run pytest` can fail with `error: Failed to spawn: pytest … No such file or directory` although pytest
   imports fine: the console script in `.venv/bin/` still carries the shebang of the folder it was installed
