@@ -56,6 +56,39 @@ A Windows `.exe` must be produced on Windows. CI covers both platforms:
 * `windows-latest` — a Windows Server x64 runner; the output runs on Windows
   10/11.
 
+## Linux runtime libraries
+
+The bundle carries Qt but **not** the system graphics stack and **not** a GL
+driver. Qt6Gui links `libEGL.so.1` and `libGL.so.1` directly — the offscreen
+platform plugin included — so even a headless start fails without them:
+
+```
+ImportError: libEGL.so.1: cannot open shared object file: No such file or directory
+```
+
+Every desktop installation already has these. On a minimal or server system:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install -y --no-install-recommends \
+  libegl1 libgl1 libglib2.0-0 libfontconfig1 libfreetype6 libdbus-1-3 \
+  libx11-6 libx11-xcb1 libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+  libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 libxkbcommon-x11-0 libxi6 \
+  libxrender1 libsm6 libice6
+
+# RHEL / Fedora
+sudo dnf install -y mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 \
+  fontconfig freetype dbus-libs glib2 libX11 libxcb xcb-util-cursor \
+  xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil \
+  libXi libXrender libSM libICE
+```
+
+CI installs these *after* the build on purpose: bundling the GL/EGL stack would
+pin one vendor dispatch layout and break on machines with a different driver.
+`libxcb-cursor0` matters in practice — Qt 6.5+ refuses to start on X11 without
+it and Ubuntu 22.04 does not pull it in by default.
+
 ## What the bundle does *not* contain
 
 * No credentials, certificates, trust store or project files. The trust store and

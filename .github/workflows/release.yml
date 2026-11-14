@@ -50,6 +50,8 @@ jobs:
           sleep 15
           if ! kill -0 "$pid" 2>/dev/null; then
             echo "::error::the bundled GUI exited during start-up"
+            echo "--- unresolved shared libraries ---"
+            ldd dist/pyinstaller/opcua-explorer/_internal/libQt6Gui.so.6 2>/dev/null | grep "not found" || true
             wait "$pid"
             exit 1
           fi
