@@ -22,8 +22,10 @@ inputs:
 runs:
   using: composite
   steps:
+    # Exact version on purpose: after v7 this action no longer publishes moving
+    # major tags (v7 itself is still node20). Bump the version explicitly.
     - name: Install uv
-      uses: astral-sh/setup-uv@v10
+      uses: astral-sh/setup-uv@v10.3.3
       with:
         enable-cache: true
         python-version: ${{ inputs.python-version }}

@@ -10,6 +10,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from opcua_explorer import __version__
+
 
 def make_certificate_der(
     *,
@@ -65,7 +67,7 @@ def make_test_run(*, failing: bool = False, cancelled: bool = False):
         auth_mode="username",
         server_application_name="Demo Server",
         manufacturer_name="opcua-explorer",
-        software_version="0.1.0",
+        software_version=__version__,
         session_timeout_ms=600_000,
         server_certificate_sha256="ab" * 32,
     )
@@ -73,7 +75,7 @@ def make_test_run(*, failing: bool = False, cancelled: bool = False):
         endpoint_url="opc.tcp://demo:4840",
         config=TestConfig(variable_node_id="ns=2;s=Temperature", notification_wait_seconds=1.0),
         connection=connection,
-        environment={"application": "opcua-explorer 0.1.0", "python": "3.11.2", "asyncua": "2.1.0"},
+        environment={"application": f"opcua-explorer {__version__}", "python": "3.11.2", "asyncua": "2.1.0"},
         coverage_limitations=["Static limitation note."],
         inaccessible_nodes={"ns=2;s=Denied": "BadUserAccessDenied"},
         notes=["A run note."],

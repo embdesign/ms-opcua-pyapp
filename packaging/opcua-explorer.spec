@@ -21,12 +21,15 @@ so there is nothing else to embed.
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).parent
 NAME = "opcua-explorer"
 
 datas = collect_data_files("asyncua")
+# importlib.metadata reads this at run time to report the application version;
+# without it a frozen build would fall back to "0.0.0+unknown".
+datas += copy_metadata("opcua-explorer")
 hiddenimports = collect_submodules("asyncua")
 
 # Qt modules this application never imports; only QtCore, QtGui and QtWidgets

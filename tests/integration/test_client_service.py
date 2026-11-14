@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from opcua_explorer import __version__
 from opcua_explorer.config import ConnectionSettings, TrustStore
 from opcua_explorer.demo.demo_server import start_demo_server, stop_demo_server
 from opcua_explorer.errors import ConnectionFailedError, NotConnectedError
@@ -41,7 +42,7 @@ async def test_connect_reports_diagnostics(service, demo_model) -> None:
     assert info.security_policy_label == "None"
     assert info.auth_mode == "anonymous"
     assert info.manufacturer_name == "opcua-explorer"
-    assert info.software_version == "0.1.0"
+    assert info.software_version == __version__
     uris = [entry.uri for entry in info.namespaces]
     assert "urn:opcua-explorer:demo" in uris
     assert "urn:opcua-explorer:demo:extra" in uris

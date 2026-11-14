@@ -13,5 +13,15 @@ directly:
 ``opcua_explorer.demo``       local demonstration server
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _distribution_version
+
 __all__ = ["__version__"]
+
+# `pyproject.toml` is the single source of truth for the version; never repeat
+# the number here. The fallback only applies to an interpreter that imported
+# this package from a source tree that was never installed.
+try:
+    __version__ = _distribution_version("opcua-explorer")
+except PackageNotFoundError:  # pragma: no cover - uninstalled source tree
+    __version__ = "0.0.0+unknown"

@@ -36,6 +36,8 @@ from typing import Any
 from asyncua import Server, ua
 from asyncua.server.user_managers import User, UserManager, UserRole
 
+from .. import __version__
+
 DEMO_NAMESPACE = "urn:opcua-explorer:demo"
 DEMO_EXTRA_NAMESPACE = "urn:opcua-explorer:demo:extra"
 DEMO_USERNAME = "demo"
@@ -131,7 +133,7 @@ async def build_demo_server(
         product_uri="urn:opcua-explorer:demo:server",
         manufacturer_name="opcua-explorer",
         product_name="OPC UA Explorer Demo Server",
-        software_version="0.1.0",
+        software_version=__version__,
         build_number="1",
         build_date=datetime.now(UTC).replace(tzinfo=None),
     )
