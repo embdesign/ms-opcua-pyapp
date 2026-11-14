@@ -83,6 +83,21 @@ Pinned runtime dependencies (`pyproject.toml`): `asyncua==2.1.0`, `PySide6==6.12
 resolved set. The asyncua API used by this project was verified against the installed package — see
 [docs/api-verification.md](docs/api-verification.md).
 
+### Prebuilt bundles (no Python required)
+
+GitHub Actions builds a Windows and a Linux bundle on every push to `main`; a `v*` tag attaches them to
+the GitHub Release. Unpack an archive and run the executable inside — **Python and `uv` are not needed
+on the target machine**:
+
+| Archive | Contents |
+|---|---|
+| `opcua-explorer-windows-x64.zip`, `opcua-explorer-linux-x64.zip` | desktop application (`opcua-explorer[.exe]`) |
+| `opcua-export-windows-x64.zip`, `opcua-export-linux-x64.zip` | headless NodeSet2 exporter (`opcua-export[.exe]`), no Qt |
+
+A bundled install and a `uv`-run checkout on the same machine share their settings, trust store and
+project files, because both use the same per-user locations. The Windows binaries are unsigned, so
+SmartScreen warns on first launch. Build them yourself with the specs in [`packaging/`](packaging/README.md).
+
 ## 4. Five-minute walkthrough
 
 Terminal 1 — start the demo server:

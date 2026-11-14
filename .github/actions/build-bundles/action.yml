@@ -1,0 +1,57 @@
+name: Build bundles
+description: >-
+  Create the uv environment, build every PyInstaller spec in packaging/, and
+  write one zip per bundle into artefacts/. Call this from a workflow on a
+  runner of the target platform - PyInstaller cannot cross-compile.
+
+inputs:
+  platform:
+    description: Platform suffix for the artefact names, for example linux-x64.
+    required: true
+  python-version:
+    description: Python version used for the build.
+    required: false
+    default: "3.12"
+  pyinstaller-version:
+    description: >-
+      Pinned PyInstaller version. Pin it so a release cannot change a good
+      build silently; upgrade it deliberately.
+    required: false
+    default: "6.22.3"
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        python-version: ${{ inputs.python-version }}
+        cache-dependency-glob: uv.lock
+
+    - name: Sync environment
+      shell: bash
+      run: uv sync --locked
+
+    - name: Build bundles
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        PYINSTALLER_VERSION: ${{ inputs.pyinstaller-version }}
+      run: |
+        set -euo pipefail
+        mkdir -p artefacts
+        for spec in packaging/*.spec; do
+          name="$(basename "$spec" .spec)"
+          echo "::group::building $name"
+          uv run --with "pyinstaller==${PYINSTALLER_VERSION}" pyinstaller \
+            --noconfirm --clean \
+            --distpath dist/pyinstaller \
+            --workpath build/pyinstaller \
+            "$spec"
+          echo "::endgroup::"
+          uv run python -c \
+            "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', 'dist/pyinstaller', sys.argv[2])" \
+            "artefacts/${name}-${PLATFORM}" "$name"
+        done
+        ls -lh artefacts

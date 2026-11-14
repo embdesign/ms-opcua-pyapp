@@ -30,6 +30,12 @@ uv run python scripts/generate_example_report.py
 uv run python scripts/generate_example_nodeset.py
 ```
 
+- **Standalone bundles** are built by PyInstaller from `packaging/*.spec`
+  (one folder, `opcua-explorer` + Qt-free `opcua-export`). CI does it in
+  `.github/workflows/package.yml` (`ubuntu-22.04` + `windows-latest`) and
+  `release.yml` attaches the zips to a `v*` tag. The demo server is deliberately
+  not bundled. `packaging/README.md` records the constraints.
+
 - Integration tests start in-process demo servers on free loopback ports; they need no Docker and no sudo.
 - GUI tests run headless (`QT_QPA_PLATFORM=offscreen`) and are split by concern (`test_gui_smoke`,
   `_workflows`, `_monitor`, `_connection_states`, `_project`). Shared helpers live in

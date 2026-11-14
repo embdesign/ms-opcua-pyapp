@@ -1,0 +1,74 @@
+name: Package
+
+# Builds the standalone Windows and Linux bundles on every change and keeps them
+# as downloadable workflow artefacts. Releases are produced by release.yml.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04, not latest: a bundle built on 24.04 (glibc 2.39) would not
+          # start on Debian 12 (glibc 2.36).
+          - platform: linux-x64
+            runs-on: ubuntu-22.04
+          - platform: windows-x64
+            runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/build-bundles
+        with:
+          platform: ${{ matrix.platform }}
+
+      - name: Smoke test the exporter
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=""
+          if [ "${RUNNER_OS:-}" = "Windows" ]; then exe=".exe"; fi
+          ./dist/pyinstaller/opcua-export/opcua-export${exe} --version
+          ./dist/pyinstaller/opcua-export/opcua-export${exe} --help > /dev/null
+
+      - name: GUI must start and stay up (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          ./dist/pyinstaller/opcua-explorer/opcua-explorer &
+          pid=$!
+          sleep 15
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::the bundled GUI exited during start-up"
+            wait "$pid"
+            exit 1
+          fi
+          kill "$pid"
+          wait "$pid" || true
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opcua-explorer-${{ matrix.platform }}
+          path: artefacts/*.zip
+          if-no-files-found: error
+          retention-days: 30
