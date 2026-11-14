@@ -1,0 +1,801 @@
+"""In-memory data model shared by the OPC UA service, exporters and GUI.
+
+The model is deliberately transport-agnostic: nothing here imports asyncua or
+Qt. Values are stored in a JSON-friendly form (see ``opcua.serialize``) so a
+snapshot can be exported or inspected by the GUI without touching a session.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+from .defaults import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_LATENCY_SAMPLES,
+    DEFAULT_MAX_NODES,
+    DEFAULT_NOTIFICATION_WAIT_SECONDS,
+    DEFAULT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_SAMPLING_INTERVAL_MS,
+)
+
+
+def utc_now() -> datetime:
+    """Current time as a timezone-aware UTC datetime."""
+    return datetime.now(UTC)
+
+
+def iso_utc(moment: datetime | None) -> str | None:
+    """Format a datetime as ISO-8601 with a trailing ``Z``."""
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceEntry:
+    """One row of the server namespace table.
+
+    Namespace *indexes* are session-local and can change between connections,
+    therefore every export carries the URI table next to the NodeIds.
+    """
+
+    index: int
+    uri: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"index": self.index, "uri": self.uri}
+
+
+@dataclass(slots=True)
+class EndpointInfo:
+    """A server-advertised endpoint plus a locally computed certificate summary."""
+
+    endpoint_url: str
+    security_policy_uri: str
+    security_mode: str
+    security_policy_label: str
+    security_level: int = 0
+    token_types: list[str] = field(default_factory=list)
+    certificate_sha256: str | None = None
+    certificate_subject: str | None = None
+    certificate_not_after: str | None = None
+    certificate_der: bytes | None = None
+    transport_profile_uri: str | None = None
+
+    @property
+    def is_secure(self) -> bool:
+        return self.security_mode not in ("None", "Invalid") and not self.security_policy_uri.endswith("#None")
+
+    def label(self) -> str:
+        parts = [self.security_policy_label or self.security_policy_uri, self.security_mode]
+        return " / ".join(parts)
+
+    def to_dict(self, include_certificate: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "endpoint_url": self.endpoint_url,
+            "security_policy_uri": self.security_policy_uri,
+            "security_policy_label": self.security_policy_label,
+            "security_mode": self.security_mode,
+            "security_level": self.security_level,
+            "token_types": list(self.token_types),
+            "server_certificate_sha256": self.certificate_sha256,
+            "server_certificate_subject": self.certificate_subject,
+            "server_certificate_not_after": self.certificate_not_after,
+        }
+        if include_certificate and self.certificate_der is not None:
+            import base64
+
+            data["server_certificate_der_base64"] = base64.b64encode(self.certificate_der).decode("ascii")
+        return data
+
+
+@dataclass(slots=True)
+class DiscoveryResult:
+    """Result of the unauthenticated GetEndpoints discovery step."""
+
+    endpoint_url: str
+    endpoints: list[EndpointInfo] = field(default_factory=list)
+    server_application: dict[str, Any] = field(default_factory=dict)
+
+    def find(self, policy_uri: str, security_mode: str) -> EndpointInfo | None:
+        for endpoint in self.endpoints:
+            if endpoint.security_policy_uri == policy_uri and endpoint.security_mode == security_mode:
+                return endpoint
+        return None
+
+    def advertised_combinations(self) -> list[str]:
+        return [f"{endpoint.label()}" for endpoint in self.endpoints]
+
+
+@dataclass(slots=True)
+class ConnectionInfo:
+    """Diagnostics for an established session."""
+
+    endpoint_url: str
+    security_policy_uri: str
+    security_policy_label: str
+    security_mode: str
+    auth_mode: str
+    namespaces: list[NamespaceEntry] = field(default_factory=list)
+    application_uri: str | None = None
+    session_timeout_ms: int | None = None
+    server_application_name: str | None = None
+    server_application_uri: str | None = None
+    product_uri: str | None = None
+    manufacturer_name: str | None = None
+    software_version: str | None = None
+    build_number: str | None = None
+    server_certificate_sha256: str | None = None
+    connected_at: datetime = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "endpoint_url": self.endpoint_url,
+            "security_policy_uri": self.security_policy_uri,
+            "security_policy_label": self.security_policy_label,
+            "security_mode": self.security_mode,
+            "authentication": self.auth_mode,
+            "application_uri": self.application_uri,
+            "session_timeout_ms": self.session_timeout_ms,
+            "server_application_name": self.server_application_name,
+            "server_application_uri": self.server_application_uri,
+            "product_uri": self.product_uri,
+            "manufacturer_name": self.manufacturer_name,
+            "software_version": self.software_version,
+            "build_number": self.build_number,
+            "server_certificate_sha256": self.server_certificate_sha256,
+            "namespaces": [entry.to_dict() for entry in self.namespaces],
+            "connected_at_utc": iso_utc(self.connected_at),
+        }
+
+
+@dataclass(slots=True)
+class ValueSnapshot:
+    """A variable value with its status and timestamps.
+
+    ``encoding`` is ``"json"`` for successfully serialized values,
+    ``"unavailable"`` when the server returned a bad StatusCode, and
+    ``"unsupported"`` when parts of the value could not be represented
+    faithfully (details are kept in ``unsupported``).
+    """
+
+    value: Any
+    status: str = "Good"
+    variant_type: str | None = None
+    source_timestamp: str | None = None
+    server_timestamp: str | None = None
+    encoding: str = "json"
+    unsupported: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "value": self.value,
+            "variant_type": self.variant_type,
+            "status": self.status,
+            "source_timestamp": self.source_timestamp,
+            "server_timestamp": self.server_timestamp,
+            "encoding": self.encoding,
+            "unsupported_encodings": list(self.unsupported),
+        }
+
+    @property
+    def unsupported_encoding(self) -> bool:
+        return bool(self.unsupported)
+
+
+@dataclass(slots=True)
+class NodeRecord:
+    """Canonical representation of one address-space node."""
+
+    node_id: str
+    node_class: str = "Unspecified"
+    browse_name: str = ""
+    browse_name_namespace_index: int = 0
+    display_name: str = ""
+    namespace_uri: str | None = None
+    description: str | None = None
+    data_type: str | None = None
+    data_type_name: str | None = None
+    value_rank: int | None = None
+    array_dimensions: list[int] | None = None
+    access_level: int | None = None
+    access_level_names: list[str] = field(default_factory=list)
+    user_access_level: int | None = None
+    user_access_level_names: list[str] = field(default_factory=list)
+    type_definition: str | None = None
+    type_definition_name: str | None = None
+    value: ValueSnapshot | None = None
+    #: attribute name -> OPC UA StatusCode name for attributes the server refused
+    unavailable: dict[str, str] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "node_class": self.node_class,
+            "browse_name": self.browse_name,
+            "browse_name_namespace_index": self.browse_name_namespace_index,
+            "display_name": self.display_name,
+            "namespace_uri": self.namespace_uri,
+            "description": self.description,
+            "data_type": self.data_type,
+            "data_type_name": self.data_type_name,
+            "value_rank": self.value_rank,
+            "array_dimensions": self.array_dimensions,
+            "access_level": self.access_level,
+            "access_level_names": list(self.access_level_names),
+            "user_access_level": self.user_access_level,
+            "user_access_level_names": list(self.user_access_level_names),
+            "type_definition": self.type_definition,
+            "type_definition_name": self.type_definition_name,
+            "value": None if self.value is None else self.value.to_dict(),
+            "unavailable_attributes": dict(self.unavailable),
+            "errors": list(self.errors),
+        }
+
+    @property
+    def has_value(self) -> bool:
+        return self.value is not None
+
+    @property
+    def is_writable(self) -> bool:
+        return "CurrentWrite" in self.access_level_names
+
+
+@dataclass(slots=True)
+class Edge:
+    """A directed reference, normalised to its forward direction.
+
+    An inverse reference ``A --(InverseOf)--> B`` observed while browsing ``A``
+    is stored as the forward edge ``B -> A`` so the same relationship discovered
+    from both ends collapses into one row. ``reference_type_name`` is resolved
+    after the traversal completes, which is why this dataclass is not frozen.
+    """
+
+    source: str
+    target: str
+    reference_type: str
+    reference_type_name: str | None = None
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.source, self.target, self.reference_type)
+
+
+@dataclass(slots=True)
+class ChildEntry:
+    """One child as shown by the lazy GUI tree."""
+
+    node_id: str
+    browse_name: str
+    browse_name_namespace_index: int
+    display_name: str
+    node_class: str
+    reference_type: str
+    reference_type_name: str | None = None
+    is_forward: bool = True
+    type_definition: str | None = None
+    type_definition_name: str | None = None
+    #: Extra reference types that pointed at the same node and were merged into
+    #: this row, so the tree can explain why the server reported it more than
+    #: once (for example ``Organizes`` next to ``HasComponent``).
+    additional_reference_types: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ReferenceInfo:
+    """One reference row of the node details panel."""
+
+    reference_type: str
+    reference_type_name: str | None
+    direction: str
+    target_node_id: str
+    target_browse_name: str
+    target_display_name: str
+    target_node_class: str
+
+
+@dataclass(slots=True)
+class AttributeResult:
+    """One attribute of one node, already decoded for display."""
+
+    attribute: str
+    value: Any = None
+    status: str = "Good"
+    ok: bool = True
+
+
+@dataclass(slots=True)
+class NodeDetails:
+    """Everything the browser shows for a selected node."""
+
+    record: NodeRecord
+    attributes: list[AttributeResult] = field(default_factory=list)
+    references: list[ReferenceInfo] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TraversalConfig:
+    """Bounds for an address-space download.
+
+    All limits are optional; ``None`` means "no limit". Every limit is reported
+    back in the export summary when it stopped the traversal.
+    """
+
+    max_depth: int | None = None
+    max_nodes: int | None = DEFAULT_MAX_NODES
+    concurrency: int = DEFAULT_CONCURRENCY
+    batch_size: int = DEFAULT_BATCH_SIZE
+    max_references_per_node: int = 0
+    namespace_filter: frozenset[int] | None = None
+    include_values: bool = False
+    include_description: bool = True
+    follow_subtypes: bool = True
+
+    def normalised(self) -> TraversalConfig:
+        return TraversalConfig(
+            max_depth=None if self.max_depth is None or self.max_depth < 0 else self.max_depth,
+            max_nodes=None if self.max_nodes is None or self.max_nodes <= 0 else self.max_nodes,
+            concurrency=max(1, min(int(self.concurrency), 32)),
+            batch_size=max(1, min(int(self.batch_size), 500)),
+            max_references_per_node=max(0, int(self.max_references_per_node)),
+            namespace_filter=self.namespace_filter,
+            include_values=bool(self.include_values),
+            include_description=bool(self.include_description),
+            follow_subtypes=bool(self.follow_subtypes),
+        )
+
+
+@dataclass(slots=True)
+class TraversalProgress:
+    """Progress notification emitted from the asyncio thread."""
+
+    phase: str
+    message: str = ""
+    nodes_collected: int = 0
+    nodes_browsed: int = 0
+    nodes_pending: int = 0
+    references_found: int = 0
+    depth: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Functional test results (phase 2)
+# ---------------------------------------------------------------------------
+
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_SKIPPED = "skipped"
+
+#: Shown in the GUI and in every exported report. The checks are behavioural
+#: smoke checks, they are not a certification of OPC UA conformance.
+FUNCTIONAL_TEST_DISCLAIMER = (
+    "Functional and interoperability checks - not official OPC UA certification."
+)
+
+
+@dataclass(slots=True)
+class WriteTarget:
+    """One explicitly requested write. There is no way to write to more than one node per entry."""
+
+    node_id: str
+    value_text: str
+    #: Off by default: a previous value is only restored when the operator asks for it.
+    restore_previous_value: bool = False
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "value_text": self.value_text,
+            "restore_previous_value": self.restore_previous_value,
+            "note": self.note,
+        }
+
+
+@dataclass(slots=True)
+class MethodCallTarget:
+    """One explicitly requested method call on one object node."""
+
+    object_node_id: str
+    method_node_id: str
+    #: Raw argument texts in server order; validated against ``InputArguments``.
+    arguments: list[str] = field(default_factory=list)
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "object_node_id": self.object_node_id,
+            "method_node_id": self.method_node_id,
+            "arguments": list(self.arguments),
+            "note": self.note,
+        }
+
+
+@dataclass(slots=True)
+class TestConfig:
+    """Bounded configuration for one functional test run."""
+
+    root_node_id: str = "i=85"
+    variable_node_id: str | None = None
+    publishing_interval_ms: float = DEFAULT_PUBLISHING_INTERVAL_MS
+    sampling_interval_ms: float = DEFAULT_SAMPLING_INTERVAL_MS
+    notification_wait_seconds: float = DEFAULT_NOTIFICATION_WAIT_SECONDS
+    latency_samples: int = DEFAULT_LATENCY_SAMPLES
+    max_browse_nodes: int = 50
+    #: Opt-in and destructive: closes the secure channel and reconnects.
+    include_channel_recovery: bool = False
+    request_timeout: float = 10.0
+    #: Master switch. Without it, configured write/method targets are skipped.
+    allow_writes: bool = False
+    write_targets: list[WriteTarget] = field(default_factory=list)
+    method_calls: list[MethodCallTarget] = field(default_factory=list)
+
+    def normalised(self) -> TestConfig:
+        return TestConfig(
+            root_node_id=(self.root_node_id or "i=85").strip(),
+            variable_node_id=(self.variable_node_id or "").strip() or None,
+            publishing_interval_ms=min(60_000.0, max(50.0, float(self.publishing_interval_ms))),
+            sampling_interval_ms=min(60_000.0, max(0.0, float(self.sampling_interval_ms))),
+            notification_wait_seconds=min(120.0, max(0.5, float(self.notification_wait_seconds))),
+            latency_samples=min(200, max(1, int(self.latency_samples))),
+            max_browse_nodes=min(5000, max(1, int(self.max_browse_nodes))),
+            include_channel_recovery=bool(self.include_channel_recovery),
+            request_timeout=min(300.0, max(0.5, float(self.request_timeout))),
+            allow_writes=bool(self.allow_writes),
+            write_targets=[
+                WriteTarget(
+                    node_id=(target.node_id or "").strip(),
+                    value_text=str(target.value_text),
+                    restore_previous_value=bool(target.restore_previous_value),
+                    note=target.note,
+                )
+                for target in self.write_targets
+                if (target.node_id or "").strip()
+            ],
+            method_calls=[
+                MethodCallTarget(
+                    object_node_id=(call.object_node_id or "").strip(),
+                    method_node_id=(call.method_node_id or "").strip(),
+                    arguments=[str(value) for value in call.arguments],
+                    note=call.note,
+                )
+                for call in self.method_calls
+                if (call.method_node_id or "").strip()
+            ],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "root_node_id": self.root_node_id,
+            "variable_node_id": self.variable_node_id,
+            "publishing_interval_ms": self.publishing_interval_ms,
+            "sampling_interval_ms": self.sampling_interval_ms,
+            "notification_wait_seconds": self.notification_wait_seconds,
+            "latency_samples": self.latency_samples,
+            "max_browse_nodes": self.max_browse_nodes,
+            "include_channel_recovery": self.include_channel_recovery,
+            "request_timeout": self.request_timeout,
+            "allow_writes": self.allow_writes,
+            "write_targets": [target.to_dict() for target in self.write_targets],
+            "method_calls": [call.to_dict() for call in self.method_calls],
+        }
+
+
+@dataclass(slots=True)
+class TestCheck:
+    """Result of one functional check."""
+
+    id: str
+    name: str
+    category: str
+    status: str = STATUS_SKIPPED
+    detail: str = ""
+    started_at: datetime = field(default_factory=utc_now)
+    duration_ms: float = 0.0
+    status_codes: list[dict[str, Any]] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def passed(self) -> bool:
+        return self.status == STATUS_PASSED
+
+    def add_status(self, operation: str, status: str, *, node_id: str | None = None) -> None:
+        entry: dict[str, Any] = {"operation": operation, "status": status}
+        if node_id:
+            entry["node_id"] = node_id
+        self.status_codes.append(entry)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "status": self.status,
+            "detail": self.detail,
+            "started_at_utc": iso_utc(self.started_at),
+            "duration_ms": self.duration_ms,
+            "status_codes": list(self.status_codes),
+            "data": self.data,
+            "notes": list(self.notes),
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
+class TestProgress:
+    """Progress notification for a running test suite."""
+
+    phase: str
+    message: str = ""
+    current: int = 0
+    total: int = 0
+
+
+@dataclass(slots=True)
+class TestRun:
+    """Result of one functional test suite execution."""
+
+    endpoint_url: str
+    config: TestConfig = field(default_factory=TestConfig)
+    connection: ConnectionInfo | None = None
+    checks: list[TestCheck] = field(default_factory=list)
+    environment: dict[str, str] = field(default_factory=dict)
+    coverage_limitations: list[str] = field(default_factory=list)
+    inaccessible_nodes: dict[str, str] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    started_at: datetime = field(default_factory=utc_now)
+    finished_at: datetime | None = None
+    cancelled: bool = False
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.finished_at is None:
+            return None
+        return max(0.0, (self.finished_at - self.started_at).total_seconds())
+
+    def counts(self) -> dict[str, int]:
+        counts = {STATUS_PASSED: 0, STATUS_FAILED: 0, STATUS_SKIPPED: 0}
+        for check in self.checks:
+            counts[check.status] = counts.get(check.status, 0) + 1
+        return counts
+
+    def summary(self) -> dict[str, Any]:
+        counts = self.counts()
+        return {
+            "total": len(self.checks),
+            "passed": counts.get(STATUS_PASSED, 0),
+            "failed": counts.get(STATUS_FAILED, 0),
+            "skipped": counts.get(STATUS_SKIPPED, 0),
+            "cancelled": self.cancelled,
+            "duration_seconds": None if self.duration_seconds is None else round(self.duration_seconds, 3),
+            "started_at_utc": iso_utc(self.started_at),
+            "finished_at_utc": iso_utc(self.finished_at),
+        }
+
+    def summary_text(self) -> str:
+        summary = self.summary()
+        lines = [
+            FUNCTIONAL_TEST_DISCLAIMER,
+            f"Endpoint:  {self.endpoint_url}",
+            f"Result:    {summary['passed']} passed, {summary['failed']} failed, "
+            f"{summary['skipped']} skipped (of {summary['total']})",
+            f"Duration:  {summary['duration_seconds']} s",
+        ]
+        if self.cancelled:
+            lines.append("State:     CANCELLED (partial results)")
+        failed = [check for check in self.checks if check.status == STATUS_FAILED]
+        for check in failed:
+            lines.append(f"Failed:    {check.name} - {check.detail or check.error or ''}")
+        for check in self.coverage_limitations:
+            lines.append(f"Limitation: {check}")
+        return "\n".join(lines)
+
+
+@dataclass(slots=True)
+class AddressSpace:
+    """A downloaded (possibly partial) address-space snapshot."""
+
+    endpoint_url: str
+    roots: list[str] = field(default_factory=list)
+    nodes: dict[str, NodeRecord] = field(default_factory=dict)
+    references: list[Edge] = field(default_factory=list)
+    namespaces: list[NamespaceEntry] = field(default_factory=list)
+    connection: ConnectionInfo | None = None
+    values_included: bool = False
+    config: TraversalConfig = field(default_factory=TraversalConfig)
+    started_at: datetime = field(default_factory=utc_now)
+    finished_at: datetime | None = None
+    cancelled: bool = False
+    limits_hit: list[str] = field(default_factory=list)
+    inaccessible: dict[str, str] = field(default_factory=dict)
+    unsupported_encodings: list[dict[str, Any]] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.finished_at is None:
+            return None
+        return max(0.0, (self.finished_at - self.started_at).total_seconds())
+
+    def namespace_uri(self, index: int) -> str | None:
+        for entry in self.namespaces:
+            if entry.index == index:
+                return entry.uri
+        return None
+
+    def summary(self) -> dict[str, Any]:
+        classes: dict[str, int] = {}
+        for record in self.nodes.values():
+            classes[record.node_class] = classes.get(record.node_class, 0) + 1
+        included = set(self.nodes)
+        dangling = sum(1 for edge in self.references if edge.target not in included)
+        return {
+            "nodes": len(self.nodes),
+            "references": len(self.references),
+            "references_to_nodes_outside_snapshot": dangling,
+            "namespaces_recorded": len(self.namespaces),
+            "node_classes": dict(sorted(classes.items())),
+            "values_included": self.values_included,
+            "cancelled": self.cancelled,
+            "limits_hit": list(self.limits_hit),
+            "inaccessible_nodes": len(self.inaccessible),
+            "unsupported_value_encodings": len(self.unsupported_encodings),
+            "errors": len(self.errors),
+            "duration_seconds": None if self.duration_seconds is None else round(self.duration_seconds, 3),
+            "started_at_utc": iso_utc(self.started_at),
+            "finished_at_utc": iso_utc(self.finished_at),
+        }
+
+    def summary_text(self) -> str:
+        """Human-readable summary used by the export tab."""
+        summary = self.summary()
+        classes = ", ".join(f"{name}={count}" for name, count in summary["node_classes"].items())
+        lines = [
+            f"Endpoint:        {self.endpoint_url}",
+            f"Nodes:           {summary['nodes']}",
+            f"References:      {summary['references']} "
+            f"({summary['references_to_nodes_outside_snapshot']} point outside the snapshot)",
+            f"Node classes:    {classes or '-'}",
+            f"Values included: {'yes' if self.values_included else 'no'}",
+            f"Duration:        {summary['duration_seconds']} s",
+        ]
+        if self.cancelled:
+            lines.append("State:           CANCELLED (partial snapshot)")
+        if self.limits_hit:
+            lines.append(f"Limits hit:      {', '.join(self.limits_hit)}")
+        if self.inaccessible:
+            lines.append(f"Inaccessible:    {len(self.inaccessible)} node(s)")
+        if self.unsupported_encodings:
+            lines.append(f"Unsupported:     {len(self.unsupported_encodings)} value encoding(s)")
+        if self.errors:
+            lines.append(f"Errors:          {len(self.errors)}")
+            for message in self.errors[:5]:
+                lines.append(f"  - {message}")
+        for note in self.limitations:
+            lines.append(f"Note:            {note}")
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Live monitoring (data-change subscriptions)
+# ---------------------------------------------------------------------------
+
+#: A notification value longer than this is truncated before it is sent to the
+#: GUI, so a burst of large arrays cannot exhaust memory.
+MONITOR_VALUE_CHAR_LIMIT = 4000
+
+
+@dataclass(slots=True)
+class MonitorConfig:
+    """Timing for one live-monitoring subscription.
+
+    The server may revise both intervals; the values here are the requested
+    ones. Sampling interval ``0`` means "fastest the server supports".
+    """
+
+    publishing_interval_ms: float = DEFAULT_PUBLISHING_INTERVAL_MS
+    sampling_interval_ms: float = DEFAULT_SAMPLING_INTERVAL_MS
+    #: Server-side queue size per monitored item; ``0`` uses the server default.
+    queue_size: int = 0
+
+    def normalised(self) -> MonitorConfig:
+        return MonitorConfig(
+            publishing_interval_ms=min(60_000.0, max(50.0, float(self.publishing_interval_ms))),
+            sampling_interval_ms=min(60_000.0, max(0.0, float(self.sampling_interval_ms))),
+            queue_size=min(1000, max(0, int(self.queue_size))),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "publishing_interval_ms": self.publishing_interval_ms,
+            "sampling_interval_ms": self.sampling_interval_ms,
+            "queue_size": self.queue_size,
+        }
+
+
+@dataclass(slots=True)
+class MonitoredItemInfo:
+    """One requested monitored item and what the server made of it."""
+
+    node_id: str
+    status: str = "pending"
+    ok: bool = True
+    client_handle: int | None = None
+    sampling_interval_ms: float = 0.0
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "status": self.status,
+            "ok": self.ok,
+            "client_handle": self.client_handle,
+            "sampling_interval_ms": self.sampling_interval_ms,
+            "detail": self.detail,
+        }
+
+
+@dataclass(slots=True)
+class MonitorNotification:
+    """One data-change notification, already JSON-safe for display."""
+
+    sequence: int
+    node_id: str
+    value: Any = None
+    value_text: str = ""
+    status: str = "Good"
+    variant_type: str | None = None
+    source_timestamp: str | None = None
+    server_timestamp: str | None = None
+    received_at: datetime = field(default_factory=utc_now)
+    truncated: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sequence": self.sequence,
+            "node_id": self.node_id,
+            "value": self.value,
+            "status": self.status,
+            "variant_type": self.variant_type,
+            "source_timestamp": self.source_timestamp,
+            "server_timestamp": self.server_timestamp,
+            "received_at_utc": iso_utc(self.received_at),
+            "truncated": self.truncated,
+        }
+
+
+@dataclass(slots=True)
+class MonitorStatusEvent:
+    """A subscription status-change notification from the server."""
+
+    status: str
+    detail: str = ""
+    received_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(slots=True)
+class MonitorStart:
+    """Result of creating a live-monitoring subscription."""
+
+    subscription_id: int | None
+    requested_publishing_interval_ms: float
+    sampling_interval_ms: float
+    items: list[MonitoredItemInfo] = field(default_factory=list)
+    started_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        accepted = sum(1 for item in self.items if item.ok)
+        return (
+            f"Subscription {self.subscription_id}: {accepted} of {len(self.items)} monitored item(s) active; "
+            f"requested publishing interval {self.requested_publishing_interval_ms:.0f} ms, "
+            f"sampling interval {self.sampling_interval_ms:.0f} ms."
+        )

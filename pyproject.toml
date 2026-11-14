@@ -1,0 +1,70 @@
+[project]
+name = "opcua-explorer"
+version = "0.1.0"
+description = "Desktop OPC UA address-space browser, exporter and functional interoperability test client"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "OPC UA Explorer contributors" }]
+keywords = ["opcua", "industrial", "asyncua", "pyside6", "address-space"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Networking",
+]
+
+# Runtime dependencies are pinned to the exact versions this project was
+# verified against; see docs/api-verification.md.
+dependencies = [
+    "asyncua==2.1.0",
+    "PySide6==6.12.0",
+]
+
+[project.optional-dependencies]
+# Optional XSD validation of exported NodeSet2 files. Without it the exporter
+# still parses its own output and reports that schema validation was skipped.
+validation = ["lxml>=5.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=1.0",
+    "lxml>=5.0",
+    # tests/support.py creates throw-away certificates; do not rely on asyncua's
+    # transitive dependency for it.
+    "cryptography>=50",
+]
+
+[project.scripts]
+opcua-explorer = "opcua_explorer.gui.app:main"
+opcua-demo-server = "opcua_explorer.demo.demo_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opcua_explorer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Test cases are plain functions. Without this, pytest would try to collect the
+# domain dataclasses TestConfig/TestCheck/TestRun/TestProgress as test classes.
+python_classes = ["*Suite"]
+filterwarnings = [
+    "error::DeprecationWarning:opcua_explorer.*",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

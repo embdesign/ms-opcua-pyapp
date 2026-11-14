@@ -1,0 +1,252 @@
+<?xml version='1.0' encoding='utf-8'?>
+<UANodeSet xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:uax="http://opcfoundation.org/UA/2008/02/Types.xsd" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd">
+  <NamespaceUris>
+    <Uri>urn:opcua-explorer:demo</Uri>
+    <Uri>urn:opcua-explorer:demo:extra</Uri>
+  </NamespaceUris>
+  <Aliases>
+    <Alias Alias="Boolean">i=1</Alias>
+    <Alias Alias="Int64">i=8</Alias>
+    <Alias Alias="Double">i=11</Alias>
+    <Alias Alias="String">i=12</Alias>
+    <Alias Alias="DateTime">i=13</Alias>
+    <Alias Alias="ByteString">i=15</Alias>
+    <Alias Alias="Organizes">i=35</Alias>
+    <Alias Alias="HasModellingRule">i=37</Alias>
+    <Alias Alias="HasTypeDefinition">i=40</Alias>
+    <Alias Alias="HasProperty">i=46</Alias>
+    <Alias Alias="HasComponent">i=47</Alias>
+    <Alias Alias="Argument">i=296</Alias>
+    <Alias Alias="Range">i=884</Alias>
+  </Aliases>
+  <UAVariable NodeId="ns=1;i=1" BrowseName="0:InputArguments" ParentNodeId="ns=1;s=Start" ValueRank="0" DataType="Argument">
+    <DisplayName>InputArguments</DisplayName>
+    <Description>InputArguments</Description>
+    <References>
+      <Reference ReferenceType="HasProperty" IsForward="false">ns=1;s=Start</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=68</Reference>
+      <Reference ReferenceType="HasModellingRule">i=78</Reference>
+    </References>
+    <Value>
+      <uax:ListOfExtensionObject>
+        <uax:ExtensionObject>
+          <uax:TypeId>
+            <uax:Identifier>i=296</uax:Identifier>
+          </uax:TypeId>
+          <uax:Body>
+            <uax:Argument>
+              <uax:Name />
+              <uax:DataType>
+                <uax:Identifier>i=11</uax:Identifier>
+              </uax:DataType>
+              <uax:ValueRank>-1</uax:ValueRank>
+              <uax:ArrayDimensions />
+              <uax:Description>
+                <uax:Locale />
+                <uax:Text />
+              </uax:Description>
+            </uax:Argument>
+          </uax:Body>
+        </uax:ExtensionObject>
+      </uax:ListOfExtensionObject>
+    </Value>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;i=2" BrowseName="0:OutputArguments" ParentNodeId="ns=1;s=Start" ValueRank="0" DataType="Argument">
+    <DisplayName>OutputArguments</DisplayName>
+    <Description>OutputArguments</Description>
+    <References>
+      <Reference ReferenceType="HasProperty" IsForward="false">ns=1;s=Start</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=68</Reference>
+      <Reference ReferenceType="HasModellingRule">i=78</Reference>
+    </References>
+    <Value>
+      <uax:ListOfExtensionObject>
+        <uax:ExtensionObject>
+          <uax:TypeId>
+            <uax:Identifier>i=296</uax:Identifier>
+          </uax:TypeId>
+          <uax:Body>
+            <uax:Argument>
+              <uax:Name />
+              <uax:DataType>
+                <uax:Identifier>i=12</uax:Identifier>
+              </uax:DataType>
+              <uax:ValueRank>-1</uax:ValueRank>
+              <uax:ArrayDimensions />
+              <uax:Description>
+                <uax:Locale />
+                <uax:Text />
+              </uax:Description>
+            </uax:Argument>
+          </uax:Body>
+        </uax:ExtensionObject>
+      </uax:ListOfExtensionObject>
+    </Value>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Blob" BrowseName="1:Blob" ParentNodeId="ns=1;s=Line1" DataType="ByteString">
+    <DisplayName>Blob</DisplayName>
+    <Description>Blob</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAObject NodeId="ns=1;s=Line1" BrowseName="1:Line1" ParentNodeId="ns=1;s=Plant">
+    <DisplayName>Line1</DisplayName>
+    <Description>Line1</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Plant</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=58</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Motor</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Temperature</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Pressure</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Recipe</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Samples</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Timestamp</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Blob</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=OperatingRange</Reference>
+      <Reference ReferenceType="Organizes">ns=1;s=SharedConfig</Reference>
+    </References>
+  </UAObject>
+  <UAObject NodeId="ns=1;s=Motor" BrowseName="1:Motor" ParentNodeId="ns=1;s=Line1">
+    <DisplayName>Motor</DisplayName>
+    <Description>Motor</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=58</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Speed</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Running</Reference>
+      <Reference ReferenceType="HasProperty">ns=1;s=SerialNumber</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Start</Reference>
+      <Reference ReferenceType="Organizes">ns=1;s=Plant</Reference>
+    </References>
+  </UAObject>
+  <UAVariable NodeId="ns=1;s=OperatingRange" BrowseName="1:OperatingRange" ParentNodeId="ns=1;s=Line1" DataType="Range">
+    <DisplayName>OperatingRange</DisplayName>
+    <Description>OperatingRange</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAObject NodeId="ns=1;s=Plant" BrowseName="1:Plant" ParentNodeId="i=85">
+    <DisplayName>Plant</DisplayName>
+    <Description>Plant</Description>
+    <References>
+      <Reference ReferenceType="Organizes" IsForward="false">i=85</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=58</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="Organizes">ns=1;s=SharedConfig</Reference>
+      <Reference ReferenceType="Organizes" IsForward="false">ns=1;s=Motor</Reference>
+    </References>
+  </UAObject>
+  <UAVariable NodeId="ns=1;s=Pressure" BrowseName="1:Pressure" ParentNodeId="ns=1;s=Line1" DataType="Double">
+    <DisplayName>Pressure</DisplayName>
+    <Description>Pressure</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Recipe" BrowseName="1:Recipe" ParentNodeId="ns=1;s=Line1" DataType="String">
+    <DisplayName>Recipe</DisplayName>
+    <Description>Recipe</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Running" BrowseName="1:Running" ParentNodeId="ns=1;s=Motor" DataType="Boolean">
+    <DisplayName>Running</DisplayName>
+    <Description>Running</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Motor</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Samples" BrowseName="1:Samples" ParentNodeId="ns=1;s=Line1" ValueRank="0" DataType="Double">
+    <DisplayName>Samples</DisplayName>
+    <Description>Samples</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=SerialNumber" BrowseName="1:SerialNumber" ParentNodeId="ns=1;s=Motor" DataType="String">
+    <DisplayName>SerialNumber</DisplayName>
+    <Description>SerialNumber</Description>
+    <References>
+      <Reference ReferenceType="HasProperty" IsForward="false">ns=1;s=Motor</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=68</Reference>
+    </References>
+  </UAVariable>
+  <UAObject NodeId="ns=1;s=SharedConfig" BrowseName="1:SharedConfig" ParentNodeId="i=85">
+    <DisplayName>SharedConfig</DisplayName>
+    <Description>SharedConfig</Description>
+    <References>
+      <Reference ReferenceType="Organizes" IsForward="false">i=85</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=58</Reference>
+      <Reference ReferenceType="HasComponent">ns=1;s=SharedThreshold</Reference>
+      <Reference ReferenceType="Organizes" IsForward="false">ns=1;s=Plant</Reference>
+      <Reference ReferenceType="Organizes" IsForward="false">ns=1;s=Line1</Reference>
+    </References>
+  </UAObject>
+  <UAVariable NodeId="ns=1;s=SharedThreshold" BrowseName="1:SharedThreshold" ParentNodeId="ns=1;s=SharedConfig" DataType="Double">
+    <DisplayName>SharedThreshold</DisplayName>
+    <Description>SharedThreshold</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=SharedConfig</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Speed" BrowseName="1:Speed" ParentNodeId="ns=1;s=Motor" DataType="Double" AccessLevel="3" UserAccessLevel="3">
+    <DisplayName>Speed</DisplayName>
+    <Description>Speed</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Motor</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAMethod NodeId="ns=1;s=Start" BrowseName="1:Start" ParentNodeId="ns=1;s=Motor">
+    <DisplayName>Start</DisplayName>
+    <Description>Start</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Motor</Reference>
+      <Reference ReferenceType="HasProperty">ns=1;i=1</Reference>
+      <Reference ReferenceType="HasProperty">ns=1;i=2</Reference>
+    </References>
+  </UAMethod>
+  <UAVariable NodeId="ns=1;s=Temperature" BrowseName="1:Temperature" ParentNodeId="ns=1;s=Line1" DataType="Double" AccessLevel="3" UserAccessLevel="3">
+    <DisplayName>Temperature</DisplayName>
+    <Description>Temperature</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAVariable NodeId="ns=1;s=Timestamp" BrowseName="1:Timestamp" ParentNodeId="ns=1;s=Line1" DataType="DateTime">
+    <DisplayName>Timestamp</DisplayName>
+    <Description>Timestamp</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=1;s=Line1</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+  <UAObject NodeId="ns=2;s=Extra" BrowseName="2:Extra" ParentNodeId="i=85">
+    <DisplayName>Extra</DisplayName>
+    <Description>Extra</Description>
+    <References>
+      <Reference ReferenceType="Organizes" IsForward="false">i=85</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=58</Reference>
+      <Reference ReferenceType="HasComponent">ns=2;s=ExtraValue</Reference>
+    </References>
+  </UAObject>
+  <UAVariable NodeId="ns=2;s=ExtraValue" BrowseName="2:ExtraValue" ParentNodeId="ns=2;s=Extra" DataType="Int64">
+    <DisplayName>ExtraValue</DisplayName>
+    <Description>ExtraValue</Description>
+    <References>
+      <Reference ReferenceType="HasComponent" IsForward="false">ns=2;s=Extra</Reference>
+      <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
+    </References>
+  </UAVariable>
+</UANodeSet>

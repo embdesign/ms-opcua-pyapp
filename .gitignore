@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Build artefacts
+dist/
+build/
+
+# Tooling
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local artefacts (examples/ is intentionally tracked)
+*.log
+*.pcap
+/tmp/
+
+# Local secrets, certificates and private keys (never commit these)
+.env
+.env.*
+!.env.example
+*.pem
+*.der
+*.p12
+*.pfx
+*.key
+
+# Extra tool caches
+.cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Merge/edit leftovers
+*.orig
+*.rej
+*.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

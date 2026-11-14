@@ -1,0 +1,429 @@
+{
+  "format": "opcua-functional-test-report",
+  "format_version": 1,
+  "disclaimer": "Functional and interoperability checks - not official OPC UA certification.",
+  "generated_at_utc": "2026-11-13T11:12:48.577Z",
+  "environment": {
+    "application": "opcua-explorer 0.1.0",
+    "asyncua": "2.1.0",
+    "pyside6": "6.12.0",
+    "python": "3.11.2",
+    "platform": "Linux-6.1.0-53-amd64-x86_64-with-glibc2.36",
+    "hostname": "debian"
+  },
+  "server": {
+    "endpoint_url": "opc.tcp://127.0.0.1:4840",
+    "connection": {
+      "endpoint_url": "opc.tcp://127.0.0.1:4840",
+      "security_policy_uri": "http://opcfoundation.org/UA/SecurityPolicy#None",
+      "security_policy_label": "None",
+      "security_mode": "None",
+      "authentication": "anonymous",
+      "application_uri": "urn:debian:OPCUAExplorer:Client",
+      "session_timeout_ms": 600000,
+      "server_application_name": "OPC UA Explorer Demo Server",
+      "server_application_uri": "urn:opcua-explorer:demo:server",
+      "product_uri": "urn:opcua-explorer:demo:server",
+      "manufacturer_name": "opcua-explorer",
+      "software_version": "0.1.0",
+      "build_number": "1",
+      "server_certificate_sha256": null,
+      "namespaces": [
+        {
+          "index": 0,
+          "uri": "http://opcfoundation.org/UA/"
+        },
+        {
+          "index": 1,
+          "uri": "urn:opcua-explorer:demo:server"
+        },
+        {
+          "index": 2,
+          "uri": "urn:opcua-explorer:demo"
+        },
+        {
+          "index": 3,
+          "uri": "urn:opcua-explorer:demo:extra"
+        }
+      ],
+      "connected_at_utc": "2026-11-13T11:12:47.528Z"
+    }
+  },
+  "configuration": {
+    "root_node_id": "i=85",
+    "variable_node_id": "ns=2;s=Temperature",
+    "publishing_interval_ms": 500.0,
+    "sampling_interval_ms": 250.0,
+    "notification_wait_seconds": 6.0,
+    "latency_samples": 10,
+    "max_browse_nodes": 50,
+    "include_channel_recovery": false,
+    "request_timeout": 10.0,
+    "allow_writes": false,
+    "write_targets": [],
+    "method_calls": []
+  },
+  "timing": {
+    "started_at_utc": "2026-11-13T11:12:47.541Z",
+    "finished_at_utc": "2026-11-13T11:12:48.577Z",
+    "duration_seconds": 1.036
+  },
+  "summary": {
+    "total": 11,
+    "passed": 10,
+    "failed": 0,
+    "skipped": 1,
+    "cancelled": false,
+    "duration_seconds": 1.036,
+    "started_at_utc": "2026-11-13T11:12:47.541Z",
+    "finished_at_utc": "2026-11-13T11:12:48.577Z"
+  },
+  "results": [
+    {
+      "id": "endpoint_discovery",
+      "name": "Endpoint discovery",
+      "category": "connection",
+      "status": "passed",
+      "detail": "1 endpoint(s); active configuration is advertised.",
+      "started_at_utc": "2026-11-13T11:12:47.541Z",
+      "duration_ms": 4.9,
+      "status_codes": [],
+      "data": {
+        "endpoint_count": 1,
+        "endpoints": [
+          {
+            "endpoint_url": "opc.tcp://127.0.0.1:4840",
+            "security_policy_uri": "http://opcfoundation.org/UA/SecurityPolicy#None",
+            "security_policy_label": "None",
+            "security_mode": "None",
+            "security_level": 0,
+            "token_types": [
+              "Anonymous",
+              "Certificate",
+              "UserName"
+            ],
+            "server_certificate_sha256": null,
+            "server_certificate_subject": null,
+            "server_certificate_not_after": null
+          }
+        ],
+        "active_configuration_advertised": true,
+        "active_security": "None / None"
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "session_state",
+      "name": "Session state & authentication",
+      "category": "connection",
+      "status": "passed",
+      "detail": "Session active (identity: anonymous); session timeout 600000 ms.",
+      "started_at_utc": "2026-11-13T11:12:47.546Z",
+      "duration_ms": 0.0,
+      "status_codes": [],
+      "data": {
+        "state": "connected",
+        "session_timeout_ms": 600000,
+        "application_uri": "urn:debian:OPCUAExplorer:Client",
+        "authentication": "anonymous",
+        "security_mode": "None"
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "namespace_array",
+      "name": "Namespace array",
+      "category": "connection",
+      "status": "passed",
+      "detail": "4 namespace(s); namespace 0 present.",
+      "started_at_utc": "2026-11-13T11:12:47.546Z",
+      "duration_ms": 3.0,
+      "status_codes": [],
+      "data": {
+        "count": 4,
+        "uris": [
+          "http://opcfoundation.org/UA/",
+          "urn:opcua-explorer:demo:server",
+          "urn:opcua-explorer:demo",
+          "urn:opcua-explorer:demo:extra"
+        ],
+        "standard_namespace_present": true
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "browse_root",
+      "name": "Browse root",
+      "category": "browse",
+      "status": "passed",
+      "detail": "Browsing i=85 succeeded (6 child reference(s)).",
+      "started_at_utc": "2026-11-13T11:12:47.549Z",
+      "duration_ms": 6.6,
+      "status_codes": [
+        {
+          "operation": "Browse",
+          "status": "Good",
+          "node_id": "i=85"
+        }
+      ],
+      "data": {
+        "root": "i=85",
+        "status": "Good",
+        "children": 6,
+        "child_names": [
+          "Locations",
+          "Server",
+          "Aliases",
+          "Plant",
+          "SharedConfig",
+          "Extra"
+        ]
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "browse_target",
+      "name": "Browse target node",
+      "category": "browse",
+      "status": "passed",
+      "detail": "Browsing ns=2;s=Temperature succeeded (0 child reference(s)).",
+      "started_at_utc": "2026-11-13T11:12:47.556Z",
+      "duration_ms": 1.1,
+      "status_codes": [
+        {
+          "operation": "Browse",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        }
+      ],
+      "data": {
+        "target": "ns=2;s=Temperature",
+        "status": "Good",
+        "children": 0
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "attribute_reads",
+      "name": "Attribute reads",
+      "category": "read",
+      "status": "passed",
+      "detail": "Core attributes read successfully from ns=2;s=Temperature.",
+      "started_at_utc": "2026-11-13T11:12:47.557Z",
+      "duration_ms": 3.7,
+      "status_codes": [
+        {
+          "operation": "Read NodeClass",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        },
+        {
+          "operation": "Read BrowseName",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        },
+        {
+          "operation": "Read DisplayName",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        },
+        {
+          "operation": "Read Description",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        }
+      ],
+      "data": {
+        "target": "ns=2;s=Temperature",
+        "attributes": {
+          "NodeClass": {
+            "status": "Good",
+            "ok": true,
+            "value": "Variable"
+          },
+          "BrowseName": {
+            "status": "Good",
+            "ok": true,
+            "value": "2:Temperature"
+          },
+          "DisplayName": {
+            "status": "Good",
+            "ok": true,
+            "value": "Temperature"
+          },
+          "Description": {
+            "status": "Good",
+            "ok": true,
+            "value": "Temperature"
+          }
+        }
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "variable_read",
+      "name": "Variable read & StatusCode",
+      "category": "read",
+      "status": "passed",
+      "detail": "Value read with status Good (Double).",
+      "started_at_utc": "2026-11-13T11:12:47.561Z",
+      "duration_ms": 0.6,
+      "status_codes": [
+        {
+          "operation": "Read Value",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        }
+      ],
+      "data": {
+        "target": "ns=2;s=Temperature",
+        "status": "Good",
+        "variant_type": "Double",
+        "encoding": "json",
+        "source_timestamp": "2026-11-13T11:12:47.493Z",
+        "server_timestamp": "2026-11-13T11:12:47.493Z",
+        "value_preview": "21.5"
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "subscription_create",
+      "name": "Subscription creation",
+      "category": "subscription",
+      "status": "passed",
+      "detail": "Subscription 78 created (publishing interval 500.0 ms).",
+      "started_at_utc": "2026-11-13T11:12:47.561Z",
+      "duration_ms": 3.0,
+      "status_codes": [],
+      "data": {
+        "subscription_id": 78,
+        "requested_publishing_interval_ms": 500.0,
+        "publishing_interval_ms": 500.0,
+        "requested_lifetime_count": 3000,
+        "requested_max_keep_alive_count": 10
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "subscription_data_change",
+      "name": "Monitored-item notifications",
+      "category": "subscription",
+      "status": "passed",
+      "detail": "2 notification(s) received, 1 value change(s) observed.",
+      "started_at_utc": "2026-11-13T11:12:47.564Z",
+      "duration_ms": 1003.6,
+      "status_codes": [
+        {
+          "operation": "DataChange",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        },
+        {
+          "operation": "DataChange",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        }
+      ],
+      "data": {
+        "target": "ns=2;s=Temperature",
+        "monitored_item_handles": [
+          112
+        ],
+        "sampling_interval_ms": 250.0,
+        "observation_window_seconds": 6.0,
+        "notifications_received": 2,
+        "values": [
+          {
+            "node_id": "ns=2;s=Temperature",
+            "value": "21.5",
+            "status": "Good"
+          },
+          {
+            "node_id": "ns=2;s=Temperature",
+            "value": "21.7",
+            "status": "Good"
+          }
+        ],
+        "value_changes_observed": 1
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "latency",
+      "name": "Bounded read latency",
+      "category": "latency",
+      "status": "passed",
+      "detail": "10 read(s): median 0.58 ms, min 0.4 ms, max 1.64 ms.",
+      "started_at_utc": "2026-11-13T11:12:48.568Z",
+      "duration_ms": 6.9,
+      "status_codes": [
+        {
+          "operation": "Read",
+          "status": "Good",
+          "node_id": "ns=2;s=Temperature"
+        }
+      ],
+      "data": {
+        "target": "ns=2;s=Temperature",
+        "read_attribute": "Value",
+        "samples": 10,
+        "samples_ms": [
+          0.66,
+          0.48,
+          1.64,
+          0.9,
+          0.46,
+          0.49,
+          0.42,
+          0.4,
+          0.71,
+          0.66
+        ],
+        "min_ms": 0.4,
+        "median_ms": 0.58,
+        "max_ms": 1.64,
+        "statuses": [
+          "Good"
+        ]
+      },
+      "notes": [],
+      "error": null
+    },
+    {
+      "id": "connection_recovery",
+      "name": "Connection loss & recovery",
+      "category": "resilience",
+      "status": "skipped",
+      "detail": "Opt-in check: it closes the secure channel and reconnects, which interrupts active subscriptions. Enable 'include connection-interruption check' to run it.",
+      "started_at_utc": "2026-11-13T11:12:48.575Z",
+      "duration_ms": 0.0,
+      "status_codes": [],
+      "data": {},
+      "notes": [],
+      "error": null
+    }
+  ],
+  "coverage_limitations": [
+    "Functional and interoperability checks - not official OPC UA certification.",
+    "The suite exercises one session, one browse root and one variable; it does not verify the whole address space or every DataType.",
+    "Writes and method calls are off by default and, when enabled, run only against the single targets the operator configured and confirmed. No writable node is discovered or written automatically.",
+    "Subscription checks record the initial value plus any changes within the observation window; a value that does not change is reported as passed with an explicit note, not as a failure.",
+    "Latency figures are client-side round-trip measurements of a few reads; they are not a performance benchmark and do not include server-internal processing time.",
+    "Access-denied nodes, timeouts and unsupported DataTypes are reported as limitations, not silently ignored."
+  ],
+  "inaccessible_nodes": [],
+  "notes": [
+    "Target variable: ns=2;s=Temperature (configured).",
+    "No write or method call was configured, so the run was read-only."
+  ],
+  "cancelled": false
+}

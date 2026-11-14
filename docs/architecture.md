@@ -1,0 +1,372 @@
+# Architecture and implementation plan
+
+Status: **phases 1–4 implemented and tested** (connection/security with background reconnect, browser,
+download, JSON/CSV/NodeSet2 export, live monitoring, functional test suite that is read-only by default with
+JSON/HTML reports, and guarded single-target write and method call). See section 12 for what is deliberately out
+of scope.
+
+---
+
+## 1. Goals and hard requirements
+
+The application must let an engineer connect to an OPC UA server, understand what it contains, and produce a
+portable inventory — without ever weakening security silently, without logging secrets, and without writing to
+a process it was not explicitly told to write to.
+
+Derived design rules:
+
+| Requirement | Consequence in the code |
+|---|---|
+| Never silently downgrade security | `opcua/security.py:select_endpoint()` raises instead of choosing an alternative; the service validates the chosen pair against the live advertisement on every connect |
+| Explicit approval before trusting a certificate | only `ConnectionSettings.server_certificate_der` (human-approved DER) reaches `set_security()`; asyncua's own implicit certificate fetch is never used |
+| No credentials in profiles | `ConnectionProfile` has no password field; `assert_no_secrets()` checks every persisted payload |
+| No secrets in logs | `logging_setup.SecretRedactor` filters formatted messages *and* exception text |
+| Graph, not tree | traversal keeps a visited set, stores every observed reference, and descends only along forward hierarchical references |
+| Responsive GUI | one asyncio loop in a worker thread; results cross to the GUI as queued Qt signals |
+
+## 2. Layers
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ gui/  (PySide6)                                                      │
+│  app.py · main_window.py · session_workspace.py                      │
+│  tabs/{connection,connection_dialogs,browser,export,monitor,tests,   │
+│        logs,unified_monitor}                                         │
+│  async_runner.py  ← only place Qt meets asyncio                      │
+└───────────────┬──────────────────────────────────────────────────────┘
+                │ coroutines submitted / plain model objects returned
+┌───────────────▼──────────────────────────────────────────────────────┐
+│ opcua/  (asyncua)                                                    │
+│  client_service.py  one Client, discovery, connect, browse, download │
+│  security.py  browse.py  attributes.py  traversal.py  serialize.py   │
+│  ua_names.py  value_parsing.py  monitor_service.py  nodeset2.py      │
+│  nodeset2_validation.py  check_support.py  test_runner.py            │
+│  guarded_operations.py                                               │
+└───────────────┬──────────────────────────────────────────────────────┘
+                │ AddressSpace snapshot / TestRun (plain dataclasses)
+┌───────────────▼──────────────────────────────────────────────────────┐
+│ models.py · config.py · defaults.py · project.py · logging_setup.py  │
+│ formatting.py · operator_text.py · exporters/ · reporting.py         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Rules that keep the layers honest:
+
+* `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `exporters/`,
+  `reporting.py` import neither asyncua nor Qt.
+* `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
+* Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
+* `gui/session_workspace.py` owns one service and its five pages and injects that session's browser
+  selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
+  and never touches a client.
+* Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
+
+## 3. Threading model
+
+```
+GUI thread                       asyncio thread ("opcua-asyncio")
+──────────                       ───────────────────────────────
+user clicks Connect
+  runner.submit(factory) ───────▶ loop.create_task(_track(...))
+                                 await service.connect(...)
+                                     sockets, sessions, reads …
+QAbstractEventLoop               emit done(key, result)
+  ◀── queued signal ─────────────┘
+on_done(result) updates widgets
+```
+
+* One loop, created *inside* the worker thread (`new_event_loop` + `run_forever`).
+* `submit()` accepts a **coroutine factory** so the coroutine is created in the loop thread; scheduling
+  failures can never leave an un-awaited coroutine behind.
+* Cancellation is performed inside the loop (`loop.call_soon_threadsafe(task.cancel)`), plus a
+  "cancel before the task started" set to close the submission race.
+* On shutdown the window cancels UI work, then `run_until_complete(service.shutdown)` releases the OPC UA
+  session *before* the loop stops.
+
+### Streaming results: live monitoring
+
+A subscription outlives the coroutine that created it, so the monitor uses a second dispatch path:
+
+* `OpcUaService.start_monitor(...)` creates the subscription and returns a `MonitorStart`; asyncua's publish loop
+  keeps delivering notifications afterwards.
+* Notifications are encoded to JSON-safe values **in the asyncio thread** (`opcua/monitor_service.py`) and
+  truncated to 4000 characters, then emitted through `AsyncRunner.progress` under one key.
+* `AsyncRunner.listen(key, slot)` keeps the slot registered after the submitting task's `done` callback has been
+  consumed; the tab calls `unlisten()` when it stops monitoring or shuts down.
+* `monitor_remove()` deletes single monitored items; stopping or disconnecting deletes the subscription, so no
+  server-side state is left behind. The GUI keeps two views: a per-node row that is overwritten in place (latest
+  value, StatusCode, source timestamp, count) and a bounded append-only notification log.
+
+## 4. Sessions, connection and trust flow
+
+`MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
+bar and two shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors) and `Logs & reports`. A
+`SessionWorkspace` owns exactly one `OpcUaService` and the five pages
+(Connection, Address space, Export, Live monitor, Tests). Sessions are fully independent — separate client,
+discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
+two sessions to the same endpoint are allowed. `File → New connection` (`Ctrl+N`) creates a new service on the
+same asyncio runner and the same trust store; closing a session tab releases only that client. All sessions share
+the single worker loop (task keys and listeners are unique per submission). Operator summaries in the shared log
+are prefixed with the session name. A device that limits concurrent sessions rejects the second one with
+`BadTooManySessions`, which surfaces as an ordinary connection error.
+
+Subscription ownership stays with the session: only `MonitorTab` creates/changes/deletes a subscription. It emits
+`notification_received` and `items_changed`; `UnifiedMonitorTab` merely observes them (plus
+`MonitorTab.item_snapshot()`) and keeps a bounded, session-labelled item table and notification log. It never
+starts or stops anything, so there is exactly one owner per subscription and closing a session simply unregisters
+its rows.
+
+### Project files
+
+`project.py` (Qt-free) defines the versioned document (`format`, `version`, `saved_at`, `sessions[]`) and owns
+all validation: endpoint/security rules through `ConnectionSettings.validate(require_server_certificate=False)`,
+unknown-key filtering (a newer field cannot inject anything), refusal of newer project versions and a
+secret-key guard — `assert_no_secrets` rejects a hand-edited file that contains a password field instead of
+silently ignoring it. The GUI only maps widgets to dataclasses (`SessionWorkspace.project_state()` /
+`apply_project_state()`); opening a project replaces the session tabs but never dials a server. Live-monitor
+targets are restored as pending rows, and `TestsState` has no `allow_writes` field by design.
+
+### Connect flow per session
+
+```
+1. Discover  → temporary SecurityPolicy#None channel: socket → Hello → OpenSecureChannel → GetEndpoints
+               (channel-level service, no session, no trust decision involved)
+2. Select    → select_endpoint(endpoints, policy_uri, mode)  ← raises if not advertised
+3. Approve   → SHA-256 of endpoint.ServerCertificate shown to the operator
+               (GUI) untrusted → review dialog; changed → new review; trusted → proceed
+4. Connect   → Client(...) + set_security(policy, cert, key, key_pw, approved_der, mode)
+               + identity (anonymous / username / certificate) + connect()
+5. Verify    → the DER handed to set_security must hash to the currently advertised certificate
+```
+
+`set_security(..., server_certificate=None)` is deliberately avoided: asyncua would then fetch and install the
+server certificate itself, bypassing the approval step. Passing the approved DER bytes is the only path that
+skips that fetch (verified in `asyncua/client/client.py`).
+
+### Link loss and resumption
+
+`Client(..., auto_reconnect=settings.auto_reconnect)` enables asyncua's connection supervisor. What happens on
+loss depends on the toggle on the Connection tab (**Resilience** → *Keep reconnecting when the link drops*, on by
+default, persisted in `settings.json` and in connection profiles):
+
+* **Enabled.** The supervisor probes the session about once a second; on loss it re-opens socket, channel and
+  session on the same endpoint with the same approved security policy and identity (exponential backoff 1 s →
+  30 s, no attempt limit). It re-activates the existing server-side session when the server still holds it,
+  otherwise it creates a new one and restores subscriptions. The GUI keeps the session: `ConnectionTab` polls
+  `service.connection_state` every 3 s and treats **every** non-connected state as transient while this mode is
+  active (`disconnected` during transport teardown, `connecting`, `socket_open`, `channel_open`, `reconnecting`),
+  shows "Link lost · reconnecting…" in the tab and **Reconnecting…** in the window, and leaves the other tabs
+  enabled. When the state returns to `connected`, the tab re-reads the namespace array and the window refreshes
+  the export namespaces and restarts a running live-monitor subscription (monitored-item handles belong to the
+  old session).
+* **Disabled.** The supervisor stops after the loss: the tab reports **Link lost**, the window disables the tabs
+  and releases the dead client with `service.disconnect()`, as before.
+* Calls issued while the transport is down fail after `request_timeout` (asyncua's reconnect gate), never hang
+  until the session timeout. Nothing is downgraded on retry: the same policy, mode, identity and approved server
+  certificate are used; if a secure server changed its certificate, the retries keep failing until the operator
+  reconnects manually.
+
+## 5. Address-space model
+
+`AddressSpace` holds:
+
+* `nodes: dict[node_id_string, NodeRecord]` — canonical records (attributes decoded, values optional)
+* `references: list[Edge]` — de-duplicated, **normalised to forward direction**; an inverse reference
+  `A ←ref— B` observed at `A` is stored as `B → A`
+* `namespaces: list[NamespaceEntry]` — the URI table, always exported with the NodeIds
+* `limits_hit`, `inaccessible`, `unsupported_encodings`, `errors`, `limitations`, timestamps, config
+
+Values are `ValueSnapshot`s: JSON-safe encoded value, StatusCode, variant type, source/server timestamps,
+and an `unsupported` list when an encoding could not be represented faithfully.
+
+The browser tree is not rebuilt from the snapshot: it stays lazy. `BrowserTab.set_monitored_nodes()` receives
+the NodeIds in the session's live-monitor list and decorates the matching rows (● prefix, bold, accent colour,
+tooltip note), keeping the original text and tooltip in item data so the mark can be removed cleanly. The set is
+session-local and is refreshed from `MonitorTab.items_changed`.
+
+## 6. Traversal algorithm
+
+```
+hier_ids = enumerate subtypes of HierarchicalReferences (Browse HasSubtype, bounded)
+frontier = roots (depth 0); visited = roots; pending = roots
+while frontier:
+    level, overflow = take_within_budget(frontier)     # max_nodes counts nodes + pending
+    outcomes = browse_level(level)                     # batches of `batch_size`, `concurrency` in flight
+    for each outcome:
+        create record (class/display from the discovering reference as a hint)
+        for each reference: store canonical edge; HasTypeDefinition → record
+        descend only if: forward ∧ hierarchical ∧ not visited ∧ namespace allowed ∧ depth < max_depth
+frontier = next level
+then: base attributes (batch) → class-specific attributes (batch) → type names → optional values
+```
+
+Properties:
+
+* **Cycles**: the visited set makes the demo's `Motor → Plant` cycle safe.
+* **Shared children**: a node referenced from several parents is collected once but every edge is kept
+  (`SharedConfig` in the demo).
+* **Depth**: level-by-level traversal makes `max_depth` exact (nodes at depth *d* are read, their children are
+  not followed).
+* **Budget**: `max_nodes` counts collected *and* pending nodes, so the limit is respected before requests go
+  out; hitting it is reported as `limits_hit: ["max_nodes"]`.
+* **Concurrency/batching**: chunks of `batch_size` nodes per Browse request, at most `concurrency` requests in
+  flight; per-chunk failures become per-node `inaccessible` entries instead of aborting the download.
+* **Continuation points**: `browse_many()` follows `BrowseNext` and releases outstanding continuation points
+  (`ReleaseContinuationPoints=True`) when a batch is cancelled. asyncua's own `get_children_descriptions()`
+  never releases them, which is why this module talks to `UaSession.browse/browse_next` directly.
+* **Cancellation** returns a *partial* snapshot marked `cancelled: true` instead of throwing the work away.
+
+Attribute reads are batched as `ReadValueId` lists (base attributes for every node, then class-specific ones
+after the NodeClass is known). Bad status codes (e.g. `DataType` on an Object) are recorded per attribute in
+`unavailable_attributes`, never treated as a download failure.
+
+## 7. Value encoding contract
+
+| OPC UA value | JSON form |
+|---|---|
+| Boolean, numbers, String | native JSON |
+| Double NaN / ±Infinity | `{"$type":"Float","value":"NaN"\|"Infinity"\|"-Infinity"}` |
+| ByteString | `{"$type":"ByteString","base64":"…"}` |
+| DateTime | `{"$type":"DateTime","iso":"…Z"}` |
+| Guid | `{"$type":"Guid","value":"…"}` |
+| NodeId / ExpandedNodeId | `{"$type":"NodeId","value":"ns=2;i=5"}` |
+| QualifiedName / LocalizedText / StatusCode | tagged object with the relevant fields |
+| arrays | JSON arrays, order preserved (dimensions kept in `Variant.Dimensions` form) |
+| ExtensionObject (decoded) | `{"$type":"ExtensionObject","type_id":…,"body_encoding":"decoded","body":{…}}` |
+| ExtensionObject (binary body) | base64 body + `"body_encoding":"binary-base64"` **and** a flagged note |
+| unknown Python object | `{"$type":"Unsupported","python_type":…,"repr":…}` **and** a flagged note |
+| cycle / too deep | `{"$type":"Cycle"}` / `{"$type":"MaxDepthExceeded"}` **and** a flagged note |
+
+Flags are de-duplicated by (kind, detail) and summarised in `unsupported_encodings`; they are never silently
+dropped and never abort an export.
+
+## 8. Export documents
+
+**JSON** (see `exporters/json_exporter.py` for the full schema): canonical nodes keyed by NodeId,
+a separate reference list, the namespace URI table, source/security description, traversal config,
+summary, inaccessible nodes, unsupported encodings, limitations. Values are stripped unless the snapshot was
+downloaded with values enabled.
+
+**CSV**: one row per node, reference in/out counts, value columns only when values were included,
+UTF-8 with BOM, quoting via the `csv` module.
+
+**NodeSet2 XML** (`opcua/nodeset2.py`): nodes *and* their dependencies are collected explicitly before
+anything is written, then handed to the verified `asyncua.common.xmlexporter.XmlExporter`
+(`build_etree` / `write_xml`). Namespace mappings come from the exporter, so the file's namespace table
+is authoritative for every index it contains.
+
+Dependency closure (`NodeSetDependencyCollector`) is a bounded, batched breadth-first search over the
+snapshot edges plus lazily browsed unknown nodes. It follows:
+
+* inverse hierarchical references → **parents** (so `ParentNodeId` always resolves),
+* `HasSubtype` → **supertypes**, `HasTypeDefinition` → **type definitions**, `HasEncoding` → **encodings**,
+* `HasProperty`/`HasComponent` forward for **type nodes** (members) and for **Method nodes**
+  (`InputArguments`/`OutputArguments`), because a method without its argument metadata is not callable,
+* the `DataType` attribute of every variable.
+
+Namespace-0 nodes are recorded as `standard_dependencies` and never written. Everything that cannot be
+resolved is reported with the relationship that needed it (`missing_dependencies`), and the budget is
+reported as `budget_exhausted` instead of silently truncating.
+
+Custom DataTypes are checked for a `DataTypeDefinition` before writing. Without one there is no way to
+describe the structure in NodeSet2, so the DataType and its members are excluded — otherwise importers fail
+with `BadParentNodeIdInvalid` — and reported as `unsupported_data_types` with the variables that use them.
+
+Method argument values are transplanted into the main tree by a second exporter that reuses the main
+namespace mapping, so they are present even when value export is off.
+
+Validation is explicit about what ran: the file is re-parsed (well-formedness), namespaces and
+`ParentNodeId` targets are checked, dangling references are listed, and XSD validation runs only when a schema
+path is given *and* `lxml` is installed (`ValidationResult.status` = `not-validated` / `valid` / `invalid`).
+
+## 9. Phase plan
+
+| Phase | Scope | State |
+|---|---|---|
+| 1 | Connection & security, lazy browser, bounded download, JSON/CSV | **done** |
+| 2 | Read-only test suite (discovery, auth outcomes, browse/attribute reads, variable reads, subscriptions with configurable intervals, connection loss/recovery, bounded latency), JSON/HTML reports | **done** |
+| 3 | NodeSet2 export with dependency collection, namespace mapping, missing-dependency report, schema validation | **done** |
+| 4 | Guarded write and method call: single target, validated arguments, confirmation showing target/operation/arguments, explicit restore only on request | **done** |
+
+Test-suite policy (phases 2–4): read-only by default, a subscription that is created but reports no value
+change is not a failure, no unrestricted stress testing, no automatic production-network scanning; results are
+described as functional/interoperability checks, never as OPC UA certification.
+
+## 10. Functional test design (phase 2)
+
+`opcua/test_runner.py` runs eleven checks in order against the *existing* session, so no re-authentication and
+no security change happens during a run:
+
+```
+endpoint_discovery → session_state → namespace_array → browse_root → browse_target
+→ attribute_reads → variable_read → subscription_create → subscription_data_change
+→ latency → connection_recovery (opt-in, last)
+```
+
+Each check is isolated: an exception marks that check failed with the exception type, a `CheckSkipped`
+precondition marks it skipped with a reason, and the run continues. A cancelled run returns partial results
+(`cancelled: true`) after releasing monitored items and the subscription.
+
+Semantics worth calling out:
+
+* **Creation vs. notification.** `subscription_create` proves `CreateSubscription` works and records the
+requested publishing interval plus the effective value asyncua reports after a server revision.
+`subscription_data_change` proves monitored items are delivered. OPC UA sends
+one *initial* value notification when a monitored item is created, so a constant variable yields one
+notification and zero changes: that is reported as passed with an explicit "no value change occurred within
+the observation window (this is not a failure)" note. No notification at all is *skipped*, never failed.
+* **Bounded latency.** 1–200 sequential reads measured with `perf_counter`; min/median/max are data, not gates
+  (only non-Good StatusCodes fail the check).
+* **Opt-in recovery.** `connection_recovery` closes the secure channel, records the detected loss, reconnects
+  with the same client and verifies a read. It runs last because the interruption affects any active
+  subscription. When automatic reconnect is enabled the supervisor performs the retry and restores client
+  subscriptions; the check waits for state `connected` plus a successful read instead of calling `connect()` a
+  second time.
+* **Cleanup.** Monitored items are unsubscribed and the subscription is deleted at the end of the run (and on
+  cancellation), so the session stays usable.
+
+`reporting.py` renders the same facts twice: a versioned JSON document and a self-contained HTML page. Every
+dynamic string is HTML-escaped (server-supplied names end up in reports), the page embeds no external assets,
+and the status pills use contrast-checked colours.
+
+## 11. Guarded write and method call (phase 4)
+
+Both operations live in `opcua/guarded_operations.py` (the runner schedules them through the same plan as the
+read-only checks) and share three rules:
+
+1. **Opt-in, per target.** `TestConfig.allow_writes` is a master switch that is off by default. Each entry in
+   `write_targets` / `method_calls` is one node and one operation; the runner never enumerates writable nodes,
+   never calls a discovered method and never repeats an operation.
+2. **Confirm the exact operation.** The Tests tab builds the confirmation text from the *validated config* (not
+   from the widgets) and shows endpoint, target NodeId, value or method + argument list, the restore decision
+   and the physical-equipment warning. Declining the dialog runs nothing at all. The runner also records
+   `confirmed_by_operator` in the check data, so a report can never look like an unconfirmed write.
+3. **Validate against the server, then verify the effect.** Values are parsed with the node's **DataType** and
+   **ValueRank** (`opcua/value_parsing.py`); method arguments are parsed with the server's `InputArguments`
+   (`ua.Argument.DataType` / `ValueRank`). Nothing is sent when parsing fails — the check is *skipped* with the
+   reason. A write is verified by reading the value back; a mismatch is a **failure**, not a pass.
+
+Restoring a previous value is a separate, explicit choice (`restore_previous_value`, off by default). When it is
+on, the runner reads the previous value before writing, writes it back afterwards and verifies the restore; a
+failed restore is reported as a failed check even though the write itself succeeded.
+
+Supported write DataTypes are the namespace-0 built-ins (Boolean, integer types with range checks, Float/Double,
+String, DateTime, Guid, ByteString as base64, NodeId/ExpandedNodeId, StatusCode, QualifiedName, LocalizedText,
+XmlElement). Arrays are entered as JSON lists. Matrices, custom structures and enumerations are **refused**
+rather than encoded on a guess.
+
+## 12. Deliberate limitations (phases 1–4)
+
+* No history reads; values are point-in-time.
+* Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
+  opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.
+* The test suite covers one session, one browse root and one variable.
+* Writes and method calls are single-target and opt-in; there is no batch write, no restore-all and no
+  stress/scan mode.
+* Sessions share one window and one asyncio loop. Each session has its own client, namespace table, address
+  space, live subscription and reconnect supervisor; there is no cross-session compare or merge, and a server
+  may refuse a second session (`BadTooManySessions`).
+* Custom structures are exported as far as asyncua decoded them; binary ExtensionObject bodies are flagged.
+* Namespace filter keeps namespace 0 to preserve the standard type system and folder structure.
+* Download completeness depends on the session's rights; access-denied nodes are reported, not hidden.
+* The NodeSet2 exporter writes what the session could read; it is not a model authoring or merging tool.

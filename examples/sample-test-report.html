@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPC UA functional test report</title>
+<style>
+:root {
+  color-scheme: light;
+  --text: #1b2533;
+  --muted: #5b6a7d;
+  --border: #d9dfe7;
+  --surface: #ffffff;
+  --page: #f2f4f7;
+  --accent: #14639e;
+  --passed-bg: #e2f4ea; --passed-fg: #17603a;
+  --failed-bg: #fdeceb; --failed-fg: #8c1d18;
+  --skipped-bg: #fff3d6; --skipped-fg: #7a5200;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 32px 20px 64px;
+  background: var(--page); color: var(--text);
+  font: 14px/1.5 "Segoe UI", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+}
+main { max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 32px 0 10px; }
+.subtitle { color: var(--muted); margin: 0 0 16px; }
+.disclaimer {
+  background: #fff6e0; border: 1px solid #f0d9a6; color: #7a5200;
+  padding: 10px 14px; border-radius: 8px; margin: 16px 0 24px; font-weight: 600;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 18px; margin-bottom: 16px;
+}
+.tiles { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0; }
+.tile {
+  flex: 1 1 150px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.tile .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.tile .value { font-size: 26px; font-weight: 700; margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: #eef2f7; color: #42536a; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+tr:last-child td { border-bottom: none; }
+tbody tr:nth-child(even) { background: #f7f9fc; }
+code, pre { font-family: "JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; }
+pre {
+  background: #f7f9fc; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+}
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+.pill.passed { background: var(--passed-bg); color: var(--passed-fg); }
+.pill.failed { background: var(--failed-bg); color: var(--failed-fg); }
+.pill.skipped { background: var(--skipped-bg); color: var(--skipped-fg); }
+.check { margin-bottom: 14px; }
+.check h3 { font-size: 15px; margin: 0 0 4px; }
+.meta { color: var(--muted); font-size: 12px; }
+.footer { color: var(--muted); font-size: 12px; margin-top: 32px; }
+a { color: var(--accent); }
+</style></head><body><main>
+<h1>OPC UA functional test report</h1>
+<p class="subtitle">opc.tcp://127.0.0.1:4840 · generated 2026-11-13T11:12:48.580Z</p>
+<p class="disclaimer">Functional and interoperability checks - not official OPC UA certification.</p>
+<div class="tiles">
+<div class="tile"><div class="label">Checks</div><div class="value">11</div></div>
+<div class="tile"><div class="label">Passed</div><div class="value">10</div></div>
+<div class="tile"><div class="label">Failed</div><div class="value">0</div></div>
+<div class="tile"><div class="label">Skipped</div><div class="value">1</div></div>
+<div class="tile"><div class="label">Duration</div><div class="value">1.036 s</div></div>
+</div>
+<h2>Server and security</h2>
+<div class="card"><table><tbody><tr><th scope="row">Endpoint</th><td>opc.tcp://127.0.0.1:4840</td></tr><tr><th scope="row">Security policy</th><td>None</td></tr><tr><th scope="row">Message security mode</th><td>None</td></tr><tr><th scope="row">Authentication</th><td>anonymous</td></tr><tr><th scope="row">Server application</th><td>OPC UA Explorer Demo Server</td></tr><tr><th scope="row">Manufacturer</th><td>opcua-explorer</td></tr><tr><th scope="row">Software version</th><td>0.1.0</td></tr><tr><th scope="row">Session timeout</th><td>600000 ms</td></tr><tr><th scope="row">Server certificate SHA-256</th><td>not applicable</td></tr></tbody></table></div>
+<h2>Test configuration</h2>
+<div class="card"><table><tbody><tr><th scope="row">root_node_id</th><td>i=85</td></tr><tr><th scope="row">variable_node_id</th><td>ns=2;s=Temperature</td></tr><tr><th scope="row">publishing_interval_ms</th><td>500.0</td></tr><tr><th scope="row">sampling_interval_ms</th><td>250.0</td></tr><tr><th scope="row">notification_wait_seconds</th><td>6.0</td></tr><tr><th scope="row">latency_samples</th><td>10</td></tr><tr><th scope="row">max_browse_nodes</th><td>50</td></tr><tr><th scope="row">include_channel_recovery</th><td>False</td></tr><tr><th scope="row">request_timeout</th><td>10.0</td></tr><tr><th scope="row">allow_writes</th><td>False</td></tr><tr><th scope="row">write_targets</th><td>[]</td></tr><tr><th scope="row">method_calls</th><td>[]</td></tr></tbody></table></div>
+<h2>Results</h2>
+<div class="card"><table><thead><tr><th>#</th><th>Check</th><th>Category</th><th>Status</th><th>Duration (ms)</th><th>Detail</th></tr></thead><tbody><tr><td>1</td><td><a href="#check-endpoint_discovery">Endpoint discovery</a></td><td>connection</td><td><span class="pill passed">passed</span></td><td>4.9</td><td>1 endpoint(s); active configuration is advertised.</td></tr><tr><td>2</td><td><a href="#check-session_state">Session state &amp; authentication</a></td><td>connection</td><td><span class="pill passed">passed</span></td><td>0.0</td><td>Session active (identity: anonymous); session timeout 600000 ms.</td></tr><tr><td>3</td><td><a href="#check-namespace_array">Namespace array</a></td><td>connection</td><td><span class="pill passed">passed</span></td><td>3.0</td><td>4 namespace(s); namespace 0 present.</td></tr><tr><td>4</td><td><a href="#check-browse_root">Browse root</a></td><td>browse</td><td><span class="pill passed">passed</span></td><td>6.6</td><td>Browsing i=85 succeeded (6 child reference(s)).</td></tr><tr><td>5</td><td><a href="#check-browse_target">Browse target node</a></td><td>browse</td><td><span class="pill passed">passed</span></td><td>1.1</td><td>Browsing ns=2;s=Temperature succeeded (0 child reference(s)).</td></tr><tr><td>6</td><td><a href="#check-attribute_reads">Attribute reads</a></td><td>read</td><td><span class="pill passed">passed</span></td><td>3.7</td><td>Core attributes read successfully from ns=2;s=Temperature.</td></tr><tr><td>7</td><td><a href="#check-variable_read">Variable read &amp; StatusCode</a></td><td>read</td><td><span class="pill passed">passed</span></td><td>0.6</td><td>Value read with status Good (Double).</td></tr><tr><td>8</td><td><a href="#check-subscription_create">Subscription creation</a></td><td>subscription</td><td><span class="pill passed">passed</span></td><td>3.0</td><td>Subscription 78 created (publishing interval 500.0 ms).</td></tr><tr><td>9</td><td><a href="#check-subscription_data_change">Monitored-item notifications</a></td><td>subscription</td><td><span class="pill passed">passed</span></td><td>1003.6</td><td>2 notification(s) received, 1 value change(s) observed.</td></tr><tr><td>10</td><td><a href="#check-latency">Bounded read latency</a></td><td>latency</td><td><span class="pill passed">passed</span></td><td>6.9</td><td>10 read(s): median 0.58 ms, min 0.4 ms, max 1.64 ms.</td></tr><tr><td>11</td><td><a href="#check-connection_recovery">Connection loss &amp; recovery</a></td><td>resilience</td><td><span class="pill skipped">skipped</span></td><td>0.0</td><td>Opt-in check: it closes the secure channel and reconnects, which interrupts active subscriptions. Enable &#x27;include connection-interruption check&#x27; to run it.</td></tr></tbody></table></div>
+<h2>Check details</h2>
+<div class="card"><div class="check" id="check-endpoint_discovery"><h3>Endpoint discovery <span class="pill passed">passed</span></h3><div class="meta">connection · 4.9 ms · started 2026-11-13T11:12:47.541+00:00</div><p>1 endpoint(s); active configuration is advertised.</p><pre>{
+  &quot;endpoint_count&quot;: 1,
+  &quot;endpoints&quot;: [
+    {
+      &quot;endpoint_url&quot;: &quot;opc.tcp://127.0.0.1:4840&quot;,
+      &quot;security_policy_uri&quot;: &quot;http://opcfoundation.org/UA/SecurityPolicy#None&quot;,
+      &quot;security_policy_label&quot;: &quot;None&quot;,
+      &quot;security_mode&quot;: &quot;None&quot;,
+      &quot;security_level&quot;: 0,
+      &quot;token_types&quot;: [
+        &quot;Anonymous&quot;,
+        &quot;Certificate&quot;,
+        &quot;UserName&quot;
+      ],
+      &quot;server_certificate_sha256&quot;: null,
+      &quot;server_certificate_subject&quot;: null,
+      &quot;server_certificate_not_after&quot;: null
+    }
+  ],
+  &quot;active_configuration_advertised&quot;: true,
+  &quot;active_security&quot;: &quot;None / None&quot;
+}</pre></div><div class="check" id="check-session_state"><h3>Session state &amp; authentication <span class="pill passed">passed</span></h3><div class="meta">connection · 0.0 ms · started 2026-11-13T11:12:47.546+00:00</div><p>Session active (identity: anonymous); session timeout 600000 ms.</p><pre>{
+  &quot;state&quot;: &quot;connected&quot;,
+  &quot;session_timeout_ms&quot;: 600000,
+  &quot;application_uri&quot;: &quot;urn:debian:OPCUAExplorer:Client&quot;,
+  &quot;authentication&quot;: &quot;anonymous&quot;,
+  &quot;security_mode&quot;: &quot;None&quot;
+}</pre></div><div class="check" id="check-namespace_array"><h3>Namespace array <span class="pill passed">passed</span></h3><div class="meta">connection · 3.0 ms · started 2026-11-13T11:12:47.546+00:00</div><p>4 namespace(s); namespace 0 present.</p><pre>{
+  &quot;count&quot;: 4,
+  &quot;uris&quot;: [
+    &quot;http://opcfoundation.org/UA/&quot;,
+    &quot;urn:opcua-explorer:demo:server&quot;,
+    &quot;urn:opcua-explorer:demo&quot;,
+    &quot;urn:opcua-explorer:demo:extra&quot;
+  ],
+  &quot;standard_namespace_present&quot;: true
+}</pre></div><div class="check" id="check-browse_root"><h3>Browse root <span class="pill passed">passed</span></h3><div class="meta">browse · 6.6 ms · started 2026-11-13T11:12:47.549+00:00</div><p>Browsing i=85 succeeded (6 child reference(s)).</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>Browse</td><td><code>Good</code></td><td>i=85</td></tr></tbody></table><pre>{
+  &quot;root&quot;: &quot;i=85&quot;,
+  &quot;status&quot;: &quot;Good&quot;,
+  &quot;children&quot;: 6,
+  &quot;child_names&quot;: [
+    &quot;Locations&quot;,
+    &quot;Server&quot;,
+    &quot;Aliases&quot;,
+    &quot;Plant&quot;,
+    &quot;SharedConfig&quot;,
+    &quot;Extra&quot;
+  ]
+}</pre></div><div class="check" id="check-browse_target"><h3>Browse target node <span class="pill passed">passed</span></h3><div class="meta">browse · 1.1 ms · started 2026-11-13T11:12:47.556+00:00</div><p>Browsing ns=2;s=Temperature succeeded (0 child reference(s)).</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>Browse</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr></tbody></table><pre>{
+  &quot;target&quot;: &quot;ns=2;s=Temperature&quot;,
+  &quot;status&quot;: &quot;Good&quot;,
+  &quot;children&quot;: 0
+}</pre></div><div class="check" id="check-attribute_reads"><h3>Attribute reads <span class="pill passed">passed</span></h3><div class="meta">read · 3.7 ms · started 2026-11-13T11:12:47.557+00:00</div><p>Core attributes read successfully from ns=2;s=Temperature.</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>Read NodeClass</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr><tr><td>Read BrowseName</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr><tr><td>Read DisplayName</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr><tr><td>Read Description</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr></tbody></table><pre>{
+  &quot;target&quot;: &quot;ns=2;s=Temperature&quot;,
+  &quot;attributes&quot;: {
+    &quot;NodeClass&quot;: {
+      &quot;status&quot;: &quot;Good&quot;,
+      &quot;ok&quot;: true,
+      &quot;value&quot;: &quot;Variable&quot;
+    },
+    &quot;BrowseName&quot;: {
+      &quot;status&quot;: &quot;Good&quot;,
+      &quot;ok&quot;: true,
+      &quot;value&quot;: &quot;2:Temperature&quot;
+    },
+    &quot;DisplayName&quot;: {
+      &quot;status&quot;: &quot;Good&quot;,
+      &quot;ok&quot;: true,
+      &quot;value&quot;: &quot;Temperature&quot;
+    },
+    &quot;Description&quot;: {
+      &quot;status&quot;: &quot;Good&quot;,
+      &quot;ok&quot;: true,
+      &quot;value&quot;: &quot;Temperature&quot;
+    }
+  }
+}</pre></div><div class="check" id="check-variable_read"><h3>Variable read &amp; StatusCode <span class="pill passed">passed</span></h3><div class="meta">read · 0.6 ms · started 2026-11-13T11:12:47.561+00:00</div><p>Value read with status Good (Double).</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>Read Value</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr></tbody></table><pre>{
+  &quot;target&quot;: &quot;ns=2;s=Temperature&quot;,
+  &quot;status&quot;: &quot;Good&quot;,
+  &quot;variant_type&quot;: &quot;Double&quot;,
+  &quot;encoding&quot;: &quot;json&quot;,
+  &quot;source_timestamp&quot;: &quot;2026-11-13T11:12:47.493Z&quot;,
+  &quot;server_timestamp&quot;: &quot;2026-11-13T11:12:47.493Z&quot;,
+  &quot;value_preview&quot;: &quot;21.5&quot;
+}</pre></div><div class="check" id="check-subscription_create"><h3>Subscription creation <span class="pill passed">passed</span></h3><div class="meta">subscription · 3.0 ms · started 2026-11-13T11:12:47.561+00:00</div><p>Subscription 78 created (publishing interval 500.0 ms).</p><pre>{
+  &quot;subscription_id&quot;: 78,
+  &quot;requested_publishing_interval_ms&quot;: 500.0,
+  &quot;publishing_interval_ms&quot;: 500.0,
+  &quot;requested_lifetime_count&quot;: 3000,
+  &quot;requested_max_keep_alive_count&quot;: 10
+}</pre></div><div class="check" id="check-subscription_data_change"><h3>Monitored-item notifications <span class="pill passed">passed</span></h3><div class="meta">subscription · 1003.6 ms · started 2026-11-13T11:12:47.564+00:00</div><p>2 notification(s) received, 1 value change(s) observed.</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>DataChange</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr><tr><td>DataChange</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr></tbody></table><pre>{
+  &quot;target&quot;: &quot;ns=2;s=Temperature&quot;,
+  &quot;monitored_item_handles&quot;: [
+    112
+  ],
+  &quot;sampling_interval_ms&quot;: 250.0,
+  &quot;observation_window_seconds&quot;: 6.0,
+  &quot;notifications_received&quot;: 2,
+  &quot;values&quot;: [
+    {
+      &quot;node_id&quot;: &quot;ns=2;s=Temperature&quot;,
+      &quot;value&quot;: &quot;21.5&quot;,
+      &quot;status&quot;: &quot;Good&quot;
+    },
+    {
+      &quot;node_id&quot;: &quot;ns=2;s=Temperature&quot;,
+      &quot;value&quot;: &quot;21.7&quot;,
+      &quot;status&quot;: &quot;Good&quot;
+    }
+  ],
+  &quot;value_changes_observed&quot;: 1
+}</pre></div><div class="check" id="check-latency"><h3>Bounded read latency <span class="pill passed">passed</span></h3><div class="meta">latency · 6.9 ms · started 2026-11-13T11:12:48.568+00:00</div><p>10 read(s): median 0.58 ms, min 0.4 ms, max 1.64 ms.</p><table><thead><tr><th>Operation</th><th>StatusCode</th><th>Node</th></tr></thead><tbody><tr><td>Read</td><td><code>Good</code></td><td>ns=2;s=Temperature</td></tr></tbody></table><pre>{
+  &quot;target&quot;: &quot;ns=2;s=Temperature&quot;,
+  &quot;read_attribute&quot;: &quot;Value&quot;,
+  &quot;samples&quot;: 10,
+  &quot;samples_ms&quot;: [
+    0.66,
+    0.48,
+    1.64,
+    0.9,
+    0.46,
+    0.49,
+    0.42,
+    0.4,
+    0.71,
+    0.66
+  ],
+  &quot;min_ms&quot;: 0.4,
+  &quot;median_ms&quot;: 0.58,
+  &quot;max_ms&quot;: 1.64,
+  &quot;statuses&quot;: [
+    &quot;Good&quot;
+  ]
+}</pre></div><div class="check" id="check-connection_recovery"><h3>Connection loss &amp; recovery <span class="pill skipped">skipped</span></h3><div class="meta">resilience · 0.0 ms · started 2026-11-13T11:12:48.575+00:00</div><p>Opt-in check: it closes the secure channel and reconnects, which interrupts active subscriptions. Enable &#x27;include connection-interruption check&#x27; to run it.</p></div></div>
+<h2>Coverage limitations</h2>
+<div class="card"><ul><li>Functional and interoperability checks - not official OPC UA certification.</li><li>The suite exercises one session, one browse root and one variable; it does not verify the whole address space or every DataType.</li><li>Writes and method calls are off by default and, when enabled, run only against the single targets the operator configured and confirmed. No writable node is discovered or written automatically.</li><li>Subscription checks record the initial value plus any changes within the observation window; a value that does not change is reported as passed with an explicit note, not as a failure.</li><li>Latency figures are client-side round-trip measurements of a few reads; they are not a performance benchmark and do not include server-internal processing time.</li><li>Access-denied nodes, timeouts and unsupported DataTypes are reported as limitations, not silently ignored.</li></ul></div>
+<h2>Notes</h2>
+<div class="card"><ul><li>Target variable: ns=2;s=Temperature (configured).</li><li>No write or method call was configured, so the run was read-only.</li></ul></div>
+<h2>Environment</h2>
+<div class="card"><table><tbody><tr><th scope="row">application</th><td>opcua-explorer 0.1.0</td></tr><tr><th scope="row">asyncua</th><td>2.1.0</td></tr><tr><th scope="row">hostname</th><td>debian</td></tr><tr><th scope="row">platform</th><td>Linux-6.1.0-53-amd64-x86_64-with-glibc2.36</td></tr><tr><th scope="row">pyside6</th><td>6.12.0</td></tr><tr><th scope="row">python</th><td>3.11.2</td></tr></tbody></table></div>
+<p class="footer">Timing: 2026-11-13T11:12:47.541Z → 2026-11-13T11:12:48.577Z (UTC). </p>
+</main></body></html>
