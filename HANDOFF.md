@@ -1,8 +1,8 @@
-# Task Handoff — OPC UA Explorer (`ms-opcua-app`)
+# Task Handoff — OPC UA Explorer (`ms-opcua-pyapp`)
 
-Project `ms-opcua-app`, application version 0.1.0, package `opcua_explorer`. This file records the current state,
-the rules a future change must respect, and what is still unverified. It is not a change log; the working copy
-has no git history (see *Repository state*).
+Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.0, package
+`opcua_explorer`. This file records the current state, the rules a future change must respect, and what is still
+unverified. It is not a change log; history is minimal (one import commit; see *Repository state*).
 
 ## Goal and acceptance criteria
 
@@ -25,7 +25,7 @@ Completion criteria:
 
 **Complete.** No open implementation work, nothing blocked, no authorization pending.
 
-226 tests pass (158 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+260 tests pass (182 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows, a manual desktop session, example regeneration) and are listed under *Known
 issues and review findings* and *Next actions*.
 
@@ -39,7 +39,9 @@ issues and review findings* and *Next actions*.
   read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers.
 - **Download & export** — bounded graph traversal (namespace filter, depth/node budget, concurrency, batch
   size, continuation points, cancellation) to JSON, CSV and NodeSet2 XML with dependency closure and
-  validation.
+  validation; the same NodeSet2 pipeline is available headlessly as `opcua-export`.
+- **Headless export** — `opcua-export` drives the same download/NodeSet2 pipeline without Qt, with explicit
+  certificate approval, JSON manifest output and exit codes suitable for scripting.
 - **Live monitoring** — one data-change subscription per session plus a read-only “All monitors” view.
 - **Functional tests** — eleven read-only checks, JSON/HTML reports, opt-in guarded single-target write and
   method call behind an explicit confirmation.
@@ -48,9 +50,12 @@ issues and review findings* and *Next actions*.
 
 ### Repository state
 
-- Branch `master` with **zero commits**; every file is untracked (`git status --porcelain -uall` → 106 entries).
-  There is no diff, history or revert: make out-of-tree backups before bulk edits and do not commit without the
-  operator's authorization.
+- Branch `main` with one commit (`37072ab Initial project import.`) and remote `origin`.
+- The `opcua-export` work is uncommitted: modified `AGENTS.md`, `HANDOFF.md`, `PLAN.md`, `README.md`,
+  `docs/api-verification.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `pyproject.toml`, plus
+  untracked `docs/pics/`, `src/opcua_explorer/cli.py`, `tests/unit/test_cli.py` and
+  `tests/integration/test_cli_export.py`.
+- Do not commit without the operator's authorization; make out-of-tree backups before bulk edits.
 
 ## Decisions and rationale
 
@@ -75,7 +80,11 @@ issues and review findings* and *Next actions*.
 ### Module boundaries and entry points
 
 - Entry points: `opcua_explorer.gui.app:main` (`opcua-explorer`), `opcua_explorer.demo.demo_server:main`
-  (`opcua-demo-server`).
+  (`opcua-demo-server`), `opcua_explorer.cli:main` (`opcua-export`, Qt-free headless NodeSet2 export).
+- `cli.py` is an adapter only: it maps arguments to `TraversalConfig` / `NodeSet2Config`, calls
+  `OpcUaService.download()` and `export_nodeset2()`, prints `NodeSet2Result.summary_text()` and optionally writes
+  `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
+  into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
 - UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors” and “Logs & reports”).
   One session = `gui/session_workspace.py` + its five pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
@@ -91,17 +100,17 @@ issues and review findings* and *Next actions*.
 
 ## Verification
 
-Latest run: 2026-11-13, Python 3.11, Linux.
+Latest run: 2026-11-14, Python 3.11, Linux.
 
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **158 passed in 1.16 s** |
-| Full suite | `uv run pytest -q` | **226 passed** (≈3.5 min idle host, up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **182 passed** |
+| Full suite | `uv run pytest -q` | **260 passed** (≈3.5 min idle host, up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
-| Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; the only `print()` calls in `src/` are the demo-server CLI banner |
-| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 77 — deliberate boundaries, see *Known issues* |
+| Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`) and the demo-server banner |
+| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 78 — deliberate boundaries, see *Known issues* |
 
 Not verified here: native Windows paths, a manual desktop (non-headless) session, and `uv sync --extra
 validation` with the optional `lxml` extra (`lxml` is already installed through the dev group). `examples/`
@@ -111,15 +120,16 @@ matches the current formats; regenerate it whenever a format changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 226 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 260 tests
   pass; the variance is scheduling/IO contention, not failures.
-- **77 broad `except Exception` handlers** in `src/` (`guarded_operations.py` 11, `client_service.py` 10,
-  `test_runner.py` 7, `nodeset2.py` 7, `attributes.py` 6, …). Most are deliberate boundaries (best-effort
+- **78 broad `except Exception` handlers** in `src/` (`guarded_operations.py` 11, `client_service.py` 10,
+  `test_runner.py` 7, `nodeset2.py` 7, `attributes.py` 6, `cli.py` 1, …). Most are deliberate boundaries (best-effort
   teardown, diagnostics for arbitrary server values); do not remove them wholesale without checking the failure
   semantics.
 - **`opcua/nodeset2.py` is 771 lines** — the largest source module; its dependency collector is a single
   coherent algorithm, so split further only if a new concern appears.
-- **No git history**: nothing to diff against, so any bulk edit needs an out-of-tree backup first.
+- **Git history is one import commit**: the `opcua-export` work is uncommitted, so a diff shows only that
+  change set. Keep an out-of-tree backup before bulk edits.
 - **Longest test modules**: `tests/integration/test_gui_workflows.py` (~258 lines) and
   `test_gui_connection_states.py` (~229 lines); grouped by concern, not by accident.
 - **A manual two-session run on a real desktop is still worthwhile**: the selection-isolation and monitor
@@ -134,8 +144,8 @@ Not verifiable on this host:
 
 AI review findings — observations, **not** independently confirmed defects:
 
-- `docs/architecture.md` opens with “phases 1–4 implemented and tested” while `README.md` and `PLAN.md` say
-  “complete and maintained”. The content agrees; only the wording differs.
+- ~~`docs/architecture.md` opens with “phases 1–4 implemented and tested” while `README.md` and `PLAN.md` say
+  “complete and maintained”.~~ **Resolved:** all three now say “complete and maintained”.
 - `.gitignore` ignores `*.log` and `*.pcap` globally while noting that `examples/` is intentionally tracked. No
   current example uses those extensions, but a future one would need an explicit negation rule.
 
@@ -147,8 +157,8 @@ Required: none.
 
 Optional, in priority order:
 
-1. **Initial commit** of the current tree (`master` has no commits). Needs explicit operator authorization and an
-   author identity decision; nothing is staged today.
+1. **Commit the `opcua-export` changes** (modified docs/pyproject plus untracked `cli.py` and CLI tests). Needs
+   explicit operator authorization; nothing is staged today.
 2. **Manual desktop run**: two sessions against `uv run opcua-demo-server`, live monitor plus “All monitors”,
    project save/open, guarded write with the confirmation accepted and declined.
 3. **Windows run** of install → connect → export before any release claim.

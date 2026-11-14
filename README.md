@@ -6,13 +6,16 @@ deliberate, explicit security handling.
 Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.12 · managed with `uv` · native
 Windows and Linux, no Docker.
 
-> **Status — complete and maintained (2026-11-13)**
+> **Status — complete and maintained (2026-11-14)**
 > Implemented and tested: connection & security with automatic reconnect, multi-session window, address-space
-> browser and bounded download, JSON/CSV/NodeSet2 export with validation, live data-change monitoring with a
-> merged view, functional tests (read-only by default) with JSON/HTML reports, guarded single-target
-> write/method-call checks with explicit confirmation, connection profiles and versioned project files.
-> The automated suite has 226 tests. See [Limitations](#10-limitations) for what is deliberately *not*
-> claimed, [PLAN.md](PLAN.md) for the delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
+> browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
+> (`opcua-export`), live data-change monitoring with a merged view, functional tests (read-only by default)
+> with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
+> connection profiles and versioned project files. The automated suite has 260 tests. See
+> [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
+> delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
+
+![OPC UA Explorer main window with a session tab](docs/pics/opcua_explorer.png)
 
 ---
 
@@ -35,6 +38,9 @@ session name). Closing a session tab releases only that session's client.
 
 **File → Save project… / Open project…** stores and restores every session's configuration and editor state in
 one versioned JSON file — never credentials.
+
+Everything the **Export** page writes can also be produced without the GUI: `uv run opcua-export …` exports a
+NodeSet2 XML file headlessly (see [Headless export](#headless-export-the-opcua-export-command)).
 
 ## 2. Requirements
 
@@ -212,6 +218,7 @@ src/opcua_explorer/
 ├── operator_text.py      guarded-operation confirmation + connection diagnostics text (Qt-free)
 ├── logging_setup.py      log bus + mandatory secret redaction
 ├── reporting.py          JSON and self-contained HTML test reports
+├── cli.py                opcua-export: headless NodeSet2 export (Qt-free, same services as the GUI)
 ├── opcua/
 │   ├── ua_names.py       shared NodeClass / StatusCode / VariantType names
 │   ├── check_support.py  shared check primitives (skipped signal, previews, environment)
@@ -241,7 +248,8 @@ PLAN.md, AGENTS.md, HANDOFF.md  delivered scope, working rules, maintenance guid
 ```
 
 Key design decision: **all asyncua work runs on one asyncio loop in a worker thread**; the GUI thread only
-receives plain model objects through queued Qt signals. No `await` ever runs on the GUI thread.
+receives plain model objects through queued Qt signals. No `await` ever runs on the GUI thread. The CLI is a
+second, Qt-free front end: it owns its own event loop and calls the very same `OpcUaService` and exporters.
 
 ## 7. Export formats
 
@@ -301,6 +309,88 @@ Example: [examples/demo-nodeset2.xml](examples/demo-nodeset2.xml) with the machi
 `Objects` folder, so the custom `MeasurementType` (a type node created under `Types`) is outside that snapshot. When
 a snapshot includes a custom DataType without a `DataTypeDefinition`, it is listed in `unsupported_data_types`
 instead of being written (covered by the integration tests).
+
+### Headless export: the `opcua-export` command
+
+The GUI is not required to write a NodeSet2 file. `opcua-export` is a Qt-free command that drives exactly the same
+code as the **Export** tab — same session handling, same bounded traversal, same dependency closure, same writer
+and same self-validation — so a scripted export and a GUI export cannot differ:
+
+```bash
+uv run opcua-export --endpoint opc.tcp://192.168.1.100:4840 --output PSU8600.NodeSet2.xml
+```
+
+The command word is optional (`opcua-export export …` works too) and `--endpoint` / `--help` list every option.
+Frequently used ones:
+
+| Option | Meaning |
+|---|---|
+| `--output FILE` | Destination; default `<host>-<port>.NodeSet2.xml` in the working directory |
+| `--node NODEID` (repeatable) | Start node(s); default `i=85` (Objects). Parents are added as dependencies |
+| `--namespace INDEX` (repeatable) | Keep only these namespaces; namespace 0 is always kept because the type system lives there |
+| `--max-nodes N`, `--max-depth N` | Bounds, `0` = unlimited (default: 20 000 nodes) |
+| `--values` | Also read variable values (off by default) |
+| `--no-dependencies` | Skip parent/type collection — the file will usually not import |
+| `--max-dependencies N`, `--schema XSD` | Dependency budget and optional XSD validation |
+| `--manifest FILE` | JSON result document (counts, namespaces, missing dependencies, unsupported DataTypes, validation) |
+| `--policy`, `--mode`, `--client-certificate`, `--client-key` | Same security selection as the GUI; no silent downgrade |
+| `--user`, `--password-env VAR` | User-name identity; the password comes from an environment variable or an interactive prompt, never from argv |
+| `--server-certificate FILE`, `--trust-server-certificate`, `--trust-store FILE` | Explicit server-certificate approval; the application trust store is used by default |
+| `--quiet`, `--verbose` | Progress/result only, or debug logging on stderr |
+
+Progress and the export summary go to **stdout/stderr**, so the command is scriptable:
+
+```bash
+# Export one device subtree from a secured endpoint; output stays parseable by CI
+OPCUA_EXPLORER_PASSWORD=… uv run opcua-export \
+  --endpoint opc.tcp://plc.example:4840 \
+  --node "ns=2;s=MyDevice" --namespace 2 \
+  --policy Basic256Sha256 --mode SignAndEncrypt \
+  --client-certificate client.der --client-key client.pem \
+  --trust-store /etc/opcua-explorer/trust.json \
+  --quiet --output MyDevice.NodeSet2.xml --manifest MyDevice.json
+```
+
+Exit codes: `0` success, `1` connection or export failure, `2` unusable arguments/configuration,
+`3` the file was written but failed its own structural checks (it may not import).
+
+#### Scope, namespaces and permissions
+
+* **Scope.** Default scope is the `Objects` folder. `--node` selects any subtree, `--namespace` restricts the
+  download to your own namespaces. Namespace 0 is never written into the file: the standard type system is
+  *referenced*, so the importing tool must know the standard NodeSet.
+* **Namespace mapping.** The exporter re-maps the *session's* namespace indexes onto the file's own
+  `NamespaceUris` table (index 1, 2, … in the order the file declares them). NodeId **identifiers** are preserved;
+  the numeric prefix inside the file therefore need not match the index the server used in that session. Always
+  resolve a NodeId through the file's `NamespaceUris` table, not through a remembered session index.
+* **Permissions.** Only what the session could read ends up in the file. Access-denied or timed-out nodes,
+  exhausted budgets and unreadable dependencies are listed in the summary and in `--manifest`, never invented.
+  Servers that expose only partial metadata still produce a file; the affected nodes appear as missing
+  dependencies or unsupported DataTypes.
+* **Cycles and size.** The traversal tracks visited NodeIds, so a graph with cycles terminates; continuation
+  points are released, including on cancellation. Memory use is bounded by `--max-nodes` / `--max-dependencies`.
+
+#### Importing the file into SiOME or UaModeler
+
+The generated file is a plain `UANodeSet` document (schema namespace
+`http://opcfoundation.org/UA/2011/03/UANodeSet.xsd`), so both tools import it directly:
+
+* **Siemens SiOME** — *File → Import → OPC UA Nodeset XML* (or *Nodeset → Import*), select the file. SiOME shows
+  the nodes under *Model / Nodeset*, and reports any reference that could not be resolved. Because namespace 0 is
+  referenced but not included, a missing custom dependency appears as a "reference to unknown node" message.
+* **Unified Automation UaModeler** — *File → Import → NodeSet2 XML* (or *Model → Import*). UaModeler validates
+  namespaces and parent relationships on import and refuses files whose nodes have no resolvable parent, which is
+  why `ParentNodeId` dependencies are always collected. Use *Model → Validate* afterwards to see dangling
+  references that point outside the file.
+
+Practical guidance:
+
+1. Export with dependencies enabled (default) and read the printed summary: `Missing deps`, `DataTypes` and
+   `References` lines tell you what an importer will complain about.
+2. A custom type defined *outside* the downloaded scope shows up as an unsupported DataType; export an additional
+   root (`--node i=86` for the Types folder) or the type's own NodeId to include it.
+3. `--values` is only needed when the consuming tool must see initial values; method `InputArguments` /
+   `OutputArguments` are always written.
 
 ## 8. Functional tests and reports
 
@@ -376,7 +466,8 @@ uv run pytest tests/unit -q   # fast, no network
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
   trust store + settings (no secrets on disk), log redaction, JSON/CSV document shape, NodeId parsing,
   reference classification, report documents and HTML escaping, NodeSet2 structural/schema validation,
-  guarded-write value parsing (ranges, arrays, ISO dates, refused custom types).
+  guarded-write value parsing (ranges, arrays, ISO dates, refused custom types) and the export CLI's argument
+  mapping and certificate-approval decisions (no network).
 * **Integration**: against the in-process demo server — discovery, anonymous and username authentication,
   browsing, attribute/reference details, bounded and depth-limited traversal on a cyclic graph, shared
   children, namespace filter, value encoding, cancellation, JSON/CSV files, NodeSet2 export with a round-trip
@@ -384,7 +475,9 @@ uv run pytest tests/unit -q   # fast, no network
   restore only on request) and method calls (validated arguments, wrong argument count), secure connection with
   mutual certificates, certificate-change
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
-  and the opt-in recovery check) and report files.
+  and the opt-in recovery check) and report files. The headless `opcua-export` command is exercised end to end
+  (Objects scope, start-node scope with parent closure, namespace scope, manifest, unsupported custom DataType,
+  nothing-to-write, unreachable endpoint, username authentication, missing schema file).
 * **GUI** (headless, `-platform offscreen`): asyncio bridge result/cancellation, window wiring, and end-to-end
   runs driven through the real tabs (connect → browse → download → JSON export; connect → download → NodeSet2
   export; connect → run tests; connect → live monitor and merged monitor view; connect → guarded write with

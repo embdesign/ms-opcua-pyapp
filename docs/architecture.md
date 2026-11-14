@@ -1,9 +1,9 @@
-# Architecture and implementation plan
+# Architecture — OPC UA Explorer
 
-Status: **phases 1–4 implemented and tested** (connection/security with background reconnect, browser,
-download, JSON/CSV/NodeSet2 export, live monitoring, functional test suite that is read-only by default with
-JSON/HTML reports, and guarded single-target write and method call). See section 12 for what is deliberately out
-of scope.
+Status: **complete and maintained** (phases 1–4; verified 2026-11-14). Implemented and tested:
+connection/security with background reconnect, browser, download, JSON/CSV/NodeSet2 export (GUI and headless
+`opcua-export`), live monitoring, functional test suite that is read-only by default with JSON/HTML reports,
+and guarded single-target write and method call. See section 12 for what is deliberately out of scope.
 
 ---
 
@@ -34,6 +34,10 @@ Derived design rules:
 │        logs,unified_monitor}                                         │
 │  async_runner.py  ← only place Qt meets asyncio                      │
 └───────────────┬──────────────────────────────────────────────────────┘
+                │
+┌───────────────▼──────────────────────────────────────────────────────┐
+│ cli.py  (PySide6-free)  opcua-export: argparse → service → exports   │
+└───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
 ┌───────────────▼──────────────────────────────────────────────────────┐
 │ opcua/  (asyncua)                                                    │
@@ -60,6 +64,9 @@ Rules that keep the layers honest:
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
+* `cli.py` is a second front end (Qt-free): it owns its own event loop through `asyncio.run`, calls
+  `OpcUaService` and the exporters, and never touches asyncua directly. It must not re-implement traversal,
+  dependency collection, writing or validation — the GUI and the CLI share those objects on purpose.
 
 ## 3. Threading model
 
@@ -278,6 +285,12 @@ namespace mapping, so they are present even when value export is off.
 Validation is explicit about what ran: the file is re-parsed (well-formedness), namespaces and
 `ParentNodeId` targets are checked, dangling references are listed, and XSD validation runs only when a schema
 path is given *and* `lxml` is installed (`ValidationResult.status` = `not-validated` / `valid` / `invalid`).
+
+The same pipeline is available without Qt as `opcua-export` (`cli.py`): argument parsing decides the
+`TraversalConfig` and `NodeSet2Config`, `OpcUaService.download()` and `export_nodeset2()` do the work, and the
+CLI only prints `NodeSet2Result.summary_text()` and optionally writes `to_dict()`. Certificate approval is the
+same explicit decision as in the GUI, expressed as an existing trust-store entry, `--trust-server-certificate`
+or a `--server-certificate` file whose SHA-256 must equal the advertised certificate.
 
 ## 9. Phase plan
 

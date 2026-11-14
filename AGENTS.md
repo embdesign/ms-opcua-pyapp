@@ -1,7 +1,7 @@
-# AGENTS.md — working rules for `ms-opcua-app`
+# AGENTS.md — working rules for `ms-opcua-pyapp`
 
-Scope: `/home/user/wdr/py/ms-opcua-app` (package `opcua_explorer`). Read this before changing code.
-It records only facts verified in this tree.
+Scope: `/home/user/wdr/py/ms-opcua-pyapp` (distribution `opcua-explorer`, package `opcua_explorer`).
+Read this before changing code. It records only facts verified in this tree.
 
 ## Project facts
 
@@ -9,8 +9,9 @@ It records only facts verified in this tree.
 - Runtime dependencies are pinned: `asyncua==2.1.0`, `PySide6==6.12.0`. Optional extra `validation` = `lxml`.
   Dev group: `pytest`, `pytest-asyncio`, `lxml`, `cryptography`.
 - Desktop OPC UA client: discovery/security/identity, lazy browser, bounded address-space download,
-  JSON/CSV/NodeSet2 export, live monitoring, read-only functional checks, guarded single-target write/method
-  call, JSON/HTML reports, demo server. One window may host several independent sessions.
+  JSON/CSV/NodeSet2 export, headless NodeSet2 export (`opcua-export`), live monitoring, read-only functional
+  checks, guarded single-target write/method call, JSON/HTML reports, demo server. One window may host several
+  independent sessions.
 - Validation document: `docs/api-verification.md`. Never invent an asyncua API or behaviour; verify it there
   or against the installed package first.
 
@@ -18,10 +19,11 @@ It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 226 passed (≈3.5–14 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 158 passed, ~1 s
+uv run pytest -q                           # full suite, 260 passed (≈3.5–14 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 182 passed, ~1 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
+uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py
 uv run python scripts/generate_example_report.py
@@ -82,9 +84,12 @@ uv run python scripts/generate_example_nodeset.py
 
 ## Pitfalls
 
-- Git state: `.git` exists on branch `master` with **no commits yet**; every file is untracked. There is
-  therefore no history, diff or revert to rely on — make a backup archive before bulk edits, and do not commit
-  without the operator's authorization. Run `git status` before assuming a clean tree.
+- Git state: branch `main`, one commit (`37072ab Initial project import.`), remote `origin`. The
+  `opcua-export` work is currently uncommitted: modified `AGENTS.md`, `HANDOFF.md`, `PLAN.md`, `README.md`,
+  `docs/api-verification.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `pyproject.toml`, plus
+  untracked `docs/pics/`, `src/opcua_explorer/cli.py`, `tests/unit/test_cli.py` and
+  `tests/integration/test_cli_export.py`. Run `git status` and make a backup archive before bulk edits; do
+  not commit without the operator's authorization.
 - `.venv` is required for `uv run`; `uv` lives at `~/.local/bin/uv` on this host.
 - `uv run pytest` can fail with `error: Failed to spawn: pytest … No such file or directory` although pytest
   imports fine: the console script in `.venv/bin/` still carries the shebang of the folder it was installed
@@ -94,5 +99,11 @@ uv run python scripts/generate_example_nodeset.py
 - Do not log passwords, private-key passwords, certificate bytes or trust decisions.
 - `opcua/nodeset2.py` (dependency collection + export) and `opcua/nodeset2_validation.py` are still sizeable;
   target their helpers directly instead of growing the modules further.
+- `cli.py` (`opcua-export`) is a second front end, not a second implementation: it must keep calling
+  `OpcUaService.download()` / `export_nodeset2()` and print `NodeSet2Result.summary_text()`. Do not copy
+  traversal, dependency closure, writing, validation or certificate-approval rules into it. Passwords are only
+  accepted through `--password-env` or an interactive prompt, never as an argument, and a secure connection
+  still requires an explicit certificate decision (trust store, `--trust-server-certificate` or
+  `--server-certificate` with a matching fingerprint).
 - The GUI test modules share mutable process state (one QApplication, demo-server subprocesses). Keep the
   `qapp` teardown and always stop a demo server in `finally` (use `gui_support.stop_demo_server`).

@@ -1,6 +1,6 @@
 # PLAN — OPC UA Explorer
 
-Status: **complete and maintained** (verified 2026-11-13). The scope described below — including the
+Status: **complete and maintained** (verified 2026-11-14). The scope described below — including the
 features added after the original brief — is implemented and covered by tests. There is no open
 implementation work.
 
@@ -13,6 +13,7 @@ implementation work.
 | Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
+| Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), read-only by default |
 | Guarded operations | Single-target write and method call, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
@@ -25,6 +26,7 @@ implementation work.
 ```
 src/opcua_explorer/
 ├── gui/            window shell, one workspace per session, tabs, Qt↔asyncio bridge
+├── cli.py          opcua-export: headless NodeSet2 export (same services, no Qt)
 ├── opcua/          client service, security, browse, attributes, traversal, serialize,
 │                   monitor, NodeSet2 (+ validation), check support, test runner,
 │                   guarded operations, shared UA names
@@ -47,10 +49,11 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 226 passed, ~3 min 35 s
-uv run pytest tests/unit -q       # 158 passed, ~1 s
+uv run pytest -q                  # 260 passed, ~4 min
+uv run pytest tests/unit -q       # 182 passed, ~1 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
+uv run opcua-export --help        # headless NodeSet2 export
 ```
 
 Integration tests start in-process demo servers on free loopback ports; GUI tests run headless

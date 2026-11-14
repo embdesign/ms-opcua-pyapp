@@ -179,6 +179,21 @@ Deleting an entry forces a new fingerprint review on the next connection.
   (access denied) or dependency collection was disabled. Check `missing_dependencies` in the manifest.
 * **Namespace indexes differ from the session** — expected: the file remaps the namespaces it writes to
   `ns=1..N`. Use the `NamespaceUris` table, not the session index.
+* **SiOME/UaModeler refuses the file** — both tools require every `ParentNodeId` and type definition to resolve.
+  Re-run the export without `--no-dependencies` and check the summary lines `Missing deps` / `References`; if
+  dependencies are still listed, the server denied access to them and the exported region must be widened.
+* **`opcua-export`: `Nothing to write` (exit code 1)** — every node of the downloaded region was in namespace 0.
+  `--namespace 0` intentionally selects only the standard namespace, which is never written into the file; widen
+  the scope with `--node` or drop the namespace filter.
+* **`opcua-export`: `is not advertised by the server`** — the requested policy/mode pair is not offered. The
+  message lists what the server does advertise; there is no silent downgrade.
+* **`opcua-export`: `The server certificate is not approved`** — the fingerprint was printed; verify it
+  out-of-band and re-run with `--trust-server-certificate` (recorded in the trust store) or `--server-certificate
+  FILE` whose SHA-256 must match the advertised certificate.
+* **`opcua-export`: `No password available`** — pass `--password-env VAR` or run in an interactive terminal; a
+  password is never accepted as a command-line argument because argv is visible to other users.
+* **`opcua-export` exit code 3** — the file was written but failed its own structural checks (for example a
+  namespace that was not declared). The file exists; treat it as unusable until the summary explains why.
 
 ## 9. Guarded write and method call
 

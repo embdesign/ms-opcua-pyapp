@@ -174,6 +174,22 @@ Verified against `asyncua/common/xmlexporter.py` and `asyncua/common/xmlparser.p
   namespace-aware element names (`{...}UANodeSet`), and the schema does **not** validate a file that omits
   `<NamespaceUris>` for indexes it uses.
 
+### Headless export (`cli.py`)
+
+The command adds **no new asyncua API**: it calls `OpcUaService.discover()`, `connect()`, `download()` and
+`export_nodeset2()`, and prints `NodeSet2Result.summary_text()`. Verified details it relies on:
+
+* `Client.connect_socket/send_hello/open_secure_channel/get_endpoints` are used only inside the service's
+  discovery helper; the CLI never opens a client itself.
+* `ConnectionSettings.validate(require_server_certificate=False)` is the pre-flight check before a network call;
+  `connect()` repeats the full validation including the approved DER.
+* Certificate files are read with `cryptography.x509.load_pem_x509_certificate` /
+  `load_der_x509_certificate` (same library `opcua/security.py` already uses) and converted with
+  `public_bytes(Encoding.DER)`; the resulting SHA-256 is compared with the advertised
+  `EndpointDescription.ServerCertificate` exactly as `client_service.connect()` does.
+* `asyncio.run()` in the CLI owns its event loop, so the command is safe to call from a thread that has no
+  running loop (which is how the integration tests drive it next to an in-process demo server).
+
 ## Guarded write and method call (phase 4)
 
 * `Node.read_data_type()` returns a `ua.NodeId` whose `NodeIdType` is **not** necessarily `Numeric`: built-in
