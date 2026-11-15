@@ -20,3 +20,7 @@ DEFAULT_LATENCY_SAMPLES = 10
 
 DEFAULT_CONCURRENCY = 4
 DEFAULT_BATCH_SIZE = 50
+
+#: Rows kept per difference bucket by the address-space comparison; the counts
+#: stay complete, only the listed rows stop.
+DEFAULT_MAX_COMPARISON_DIFFERENCES = 2_000

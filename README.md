@@ -11,7 +11,9 @@ Windows and Linux, no Docker.
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, functional tests (read-only by default)
 > with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
-> connection profiles and versioned project files. The automated suite has 260 tests. See
+> connection profiles and versioned project files, and a headless comparison of two address spaces
+> (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports). The automated suite
+> has 325 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -23,9 +25,10 @@ Windows and Linux, no Docker.
 
 Each session lives in its own tab (**File → New connection**, `Ctrl+N`) with its own OPC UA client, so you can
 work with several devices — or the same server twice — at the same time. A session tab contains the first five
-pages below. Two tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
-and notification log, with a session filter) and **Logs & reports** (operator summaries prefixed with the
-session name). Closing a session tab releases only that session's client.
+pages below. Three tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
+and notification log, with a session filter), **Compare** (a read-only structural comparison of two sessions) and
+**Logs & reports** (operator summaries prefixed with the session name). Closing a session tab releases only that
+session's client.
 
 | Page | Capability |
 |---|---|
@@ -35,12 +38,15 @@ session name). Closing a session tab releases only that session's client.
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals and bounded row retention |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
+| **Compare** | Read-only structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report |
 
 **File → Save project… / Open project…** stores and restores every session's configuration and editor state in
 one versioned JSON file — never credentials.
 
 Everything the **Export** page writes can also be produced without the GUI: `uv run opcua-export …` exports a
 NodeSet2 XML file headlessly (see [Headless export](#headless-export-the-opcua-export-command)).
+Two devices can be compared headlessly with `uv run opcua-compare …` (see
+[Headless comparison](#headless-comparison-the-opcua-compare-command)).
 
 ## 2. Requirements
 
@@ -93,6 +99,7 @@ on the target machine**:
 |---|---|
 | `opcua-explorer-windows-x64.zip`, `opcua-explorer-linux-x64.zip` | desktop application (`opcua-explorer[.exe]`) |
 | `opcua-export-windows-x64.zip`, `opcua-export-linux-x64.zip` | headless NodeSet2 exporter (`opcua-export[.exe]`), no Qt |
+| `opcua-compare-windows-x64.zip`, `opcua-compare-linux-x64.zip` | headless address-space comparison (`opcua-compare[.exe]`), no Qt |
 
 A bundled install and a `uv`-run checkout on the same machine share their settings, trust store and
 project files, because both use the same per-user locations. The Windows binaries are unsigned, so
@@ -142,6 +149,12 @@ uv run opcua-explorer
    target, value and restore choice; confirm it and the write is read back (and restored only if you ticked the
    restore box). The demo's `Start` method can be called the same way: object `ns=2;s=Motor`, method
    `ns=2;s=Start`, argument `900`.
+8. **Compare** (two sessions): open a second session with **File → New connection** and connect it to the other
+   device, then switch to the shared **Compare** tab, choose *Reference* and *Candidate* and press **Compare**.
+   Both address spaces are downloaded again with one scope; the table lists every difference (missing / extra /
+   changed / not comparable) and the selected row shows its attribute detail. Use *Show* or the filter field to
+   narrow the list, then **Export HTML report…** or **Export JSON…**. If the old device is already gone, pick
+   *Saved JSON export…* for that side and select a document previously written with **Export JSON…**.
 
 ### Saving and reopening your work
 
@@ -233,7 +246,9 @@ src/opcua_explorer/
 ├── operator_text.py      guarded-operation confirmation + connection diagnostics text (Qt-free)
 ├── logging_setup.py      log bus + mandatory secret redaction
 ├── reporting.py          JSON and self-contained HTML test reports
+├── compare.py            structural comparison of two address-space snapshots (Qt/asyncua-free)
 ├── cli.py                opcua-export: headless NodeSet2 export (Qt-free, same services as the GUI)
+├── cli_compare.py        opcua-compare: headless comparison of two servers (Qt-free, read-only)
 ├── opcua/
 │   ├── ua_names.py       shared NodeClass / StatusCode / VariantType names
 │   ├── check_support.py  shared check primitives (skipped signal, previews, environment)
@@ -254,7 +269,7 @@ src/opcua_explorer/
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
 │   ├── session_workspace.py  one session: its service and five pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
-│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, logs, unified monitor
+│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
 examples/                 generated sample exports and sample reports
@@ -407,6 +422,76 @@ Practical guidance:
 3. `--values` is only needed when the consuming tool must see initial values; method `InputArguments` /
    `OutputArguments` are always written.
 
+### Headless comparison: the `opcua-compare` command
+
+When a device is replaced, the question is whether the new one exposes the same information model. `opcua-compare`
+downloads both address spaces through the same service layer the GUI uses and compares the snapshots. It is
+read-only: nothing is written, called or subscribed.
+
+```bash
+uv run opcua-compare --reference opc.tcp://old-device:4840 --candidate opc.tcp://new-device:4840 \
+  --json diff.json --report diff.html
+
+# The old device is already gone: compare its saved JSON export with the new one live
+uv run opcua-compare --reference-file old-device.json --candidate opc.tcp://new-device:4840
+```
+
+The first server is the baseline. Differences are reported in four buckets — *missing on the candidate*,
+*extra on the candidate*, *changed attributes* and *not comparable* — plus namespace and (optional) reference
+differences. Exit code **3 means “compared, differences found”**, which makes the command usable as a CI gate.
+The same comparison is available in the GUI as the shared **Compare** tab, which writes the same reports.
+
+**Each side is either a live endpoint or a saved JSON export.** `--reference-file` / `--candidate-file` read a
+document written by the Export tab (*Export JSON…*) or by `opcua-export`'s JSON writer; a side that comes from a
+document is not downloaded and needs no connection, and two documents compare completely offline. A truncated
+export is reported as such: the document keeps the `limits_hit` flags of its download, so the comparison warns
+that one side was cut short instead of reporting the missing nodes as differences.
+
+| Option | Meaning |
+|---|---|
+| `--reference ENDPOINT`, `--candidate ENDPOINT` | Baseline and replacement |
+| `--reference-file FILE`, `--candidate-file FILE` | Use a saved JSON export for that side instead of a live endpoint |
+| `--node NODEID` (repeatable) | Roots to download on **both** sides; default `i=85` (Objects) |
+| `--tolerance functional\|strict` | `functional` (default): node class, data type, value rank, array dimensions, access levels, type definition. `strict`: also display name and description |
+| `--compare-value NODEID` (repeatable) | Compare status, variant type and payload of exactly these nodes (values are read only for them) |
+| `--ignore NODEID` (repeatable) | Nodes expected to differ (current time, counters, serial numbers) |
+| `--float-tolerance X` | Absolute tolerance for compared numbers (default `0` = exact) |
+| `--compare-reference-names` | Also compare the reference graph (type names, sources, targets) |
+| `--no-browse-path-match` | Match only by NodeId; disable the browse-path fallback for renumbered nodes |
+| `--max-nodes N`, `--max-depth N` | Download bounds per side; `0` = unlimited (default unlimited — a truncated side cannot be compared) |
+| `--json FILE`, `--report FILE` | Versioned JSON document and/or self-contained HTML report |
+| `--policy`, `--mode`, `--client-certificate`, `--client-key`, `--user`, `--password-env` | Same security and identity selection as `opcua-export`, applied to **both** sessions |
+| `--candidate-policy`, `--candidate-mode` | Override the security settings for the candidate only |
+| `--reference-server-certificate`, `--candidate-server-certificate` | Per-side approved certificate; `--trust-server-certificate` approves both |
+| `--quiet`, `--verbose` | Progress/result only, or debug logging on stderr |
+
+Rules that make the result trustworthy:
+
+* **One identity for both sessions.** `UserAccessLevel` can only be compared when both servers are asked with the
+  same user; the command therefore reads the password once and uses it for both. The report states the identity.
+* **Namespace URIs, not indexes.** Nodes are identified by namespace URI + identifier, so differently numbered
+  namespace tables compare correctly. A NodeId printed in the report is the one *that session* used.
+* **Browse-path fallback.** When a NodeId changed but its position did not, the nodes are matched by qualified
+  browse path — only when that path is unambiguous on both sides.
+* **Partial snapshots are flagged, not hidden.** Cancelled downloads, hit limits, inaccessible nodes and a
+  different authentication mode produce warnings; nodes that could be browsed on one side only are *not
+  comparable*, never “equal”.
+* **Values are a point-in-time read** and are compared only for the nodes you name — a serial number or a counter
+  is not a difference in functionality.
+
+Sample files: [examples/sample-comparison.json](examples/sample-comparison.json) /
+[examples/sample-comparison.html](examples/sample-comparison.html) (two demo servers, no difference) and
+[examples/sample-comparison-differences.json](examples/sample-comparison-differences.json) /
+[examples/sample-comparison-differences.html](examples/sample-comparison-differences.html) (the difference tables,
+produced from a documented synthetic variant). Regenerate them with:
+
+```bash
+uv run python scripts/generate_example_comparison.py
+```
+
+The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
+servers behave identically under load, and it sends no write or method call.
+
 ## 8. Functional tests and reports
 
 The **Tests** tab runs eleven bounded checks against the current session; the default suite is read-only:
@@ -525,11 +610,15 @@ The implemented scope is complete; the following are **not** claimed:
   body without a type dictionary is base64-encoded and flagged as undecoded.
 * **Namespace filter** keeps namespace 0 (standard type system and folder structure) by design.
 * **Concurrent sessions share one window and one asyncio loop.** Each session has its own client, namespace
-  table, download snapshot, live subscription and reconnect supervisor; there is no cross-session compare or
-  merge. A device that limits concurrent sessions can refuse the second one — the StatusCode is shown, nothing
-  is retried silently.
+  table, download snapshot, live subscription and reconnect supervisor. The shared **Compare** tab compares two
+  of them (the same comparison the headless `opcua-compare` command runs); there is no automatic merge of
+  sessions. A device that limits concurrent sessions can refuse the second one — the StatusCode is shown,
+  nothing is retried silently.
 * **A project is a configuration snapshot, not a session restore.** Opening one restores editors and pending
   monitor targets; it does not reconnect, re-subscribe, re-download or restore logs and reports.
+* **A comparison is structural evidence, not an equivalence guarantee.** The **Compare** tab and
+  `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
+  Neither compares behaviour under load, internal limits, or anything that requires a write.
 * Downloads reflect what the session was allowed to browse: access-denied nodes, timeouts and disconnects are
   reported (`inaccessible_nodes`) instead of being hidden.
 

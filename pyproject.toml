@@ -44,6 +44,8 @@ opcua-explorer = "opcua_explorer.gui.app:main"
 opcua-demo-server = "opcua_explorer.demo.demo_server:main"
 # Headless address-space export (Qt-free, same services as the GUI Export tab).
 opcua-export = "opcua_explorer.cli:main"
+# Headless comparison of two address spaces (Qt-free, read-only).
+opcua-compare = "opcua_explorer.cli_compare:main"
 
 [build-system]
 requires = ["hatchling"]

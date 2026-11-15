@@ -18,6 +18,7 @@ implementation work.
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), read-only by default |
 | Guarded operations | Single-target write and method call, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
+| Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict tolerance, value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
 | Sessions & projects | Several independent sessions per window, shared trust store and asyncio loop; versioned project files with per-session configuration and editor state, never secrets |
 | Demo & examples | Local demo server with a graph-shaped model; example JSON/CSV/NodeSet2 exports and sample reports |
 
@@ -30,7 +31,7 @@ src/opcua_explorer/
 ├── opcua/          client service, security, browse, attributes, traversal, serialize,
 │                   monitor, NodeSet2 (+ validation), check support, test runner,
 │                   guarded operations, shared UA names
-├── exporters/      JSON and CSV
+├── exporters/      JSON and CSV writers, JSON snapshot loader
 ├── models.py       plain dataclasses shared by every layer
 ├── config.py       settings, profiles, trust store
 ├── defaults.py     single definition of numeric defaults
@@ -38,6 +39,8 @@ src/opcua_explorer/
 ├── formatting.py   exporter formatting (Qt/asyncua-free)
 ├── operator_text.py safety confirmation and diagnostics text (Qt-free)
 ├── reporting.py    JSON/HTML reports
+├── compare.py      structural comparison of two address-space snapshots (Qt/asyncua-free)
+├── cli_compare.py  opcua-compare: headless comparison (same services, no Qt)
 ├── logging_setup.py log bus and secret redaction
 └── demo/           local demo server
 ```
@@ -49,8 +52,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 260 passed, ~4 min
-uv run pytest tests/unit -q       # 182 passed, ~1 s
+uv run pytest -q                  # 325 passed, ~4:20
+uv run pytest tests/unit -q       # 234 passed, ~2 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -69,7 +72,9 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 - Downloads and NodeSet2 exports contain what the session was allowed to browse; access-denied nodes
   and missing dependencies are reported, not hidden.
 - NodeSet2 is an export of an existing session, not a model-authoring or merging tool.
-- Sessions share one window and one asyncio loop; there is no cross-session compare or merge.
+- Sessions share one window and one asyncio loop; the shared **Compare** tab and `opcua-compare` compare two
+  of them, but nothing is merged automatically, and the comparison is structural evidence for one identity and
+  one point in time rather than an equivalence guarantee.
 
 ## 5. Deferred maintenance
 

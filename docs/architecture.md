@@ -36,7 +36,7 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py  (PySide6-free)  opcua-export: argparse → service → exports   │
+│ cli.py · cli_compare.py  (Qt-free)  opcua-export · opcua-compare     │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -57,16 +57,17 @@ Derived design rules:
 Rules that keep the layers honest:
 
 * `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `exporters/`,
-  `reporting.py` import neither asyncua nor Qt.
+  `reporting.py`, `compare.py` import neither asyncua nor Qt.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
 * Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
 * `gui/session_workspace.py` owns one service and its five pages and injects that session's browser
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
-* `cli.py` is a second front end (Qt-free): it owns its own event loop through `asyncio.run`, calls
-  `OpcUaService` and the exporters, and never touches asyncua directly. It must not re-implement traversal,
-  dependency collection, writing or validation — the GUI and the CLI share those objects on purpose.
+* `cli.py` and `cli_compare.py` are the Qt-free front ends: each owns its own event loop through
+  `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They must not
+  re-implement traversal, dependency collection, writing, validation, certificate approval or the comparison —
+  the GUI and the CLIs share those objects on purpose.
 
 ## 3. Threading model
 
@@ -292,6 +293,17 @@ CLI only prints `NodeSet2Result.summary_text()` and optionally writes `to_dict()
 same explicit decision as in the GUI, expressed as an existing trust-store entry, `--trust-server-certificate`
 or a `--server-certificate` file whose SHA-256 must equal the advertised certificate.
 
+`opcua-compare` (`cli_compare.py`) follows the same rule for a different question: it reuses the connection,
+traversal and certificate-approval helpers of `cli.py`, downloads both snapshots through
+`OpcUaService.download()` — one session per server, same identity — and only calls `compare_address_spaces()`
+and prints `ComparisonResult.summary_text()`. `compare.py` itself is a pure function over two `AddressSpace`
+objects: node identity is namespace URI + identifier, a renumbered NodeId is matched by its unambiguous
+qualified browse path, values are compared only for nodes named in the config, and results land in the four
+buckets `missing` / `extra` / `changed` / `not comparable`. Partial snapshots (cancelled, limits hit,
+inaccessible nodes, a different identity) produce warnings instead of a false "equal". Either side can also come
+from a JSON export (`exporters/json_loader.py`), which restores the download's `limits_hit` flags so a truncated
+document is reported as partial rather than as "nodes missing on the other side".
+
 ## 9. Phase plan
 
 | Phase | Scope | State |
@@ -377,8 +389,9 @@ rather than encoded on a guess.
 * Writes and method calls are single-target and opt-in; there is no batch write, no restore-all and no
   stress/scan mode.
 * Sessions share one window and one asyncio loop. Each session has its own client, namespace table, address
-  space, live subscription and reconnect supervisor; there is no cross-session compare or merge, and a server
-  may refuse a second session (`BadTooManySessions`).
+  space, live subscription and reconnect supervisor; the shared **Compare** tab compares two of them without
+  owning a client or a subscription (it downloads through the selected sessions' services), and a server may
+  refuse a second session (`BadTooManySessions`).
 * Custom structures are exported as far as asyncua decoded them; binary ExtensionObject bodies are flagged.
 * Namespace filter keeps namespace 0 to preserve the standard type system and folder structure.
 * Download completeness depends on the session's rights; access-denied nodes are reported, not hidden.

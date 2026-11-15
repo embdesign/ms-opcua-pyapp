@@ -19,19 +19,21 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 260 passed (≈3.5–14 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 182 passed, ~1 s
+uv run pytest -q                           # full suite, 325 passed (≈3.5–14 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 234 passed, ~2 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
+uv run opcua-compare --help                # headless comparison of two servers (Qt-free, read-only)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py
 uv run python scripts/generate_example_report.py
 uv run python scripts/generate_example_nodeset.py
+uv run python scripts/generate_example_comparison.py   # examples/sample-comparison*
 ```
 
 - **Standalone bundles** are built by PyInstaller from `packaging/*.spec`
-  (one folder, `opcua-explorer` + Qt-free `opcua-export`). CI does it in
+  (one folder, `opcua-explorer` + the Qt-free `opcua-export` and `opcua-compare`). CI does it in
   `.github/workflows/package.yml` (`ubuntu-22.04` + `windows-latest`) and
   `release.yml` attaches the zips to a `v*` tag. The demo server is deliberately
   not bundled. `packaging/README.md` records the constraints.
@@ -50,7 +52,7 @@ uv run python scripts/generate_example_nodeset.py
   `gui/` → `opcua/` → `models.py` / `config.py` / `defaults.py` / `project.py` / `formatting.py` /
   `operator_text.py`.
 - `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `exporters/`,
-  `reporting.py` import neither asyncua nor Qt. `exporters/` uses `formatting.py`, never `opcua/`.
+  `reporting.py`, `compare.py` import neither asyncua nor Qt. `exporters/` uses `formatting.py`, never `opcua/`.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
 - Only `opcua/client_service.py` constructs an `asyncua.Client`; one instance per session.
 - Only `gui/async_runner.py` bridges asyncio and Qt. Widgets never `await`; all OPC UA work runs on the single
@@ -58,6 +60,10 @@ uv run python scripts/generate_example_nodeset.py
 - `gui/main_window.py` is a shell (session tabs, menus, status bar, shared tabs). A session's state and Qt
   wiring live in `gui/session_workspace.py`. New cross-tab dependencies are injected by the workspace
   (see `selection_provider`), never looked up through `MainWindow` compatibility properties.
+- The shared **Compare** tab (`gui/tabs/compare_tab.py`) owns no client and no subscription: it downloads
+  through the two selected sessions' `OpcUaService` and calls `compare_address_spaces()`. Keep it read-only and
+  do not add a second comparison implementation — GUI and `opcua-compare` share the config, the comparison and
+  the report writers.
 - Shared value/name conversions live in `opcua/ua_names.py`; do not add another local copy of
   `node_class_name` / `status_name` / `variant_type_name`.
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
@@ -101,11 +107,15 @@ uv run python scripts/generate_example_nodeset.py
 - Do not log passwords, private-key passwords, certificate bytes or trust decisions.
 - `opcua/nodeset2.py` (dependency collection + export) and `opcua/nodeset2_validation.py` are still sizeable;
   target their helpers directly instead of growing the modules further.
-- `cli.py` (`opcua-export`) is a second front end, not a second implementation: it must keep calling
-  `OpcUaService.download()` / `export_nodeset2()` and print `NodeSet2Result.summary_text()`. Do not copy
-  traversal, dependency closure, writing, validation or certificate-approval rules into it. Passwords are only
-  accepted through `--password-env` or an interactive prompt, never as an argument, and a secure connection
-  still requires an explicit certificate decision (trust store, `--trust-server-certificate` or
-  `--server-certificate` with a matching fingerprint).
+- `compare.py` is a pure function over two `AddressSpace` snapshots: namespace **URI** + identifier identity,
+  browse-path fallback only when unambiguous, values only for nodes named in the config, and a separate
+  `not_comparable` bucket. Do not make it read, connect, or import asyncua/Qt; the front end does that.
+- `cli.py` (`opcua-export`) and `cli_compare.py` (`opcua-compare`) are Qt-free front ends, not second
+  implementations: they must keep calling `OpcUaService.download()` / `export_nodeset2()` /
+  `compare_address_spaces()` and print the existing summary texts. `cli_compare.py` imports the connection,
+  traversal and certificate-approval helpers from `cli.py`; do not copy them. Passwords are only accepted
+  through `--password-env` or an interactive prompt, never as an argument, and a secure connection still
+  requires an explicit certificate decision (trust store, `--trust-server-certificate` or a per-side
+  `--reference-server-certificate` / `--candidate-server-certificate` with a matching fingerprint).
 - The GUI test modules share mutable process state (one QApplication, demo-server subprocesses). Keep the
   `qapp` teardown and always stop a demo server in `finally` (use `gui_support.stop_demo_server`).

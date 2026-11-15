@@ -26,9 +26,15 @@ Completion criteria:
 
 **Complete.** No open implementation work, nothing blocked, no authorization pending.
 
-260 tests pass (182 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+325 tests pass (234 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows, a manual desktop session, example regeneration) and are listed under *Known
 issues and review findings* and *Next actions*.
+
+`compare.py` (Qt/asyncua-free) compares two downloaded address-space snapshots; `cli_compare.py`
+(`opcua-compare`) exposes it headlessly and the shared **Compare** tab exposes it in the window. The tab owns
+no client and no subscription: it downloads through the two selected sessions' services. Either side may be a
+saved JSON export (`exporters/json_loader.py`), so a device that is gone can still be the baseline. Three
+bundles are built now (GUI, export, compare).
 
 ## Implemented changes
 
@@ -97,8 +103,8 @@ Latest run: 2026-11-14, Python 3.11, Linux.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **182 passed** |
-| Full suite | `uv run pytest -q` | **260 passed** (≈3.5 min idle host, up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **234 passed** |
+| Full suite | `uv run pytest -q` | **325 passed** (≈3.5 min idle host, up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`) and the demo-server banner |
@@ -112,7 +118,7 @@ matches the current formats; regenerate it whenever a format changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 260 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 325 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **78 broad `except Exception` handlers** in `src/` (`guarded_operations.py` 11, `client_service.py` 10,
   `test_runner.py` 7, `nodeset2.py` 7, `attributes.py` 6, `cli.py` 1, …). Most are deliberate boundaries (best-effort
