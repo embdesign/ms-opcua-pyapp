@@ -3,9 +3,9 @@
   "format_version": 1,
   "generator": {
     "name": "opcua-explorer",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
-  "generated_at_utc": "2026-11-11T19:37:13.088Z",
+  "generated_at_utc": "2026-11-16T12:26:17.557Z",
   "source": {
     "endpoint_url": "opc.tcp://127.0.0.1:4840",
     "connection": {
@@ -20,7 +20,7 @@
       "server_application_uri": "urn:opcua-explorer:demo:server",
       "product_uri": "urn:opcua-explorer:demo:server",
       "manufacturer_name": "opcua-explorer",
-      "software_version": "0.1.0",
+      "software_version": "0.1.1",
       "build_number": "1",
       "server_certificate_sha256": null,
       "namespaces": [
@@ -41,7 +41,7 @@
           "uri": "urn:opcua-explorer:demo:extra"
         }
       ],
-      "connected_at_utc": "2026-11-11T19:37:12.956Z"
+      "connected_at_utc": "2026-11-16T12:26:17.361Z"
     },
     "download_roots": [
       "i=85"
@@ -97,9 +97,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.131,
-    "started_at_utc": "2026-11-11T19:37:12.956Z",
-    "finished_at_utc": "2026-11-11T19:37:13.087Z"
+    "duration_seconds": 0.195,
+    "started_at_utc": "2026-11-16T12:26:17.361Z",
+    "finished_at_utc": "2026-11-16T12:26:17.556Z"
   },
   "nodes": {
     "i=11192": {
@@ -7235,13 +7235,15 @@
       "data_type_name": "ByteString",
       "value_rank": -1,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",
@@ -7353,13 +7355,15 @@
       "data_type_name": "Double",
       "value_rank": -1,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",
@@ -7379,13 +7383,15 @@
       "data_type_name": "String",
       "value_rank": -1,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",
@@ -7405,13 +7411,15 @@
       "data_type_name": "Double",
       "value_rank": 0,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",
@@ -7453,13 +7461,15 @@
       "data_type_name": "Double",
       "value_rank": -1,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",
@@ -7507,13 +7517,15 @@
       "data_type_name": "DateTime",
       "value_rank": -1,
       "array_dimensions": [],
-      "access_level": 1,
+      "access_level": 3,
       "access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
-      "user_access_level": 1,
+      "user_access_level": 3,
       "user_access_level_names": [
-        "CurrentRead"
+        "CurrentRead",
+        "CurrentWrite"
       ],
       "type_definition": "i=63",
       "type_definition_name": "BaseDataVariableType",

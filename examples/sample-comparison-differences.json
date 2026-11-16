@@ -49,9 +49,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.496,
-    "started_at_utc": "2026-11-14T18:35:38.924Z",
-    "finished_at_utc": "2026-11-14T18:35:39.420Z"
+    "duration_seconds": 0.464,
+    "started_at_utc": "2026-11-16T12:27:27.049Z",
+    "finished_at_utc": "2026-11-16T12:27:27.513Z"
   },
   "candidate": {
     "nodes": 696,
@@ -69,9 +69,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.415,
-    "started_at_utc": "2026-11-14T18:35:39.428Z",
-    "finished_at_utc": "2026-11-14T18:35:39.843Z"
+    "duration_seconds": 0.389,
+    "started_at_utc": "2026-11-16T12:27:27.519Z",
+    "finished_at_utc": "2026-11-16T12:27:27.908Z"
   },
   "differences": [
     {
@@ -142,6 +142,6 @@
       "reference_type": "HasProperty"
     }
   ],
-  "generated_at_utc": "2026-11-14T18:35:40.365Z",
+  "generated_at_utc": "2026-11-16T12:27:28.268Z",
   "disclaimer": "A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically."
 }

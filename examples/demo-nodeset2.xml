@@ -83,7 +83,7 @@
       </uax:ListOfExtensionObject>
     </Value>
   </UAVariable>
-  <UAVariable NodeId="ns=1;s=Blob" BrowseName="1:Blob" ParentNodeId="ns=1;s=Line1" DataType="ByteString">
+  <UAVariable NodeId="ns=1;s=Blob" BrowseName="1:Blob" ParentNodeId="ns=1;s=Line1" DataType="ByteString" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Blob</DisplayName>
     <Description>Blob</Description>
     <References>
@@ -140,7 +140,7 @@
       <Reference ReferenceType="Organizes" IsForward="false">ns=1;s=Motor</Reference>
     </References>
   </UAObject>
-  <UAVariable NodeId="ns=1;s=Pressure" BrowseName="1:Pressure" ParentNodeId="ns=1;s=Line1" DataType="Double">
+  <UAVariable NodeId="ns=1;s=Pressure" BrowseName="1:Pressure" ParentNodeId="ns=1;s=Line1" DataType="Double" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Pressure</DisplayName>
     <Description>Pressure</Description>
     <References>
@@ -148,7 +148,7 @@
       <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
     </References>
   </UAVariable>
-  <UAVariable NodeId="ns=1;s=Recipe" BrowseName="1:Recipe" ParentNodeId="ns=1;s=Line1" DataType="String">
+  <UAVariable NodeId="ns=1;s=Recipe" BrowseName="1:Recipe" ParentNodeId="ns=1;s=Line1" DataType="String" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Recipe</DisplayName>
     <Description>Recipe</Description>
     <References>
@@ -156,7 +156,7 @@
       <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
     </References>
   </UAVariable>
-  <UAVariable NodeId="ns=1;s=Running" BrowseName="1:Running" ParentNodeId="ns=1;s=Motor" DataType="Boolean">
+  <UAVariable NodeId="ns=1;s=Running" BrowseName="1:Running" ParentNodeId="ns=1;s=Motor" DataType="Boolean" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Running</DisplayName>
     <Description>Running</Description>
     <References>
@@ -164,7 +164,7 @@
       <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
     </References>
   </UAVariable>
-  <UAVariable NodeId="ns=1;s=Samples" BrowseName="1:Samples" ParentNodeId="ns=1;s=Line1" ValueRank="0" DataType="Double">
+  <UAVariable NodeId="ns=1;s=Samples" BrowseName="1:Samples" ParentNodeId="ns=1;s=Line1" ValueRank="0" DataType="Double" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Samples</DisplayName>
     <Description>Samples</Description>
     <References>
@@ -191,7 +191,7 @@
       <Reference ReferenceType="Organizes" IsForward="false">ns=1;s=Line1</Reference>
     </References>
   </UAObject>
-  <UAVariable NodeId="ns=1;s=SharedThreshold" BrowseName="1:SharedThreshold" ParentNodeId="ns=1;s=SharedConfig" DataType="Double">
+  <UAVariable NodeId="ns=1;s=SharedThreshold" BrowseName="1:SharedThreshold" ParentNodeId="ns=1;s=SharedConfig" DataType="Double" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>SharedThreshold</DisplayName>
     <Description>SharedThreshold</Description>
     <References>
@@ -224,7 +224,7 @@
       <Reference ReferenceType="HasTypeDefinition">i=63</Reference>
     </References>
   </UAVariable>
-  <UAVariable NodeId="ns=1;s=Timestamp" BrowseName="1:Timestamp" ParentNodeId="ns=1;s=Line1" DataType="DateTime">
+  <UAVariable NodeId="ns=1;s=Timestamp" BrowseName="1:Timestamp" ParentNodeId="ns=1;s=Line1" DataType="DateTime" AccessLevel="3" UserAccessLevel="3">
     <DisplayName>Timestamp</DisplayName>
     <Description>Timestamp</Description>
     <References>

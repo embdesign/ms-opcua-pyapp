@@ -1,6 +1,6 @@
 # Task Handoff — OPC UA Explorer (`ms-opcua-pyapp`)
 
-Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.0, package
+Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.1, package
 `opcua_explorer`. This file records the current state, the rules a future change must respect, and what is still
 unverified. It is not a change log. Do not commit without the operator's authorization; make out-of-tree
 backups before bulk edits.

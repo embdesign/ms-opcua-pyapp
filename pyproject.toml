@@ -1,6 +1,6 @@
 [project]
 name = "opcua-explorer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop OPC UA address-space browser, exporter and functional interoperability test client"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
