@@ -1,0 +1,39 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "PSU - method calls",
+  "description": "Turns the outputs off, waits for them to settle, then turns them back on.",
+  "inputs": {
+    "lock_ni": "ns=3;i=100353",
+    "lock_context": "opcua-explorer",
+    "device_state_ni": "ns=3;i=100778",
+    "device_operation_mode_ni": "ns=3;i=100769",
+    "current_limit_setpoint_ni": "ns=3;i=100085",
+    "current_limit_setpoint_value": 4.1
+  },
+  "preconditions": [
+    { "kind": "assert", "id": "device-state", "node_id": "${device_state_ni}", "expected": 4 },
+    { "kind": "assert", "id": "remote-mode", "node_id": "${device_operation_mode_ni}", "value": 1, "optional": true }
+  ],
+  "gate": {
+    "on":  [ { "kind": "call", "id": "acquire", "node_id": "${lock_ni}", "method_name": "2:InitLock", "arguments": ["${lock_context}"] } ],
+    "off": [ { "kind": "call", "id": "release", "node_id": "${lock_ni}", "method_name": "2:ExitLock" } ],
+    "keepalive":{ "kind": "call", "id": "renew", "node_id": "${lock_ni}", "method_name": "2:RenewLock" },
+    "every_s": 5,
+    "on_failure": "abort",
+    "verify":   { "kind": "wait_until", "id": "held", "node_id": "ns=3;i=100361", "expected": "true", "timeout_seconds": 5.0, "poll_seconds": 0.2 }
+  },
+  "steps": [
+    { "kind": "call",  "id": "node-methodid",   "node_id": "ns=3;i=100368", "method_node_id": "ns=3;i=100399" },
+    { "kind": "delay", "id": "settle-1", "seconds": 2 },
+    { "kind": "call",  "id": "node-methodname", "node_id": "ns=3;i=100368", "method_name": "3:TurnOnOutputs" },
+    { "kind": "delay", "id": "settle-2", "seconds": 4 },
+    { "kind": "call",  "id": "path-methodname", "path": ["2:DeviceSet", "3:PSU8600", "2:MethodSet"], "method_name": "3:TurnOffOutputs" },
+    { "kind": "delay", "id": "settle-3", "seconds": 2 },
+    { "kind": "call",  "id": "path-methodid",   "path": ["2:DeviceSet", "3:PSU8600", "2:MethodSet"], "method_node_id": "ns=3;i=100400" },
+    { "kind": "delay", "id": "settle-4", "seconds": 4 },
+    { "kind": "write", "id": "setpoint-write", "node_id": "${current_limit_setpoint_ni}", "value": "${current_limit_setpoint_value}", "verify": false },
+    { "kind": "expect", "id": "setpoint-read-back", "node_id": "${current_limit_setpoint_ni}", "expected": "${current_limit_setpoint_value}", "tolerance": 0.05 }
+  ]
+}
+

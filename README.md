@@ -3,17 +3,18 @@
 Desktop application for **browsing an OPC UA server, downloading its address space, and exporting it** — with
 deliberate, explicit security handling.
 
-Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.12 · managed with `uv` · native
+Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.11.3 · managed with `uv` · native
 Windows and Linux, no Docker.
 
-> **Status — complete and maintained (2026-11-14)**
+> **Status — complete and maintained (2026-11-16)**
 > Implemented and tested: connection & security with automatic reconnect, multi-session window, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, functional tests (read-only by default)
 > with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
-> connection profiles and versioned project files, and a headless comparison of two address spaces
-> (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports). The automated suite
-> has 325 tests. See
+> connection profiles and versioned project files, a headless comparison of two address spaces
+> (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
+> control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
+> suite has 416 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -24,7 +25,7 @@ Windows and Linux, no Docker.
 ## 1. What you can do with it
 
 Each session lives in its own tab (**File → New connection**, `Ctrl+N`) with its own OPC UA client, so you can
-work with several devices — or the same server twice — at the same time. A session tab contains the first five
+work with several devices — or the same server twice — at the same time. A session tab contains the first six
 pages below. Three tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
 and notification log, with a session filter), **Compare** (a read-only structural comparison of two sessions) and
 **Logs & reports** (operator summaries prefixed with the session name). Closing a session tab releases only that
@@ -37,6 +38,7 @@ session's client.
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals and bounded row retention |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
+| **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
 | **Compare** | Read-only structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report |
 
@@ -85,7 +87,7 @@ pip install -e .
 opcua-explorer
 ```
 
-Pinned runtime dependencies (`pyproject.toml`): `asyncua==2.1.0`, `PySide6==6.12.0`; `uv.lock` pins the full
+Pinned runtime dependencies (`pyproject.toml`): `asyncua==2.1.0`, `PySide6==6.11.3`; `uv.lock` pins the full
 resolved set. The asyncua API used by this project was verified against the installed package — see
 [docs/api-verification.md](docs/api-verification.md).
 
@@ -100,6 +102,8 @@ on the target machine**:
 | `opcua-explorer-windows-x64.zip`, `opcua-explorer-linux-x64.zip` | desktop application (`opcua-explorer[.exe]`) |
 | `opcua-export-windows-x64.zip`, `opcua-export-linux-x64.zip` | headless NodeSet2 exporter (`opcua-export[.exe]`), no Qt |
 | `opcua-compare-windows-x64.zip`, `opcua-compare-linux-x64.zip` | headless address-space comparison (`opcua-compare[.exe]`), no Qt |
+
+`opcua-run-sequence` is currently run from a `uv` checkout; it is not part of a bundle yet.
 
 A bundled install and a `uv`-run checkout on the same machine share their settings, trust store and
 project files, because both use the same per-user locations. The Windows binaries are unsigned, so
@@ -247,8 +251,10 @@ src/opcua_explorer/
 ├── logging_setup.py      log bus + mandatory secret redaction
 ├── reporting.py          JSON and self-contained HTML test reports
 ├── compare.py            structural comparison of two address-space snapshots (Qt/asyncua-free)
+├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli.py                opcua-export: headless NodeSet2 export (Qt-free, same services as the GUI)
 ├── cli_compare.py        opcua-compare: headless comparison of two servers (Qt-free, read-only)
+├── cli_sequence.py       opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── opcua/
 │   ├── ua_names.py       shared NodeClass / StatusCode / VariantType names
 │   ├── check_support.py  shared check primitives (skipped signal, previews, environment)
@@ -261,15 +267,21 @@ src/opcua_explorer/
 │   ├── nodeset2_validation.py  well-formedness, structural checks, optional XSD validation
 │   ├── test_runner.py    read-only functional checks and run orchestration
 │   ├── guarded_operations.py  opt-in single-target write / method-call checks
+│   ├── write_service.py  the one write/method-call implementation (prepare → send → read back)
+│   ├── value_parsing.py  operator text → typed value (built-in scalars and arrays)
+│   ├── type_support.py   server-driven typing: built-ins, enumerations, structures
+│   ├── method_support.py shared DataType/ValueRank, InputArguments and Executable reads
+│   ├── path_support.py   TranslateBrowsePathsToNodeIds (complete, unambiguous matches only)
+│   ├── sequence_runner.py  universal sequence engine (gates, keepalive, dry run)
 │   ├── monitor_service.py  live data-change subscription: monitored items, JSON-safe notifications
 │   └── client_service.py the only owner of an asyncua Client
-├── exporters/            json_exporter.py, csv_exporter.py
+├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
-│   ├── session_workspace.py  one session: its service and five pages
+│   ├── session_workspace.py  one session: its service and six pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
-│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, logs, unified monitor, compare
+│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
 examples/                 generated sample exports and sample reports
@@ -492,6 +504,58 @@ uv run python scripts/generate_example_comparison.py
 The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
 servers behave identically under load, and it sends no write or method call.
 
+### Operator sequences: the Sequences tab
+
+A device that expects an *ordered* workflow (acquire a lock, change a setpoint, read it back, release the lock)
+is expressed as a **sequence document** instead of application code. The tab loads such a file, lets you edit its
+`${name}` inputs, and runs it:
+
+```bash
+uv run opcua-explorer            # Sequences tab: Open sequence…, Dry run, Run, Stop
+```
+
+The document has three parts: `preconditions` (run before the gate; `assert` is read-only, an `ensure` may
+write a prerequisite), an optional `gate`, and the `steps`. Nothing in the
+application names a device or a lock protocol — `gate.on`, `gate.keepalive` and `gate.off` are whatever steps
+the document lists. The guarantees are mechanical:
+
+* `gate.off` runs in `finally` — after success, after a failing step, after **Stop** and after a failed
+  keepalive. A refused release is shown, never hidden.
+* `gate.verify` must pass before the body starts, and a keepalive failure aborts the body (`on_failure: abort`).
+* Every step is sent **once**. A cancellation while a write is in flight is reported as `outcome_unknown`.
+* **Dry run** resolves NodeIds (including browse paths through `TranslateBrowsePathsToNodeIds`), DataTypes,
+  ValueRanks, `InputArguments` and `Executable`, and sends nothing.
+* There is **no armed state and no per-write dialog**: a write happens because a step asks for it, is read back,
+  and appears in the run timeline. One sequence runs at a time per session.
+
+`input` values may be given in the document; the tab and the command override them per run. The example
+[examples/demo-setpoint.opcua-sequence.json](examples/demo-setpoint.opcua-sequence.json) works against the
+demo server, [examples/demo-method-call.opcua-sequence.json](examples/demo-method-call.opcua-sequence.json) shows
+method calls by browse name and by method NodeId, and
+[examples/device-gate.opcua-sequence.json](examples/device-gate.opcua-sequence.json) is a template
+that shows a gate with acquire / verify / keepalive / release plus an optional remote-mode step — adapt the
+NodeIds and browse names to your device.
+
+**[examples/README.md](examples/README.md) indexes a set of runnable demos** — write/read-back, the four ways to
+call a method, `wait_until` with optional preconditions, a gate built from plain writes, failure handling and the
+supported value types — each with its purpose and expected exit code. Start the demo server with
+`uv run opcua-demo-server --no-updates` for those runs: static values keep `expect`, `assert` and `wait_until`
+deterministic.
+
+### Headless run: the `opcua-run-sequence` command
+
+```bash
+uv run opcua-run-sequence examples/demo-setpoint.opcua-sequence.json \
+    --endpoint opc.tcp://127.0.0.1:4840 --input temperature=42.5 --dry-run
+uv run opcua-run-sequence my-device.opcua-sequence.json --endpoint opc.tcp://192.168.1.100:4840 \
+    --user operator --password-env PSU_PASSWORD --json run.json
+```
+
+It prints each step with its status, StatusCode and read-back result, then the gate outcome. Exit codes: `0`
+passed, `1` a step or the gate release failed, `2` usage or an invalid document (nothing is sent). Certificate
+approval, identity and timeouts are the same options as `opcua-export`. `--json` writes the whole run (steps,
+previous/new values, `outcome_unknown`, gate state).
+
 ## 8. Functional tests and reports
 
 The **Tests** tab runs eleven bounded checks against the current session; the default suite is read-only:
@@ -544,9 +608,10 @@ action:
   method + argument list, whether the previous value will be restored, and a warning that a change on a server
   connected to real equipment can move machinery. Declining runs nothing.
 * **Server-side validation first.** The value is parsed with the node's DataType and ValueRank; method arguments
-  are parsed with the server's `InputArguments` and the count must match. Anything that cannot be typed safely
-  (custom structures, enumerations, matrices, text that is not a number) is refused locally — the operation is
-  *skipped* with the reason and nothing is sent.
+  are parsed with the server's `InputArguments` and the count must match. Built-in DataTypes, enumerations (by
+  name or number) and structures whose `DataTypeDefinition` is readable are supported; matrices, unions and
+  types without a definition are refused locally — the operation is *skipped* with the reason and nothing is
+  sent.
 * **Verified effect.** A write is read back and compared; a mismatch is a failure. A method call reports the
   StatusCode and output arguments.
 * **No silent restore.** A previous value is restored only if you tick *"Restore the previous value"*, and the
@@ -566,7 +631,8 @@ uv run pytest tests/unit -q   # fast, no network
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
   trust store + settings (no secrets on disk), log redaction, JSON/CSV document shape, NodeId parsing,
   reference classification, report documents and HTML escaping, NodeSet2 structural/schema validation,
-  guarded-write value parsing (ranges, arrays, ISO dates, refused custom types) and the export CLI's argument
+  guarded-write value parsing (built-in scalars, arrays, ISO dates; enumerations and structures are typed from
+  the server; matrices, unions and optional-field structures are refused) and the export CLI's argument
   mapping and certificate-approval decisions (no network).
 * **Integration**: against the in-process demo server — discovery, anonymous and username authentication,
   browsing, attribute/reference details, bounded and depth-limited traversal on a cyclic graph, shared
@@ -575,14 +641,17 @@ uv run pytest tests/unit -q   # fast, no network
   restore only on request) and method calls (validated arguments, wrong argument count), secure connection with
   mutual certificates, certificate-change
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
-  and the opt-in recovery check) and report files. The headless `opcua-export` command is exercised end to end
+  and the opt-in recovery check) and report files. Sequence documents are exercised against the demo server
+  (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
+  downloads end to end. The headless `opcua-export` command is exercised end to end
   (Objects scope, start-node scope with parent closure, namespace scope, manifest, unsupported custom DataType,
   nothing-to-write, unreachable endpoint, username authentication, missing schema file).
 * **GUI** (headless, `-platform offscreen`): asyncio bridge result/cancellation, window wiring, and end-to-end
   runs driven through the real tabs (connect → browse → download → JSON export; connect → download → NodeSet2
   export; connect → run tests; connect → live monitor and merged monitor view; connect → guarded write with
   confirmation accepted/declined; connection loss and automatic reconnect; two independent sessions; project
-  save/load; live-monitor markers in the address-space tree).
+  save/load; live-monitor markers in the address-space tree; Compare tab runs against two sessions and a saved
+  JSON export; Sequences tab load, dry run and run).
 
 ## 10. Limitations
 
@@ -593,8 +662,9 @@ The implemented scope is complete; the following are **not** claimed:
   importable: custom DataTypes without a `DataTypeDefinition` are excluded and reported.
 * **Writes and method calls are single-target and opt-in.** One node, one value, one call, one confirmation.
   There is no batch write, no "write to all writable nodes", no discovery-driven method invocation, no
-  automatic value restore and no write stress mode. Only namespace-0 built-in DataTypes can be written;
-  custom structures and enumerations are refused rather than encoded on a guess.
+  automatic value restore and no write stress mode. Writes are typed from the server: built-in DataTypes,
+  enumerations (by name or number) and structures with a readable `DataTypeDefinition` (sent as
+  `ExtensionObject`); matrices, unions and types without a definition are refused rather than encoded on a guess.
 * **No stress testing.** Latency is a bounded sample of ordinary reads, not a benchmark; there is no load or
   soak testing and no automatic network scanning.
 * **Connection recovery is opt-in** in the functional-check suite and disruptive there: the *check* closes the
@@ -615,7 +685,11 @@ The implemented scope is complete; the following are **not** claimed:
   sessions. A device that limits concurrent sessions can refuse the second one — the StatusCode is shown,
   nothing is retried silently.
 * **A project is a configuration snapshot, not a session restore.** Opening one restores editors and pending
-  monitor targets; it does not reconnect, re-subscribe, re-download or restore logs and reports.
+  monitor targets; it does not reconnect, re-subscribe, re-download or restore logs and reports. A project also
+  records the Sequences tab's document *path* and inputs — it never loads or runs the sequence by itself.
+* **Sequences are declarative, not scripts.** There is no embedded programming language and no arbitrary code
+  execution. A keepalive failure aborts between steps, not inside a running `delay`. One sequence runs at a time
+  per session, and matrices, unions and optional-field structures are refused rather than encoded on a guess.
 * **A comparison is structural evidence, not an equivalence guarantee.** The **Compare** tab and
   `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
   Neither compares behaviour under load, internal limits, or anything that requires a write.

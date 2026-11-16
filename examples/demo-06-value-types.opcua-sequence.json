@@ -1,0 +1,25 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 06 - value types",
+  "description": "Writes a String, a DateTime (ISO 8601), a ByteString (base64) and a Double array; every value is read back by the server and compared. Shows how the text inputs map onto the server's DataTypes.",
+  "inputs": {
+    "recipe": "Night shift",
+    "timestamp": "2026-11-15T12:00:00Z",
+    "blob": "AAEC/w==",
+    "samples": "[1.5, 2.5, 3.5]"
+  },
+  "steps": [
+    { "kind": "write", "id": "recipe-write", "node_id": "ns=2;s=Recipe", "value": "${recipe}", "verify": true },
+    { "kind": "expect", "id": "recipe-check", "node_id": "ns=2;s=Recipe", "expected": "${recipe}" },
+
+    { "kind": "write", "id": "timestamp-write", "node_id": "ns=2;s=Timestamp", "value": "${timestamp}", "verify": true },
+    { "kind": "expect", "id": "timestamp-check", "node_id": "ns=2;s=Timestamp", "expected": "${timestamp}" },
+
+    { "kind": "write", "id": "blob-write", "node_id": "ns=2;s=Blob", "value": "${blob}", "verify": true },
+    { "kind": "expect", "id": "blob-check", "node_id": "ns=2;s=Blob", "expected": "${blob}" },
+
+    { "kind": "write", "id": "samples-write", "node_id": "ns=2;s=Samples", "value": "${samples}", "verify": true },
+    { "kind": "expect", "id": "samples-check", "node_id": "ns=2;s=Samples", "expected": "${samples}", "tolerance": 0.01 }
+  ]
+}

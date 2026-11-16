@@ -163,6 +163,20 @@ Deleting an entry forces a new fingerprint review on the next connection.
   set `QT_ENABLE_HIGHDPI_SCALING=1` before starting.
 * **The window freezes** — it should not: all I/O runs in the asyncio worker thread. If it does, check the log
   for a Python exception in a callback; the UI stays usable and the operation reports an error.
+* **Crash: `Fatal Python error: none_dealloc: deallocating None …` while browsing** — this is a **PySide6
+  6.12.0** regression in `QTreeWidgetItem` (Shiboken refcount bug), not an application fault. It aborts the
+  process after a few hundred tree rows, with the traceback pointing at a Qt setter such as `setForeground`.
+  Check the version and re-sync:
+
+  ```bash
+  uv run python -c "import PySide6; print(PySide6.__version__)"   # must print 6.11.3
+  uv sync                                                          # restores the pinned version
+  ```
+
+  `pyproject.toml` pins `PySide6==6.11.3` for this reason; `tests/integration/test_pyside_stability.py` runs the
+  reproducer in a subprocess, so an upgrade that reintroduces the crash fails the suite instead of a session.
+  Do not “fix” it by changing item painting in `browser_tab.py` — the same churn crashes a script that uses
+  nothing but Qt API.
 
 ## 8. NodeSet2 export
 
@@ -199,11 +213,14 @@ Deleting an entry forces a new fingerprint review on the next connection.
 
 * **The write check is *skipped* with "Writes and method calls are disabled"** — the consent checkbox is off.
   Configured targets are reported, never silently executed.
-* **"DataType … is not a built-in type; it cannot be written safely"** — the variable uses a server-defined
-  structure or enumeration. This build writes only namespace-0 built-in DataTypes; encoding a structure on a
-  guess could corrupt the value.
-* **"An array value is expected as a JSON array"** — a variable with ValueRank ≥ 1 needs `[1, 2, 3]`, not
-  `1,2,3`. Matrix (rank ≥ 2) values are refused because a flat list would lose the dimensions.
+* **"… is not a built-in DataType and exposes no EnumDefinition, EnumStrings/EnumValues or
+  StructureDefinition; it cannot be written safely"** — the variable's custom type has no readable definition.
+  Built-in DataTypes, enumerations and structures with a `DataTypeDefinition` are supported; unions,
+  optional-field structures, matrices and recursive definitions are refused locally, so nothing is sent.
+* **"An array value is expected as a JSON array"** — a variable with ValueRank `0` or `1` needs `[1, 2, 3]`,
+  not `1,2,3` (`0` means "one or more dimensions", and several servers report it for array variables). Ranks
+  `-2`/`-3` are decided from the entered text; matrices and other ranks that a flat JSON list cannot represent
+  are refused instead of being guessed.
 * **The write fails with `BadNotWritable` / `BadUserAccessDenied`** — the server refused it: the node's access
   level or the session's user rights do not allow writing. The StatusCode is recorded in the report.
 * **"The method expects N argument(s) … but M were configured"** — the arguments are validated against the

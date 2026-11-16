@@ -25,7 +25,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   report. Exit code `3` means "compared, differences found", so the command works
   as a CI gate. It reuses the connection, traversal and certificate-approval
   helpers of `opcua-export`; `--candidate-policy` / `--candidate-mode` cover
-  devices that advertise different endpoints. The GUI still has no compare page.
+  devices that advertise different endpoints.
 - **Comparison sample reports** (`examples/sample-comparison.*` and
   `examples/sample-comparison-differences.*`) with
   `scripts/generate_example_comparison.py`.
@@ -41,6 +41,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **`opcua-compare` bundle** — `packaging/opcua-compare.spec` and a launcher build the Qt-free comparison command
   as a third standalone archive (`opcua-compare-<platform>.zip`); both workflows smoke-test it, including an
   offline comparison of the committed sample.
+- **Operator sequences** (`opcua-explorer-sequence`, version 1) — an ordered device workflow (acquire, change,
+  read back, release) is a document, not application code: `preconditions` (usually read-only checks, with an
+  optional `ensure` that may set a prerequisite), an optional operator-defined
+  `gate` (`on` / `verify` / `keepalive` / `off`, always released in `finally`) and a body of `write`, `expect`,
+  `assert`, `ensure`, `call`, `delay` and `wait_until` steps, with `${name}` inputs. Values are typed from the
+  server (DataType, ValueRank, `InputArguments`), including enumerations, structures and arrays; targets may be
+  NodeIds or browse paths resolved through `TranslateBrowsePathsToNodeIds` (complete, unambiguous matches only).
+  One send per step, no retry, `outcome_unknown` for a cancelled in-flight operation, no armed state and no
+  per-write dialog. Surfaced by the **Sequences** tab (document, inputs, Dry run, Run, Stop, live timeline, gate
+  state and an operator-triggered release), by `opcua-run-sequence` (`--dry-run`, `--input`, `--json`, exit codes
+  0/1/2) and in the project file (version 2; version 1 files still load).
+- **Sequence demo suite** — `examples/README.md` indexes six runnable documents (`demo-01-write-readback`,
+  `demo-02-method-calls`, `demo-03-wait-and-optional`, `demo-04-gate-from-writes`, `demo-05-failure-handling`,
+  `demo-06-value-types`) with their purpose and expected exit code; the demo server gained `--no-updates` and
+  writable demo variables so those runs are deterministic.
+
+### Fixed
+
+- **`ValueRank 0` was treated as a scalar** — OPC UA defines `0` as "one or more dimensions", and asyncua-based
+  servers report it for array variables, so writes to arrays were refused ("is not a number"). Ranks `0` and `1`
+  are now a one-dimensional array, `-1` is a scalar, `-2`/`-3` are decided from the entered text and matrices are
+  still refused.
+- **Sequence comparisons bypassed the server-driven type resolution** — `expect`, `assert` and `wait_until`
+  parsed the expected text with the built-in parser only, so an enum or structure node failed with
+  "DataType … is not supported for guarded test writes". They now resolve the type exactly like a write does.
+- **Qt runtime pinned to `PySide6==6.11.3`** — 6.12.0 aborts the process with
+  `Fatal Python error: none_dealloc: deallocating None` after a few hundred `QTreeWidgetItem` rows (Shiboken
+  refcount regression). `tests/integration/test_pyside_stability.py` reproduces the churn in a subprocess; an
+  upgrade must keep that test green.
 
 ## [0.1.0] - 2026-11-14
 

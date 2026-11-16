@@ -19,6 +19,10 @@ locally, and `dist/` and `build/` are already ignored by `.gitignore`.
 `opcua-demo-server` is **not** bundled. It is a development aid that starts an
 in-process demo server; use `uv run opcua-demo-server` from a checkout.
 
+`opcua-run-sequence` is also **not** bundled yet: it runs from a `uv` checkout
+(`uv run opcua-run-sequence --help`). Adding a fourth spec is deliberately left
+until a build has been verified on both CI platforms.
+
 `opcua-compare` **is** bundled (console, Qt-free): it can compare two saved JSON
 exports on a machine with no display server and no Python.
 
@@ -47,11 +51,9 @@ dist/pyinstaller/opcua-export/     opcua-export[.exe]   + _internal/
 dist/pyinstaller/opcua-compare/    opcua-compare[.exe]  + _internal/
 ```
 
-Measured Linux one-folder sizes (2026-11-14, Python 3.11, PySide6 6.12.0,
-PyInstaller 6.22.3): **opcua-explorer 205 MB, opcua-export 53 MB,
-opcua-compare 53 MB**. Qt's own shared libraries dominate the GUI bundle; the
-Python-level `excludes` in the spec cannot remove them, but they do keep both
-command-line bundles Qt-free.
+Measured Linux one-folder sizes (2026-11-14, PyInstaller 6.22.3, before the PySide6 6.11.3 pin): **opcua-explorer
+205 MB, opcua-export 53 MB, opcua-compare 53 MB**. Qt's own shared libraries dominate the GUI bundle; the
+Python-level `excludes` in the spec cannot remove them, but they do keep both command-line bundles Qt-free.
 
 A wheel (`uv build`) is **not** equivalent: it still needs Python plus a
 dependency install on the target.

@@ -236,7 +236,7 @@ class TestsTab(QWidget):
         return scroll
 
     def _build_guarded_box(self) -> QWidget:
-        """Opt-in write / method-call configuration (phase 4)."""
+        """Opt-in write / method-call configuration."""
         box = QGroupBox("Guarded write & method call (optional)")
         layout = QVBoxLayout(box)
 

@@ -38,6 +38,18 @@ _INTEGER_BOUNDS: dict[int, tuple[int, int]] = {
 _TRUE = {"1", "true", "yes", "on", "enabled"}
 _FALSE = {"0", "false", "no", "off", "disabled"}
 
+# OPC UA ValueRank (Part 3): -3 ScalarOrOneDimension, -2 Any, -1 Scalar,
+# 0 OneOrMoreDimensions, 1 OneDimension, n>1 matrix dimensions.
+# Rank 0 is treated as one dimension because servers commonly report it for array
+# variables (asyncua's demo server does), while matrices stay refused below.
+ARRAY_RANKS: tuple[int, ...] = (0, 1)
+SCALAR_OR_ARRAY_RANKS: tuple[int, ...] = (-2, -3)
+
+
+def looks_like_array(text: str) -> bool:
+    """True when ``text`` is a JSON array; used for the ambiguous ValueRanks -2/-3."""
+    return _strip_quotes(text).lstrip().startswith("[")
+
 
 def _strip_quotes(text: str) -> str:
     value = text.strip()
@@ -161,9 +173,21 @@ def parse_scalar(text: str, data_type: ua.NodeId) -> Any:
 
 
 def parse_value_text(text: str, data_type: ua.NodeId, value_rank: int) -> Any:
-    """Parse ``text`` for ``value_rank``: 0/-1 scalar, 1..n a JSON array."""
-    if value_rank in (0, -1):
+    """Parse ``text`` for the server's ``value_rank``.
+
+    Rank -1 is a scalar, ranks 0 and 1 are a JSON array (rank 0 means "one or more
+    dimensions" and is what several servers report for array variables), and the
+    ambiguous ranks -2/-3 are decided from the text. Matrices are refused instead
+    of being flattened.
+    """
+    if value_rank in SCALAR_OR_ARRAY_RANKS:
+        value_rank = 1 if looks_like_array(text) else -1
+    if value_rank < 0:
         return parse_scalar(text, data_type)
+    if value_rank not in ARRAY_RANKS:
+        # Matrix ranks (n > 1) are legal in OPC UA but a flat JSON list would silently
+        # lose the dimensions, so this is refused rather than guessed.
+        raise ValueParseError(f"ValueRank {value_rank} (matrix) is not supported for guarded test writes")
 
     raw = _strip_quotes(text)
     try:
@@ -172,11 +196,7 @@ def parse_value_text(text: str, data_type: ua.NodeId, value_rank: int) -> Any:
         raise ValueParseError(f"An array value is expected as a JSON array, for example [1, 2, 3] ({exc})") from exc
     if not isinstance(items, list):
         raise ValueParseError("An array value is expected as a JSON array, for example [1, 2, 3]")
-    if value_rank == 1:
-        return [parse_scalar(item if isinstance(item, str) else json.dumps(item), data_type) for item in items]
-    # Matrix ranks (n > 1) are legal in OPC UA but a flat JSON list would silently
-    # lose the dimensions, so this is refused rather than guessed.
-    raise ValueParseError(f"ValueRank {value_rank} (matrix) is not supported for guarded test writes")
+    return [parse_scalar(item if isinstance(item, str) else json.dumps(item), data_type) for item in items]
 
 
 def describe_data_type(data_type: ua.NodeId) -> str:

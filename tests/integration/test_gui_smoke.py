@@ -63,7 +63,7 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
     service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
     window = MainWindow(runner, service, AppSettings())
     try:
-        # One session tab (with its own five tabs), the merged monitor tab, the compare tab, the logs tab.
+        # One session tab (with its own six tabs), the merged monitor tab, the compare tab, the logs tab.
         assert window.tabs.count() == 4
         assert window.tabs.tabText(0).startswith("Session 1")
         assert window.tabs.tabText(1) == "All monitors"
@@ -78,6 +78,7 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
             "Export",
             "Live monitor",
             "Tests",
+            "Sequences",
         ]
 
         tab = window.connection_tab

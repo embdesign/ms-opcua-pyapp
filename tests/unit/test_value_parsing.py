@@ -75,6 +75,18 @@ def test_matrices_are_refused_instead_of_flattened():
         parse_value_text("[[1, 2], [3, 4]]", _dt(ua.ObjectIds.Double), 2)
 
 
+def test_rank_zero_is_one_dimension():
+    """ValueRank 0 means "one or more dimensions"; servers report it for array variables."""
+    assert parse_value_text("[1, 2, 3]", _dt(ua.ObjectIds.Int32), 0) == [1, 2, 3]
+    assert parse_value_text("[]", _dt(ua.ObjectIds.Double), 0) == []
+
+
+def test_ambiguous_ranks_are_decided_by_the_text():
+    assert parse_value_text("5.5", _dt(ua.ObjectIds.Double), -3) == 5.5
+    assert parse_value_text("[5.5, 6.5]", _dt(ua.ObjectIds.Double), -3) == [5.5, 6.5]
+    assert parse_value_text("[1, 2]", _dt(ua.ObjectIds.Int32), -2) == [1, 2]
+
+
 def test_custom_data_type_is_refused():
     custom = ua.NodeId("MeasurementType", 2)
     with pytest.raises(ValueParseError, match="not a built-in type"):

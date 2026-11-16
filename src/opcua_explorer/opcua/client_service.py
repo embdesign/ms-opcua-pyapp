@@ -49,6 +49,8 @@ from ..models import (
     NamespaceEntry,
     NodeDetails,
     ReferenceInfo,
+    Sequence,
+    SequenceRun,
     TestConfig,
     TestProgress,
     TestRun,
@@ -68,6 +70,7 @@ from .browse import (
 )
 from .monitor_service import LiveMonitor
 from .nodeset2 import NodeSet2Config, NodeSet2Result, export_nodeset2
+from .path_support import PathRequest, PathResolution, resolve_paths
 from .security import (
     default_application_uri,
     endpoint_to_info,
@@ -77,6 +80,7 @@ from .security import (
     select_endpoint,
     summarize_certificate,
 )
+from .sequence_runner import SequenceRunner
 from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .ua_names import node_class_name
@@ -142,6 +146,7 @@ class OpcUaService:
         self._namespace_index: dict[int, str] = {}
         self._endpoint_url: str = ""
         self._monitor: LiveMonitor | None = None
+        self._sequence_runner: SequenceRunner | None = None
 
     # -- state -------------------------------------------------------------
     @property
@@ -459,6 +464,7 @@ class OpcUaService:
         self._connection = None
         self._namespaces = []
         self._namespace_index = {}
+        self._sequence_runner = None
         if client is None:
             return
         await self._safe_disconnect(client)
@@ -522,6 +528,15 @@ class OpcUaService:
     async def browse_children(self, node_id: Any, *, follow_subtypes: bool = True) -> list[ChildEntry]:
         session = self._require_session()
         return await browse_children_impl(session, _normalise_node_id(node_id), follow_subtypes=follow_subtypes)
+
+    async def resolve_browse_paths(self, requests: list[PathRequest]) -> list[PathResolution]:
+        """Resolve browse paths with TranslateBrowsePathsToNodeIds on the current session.
+
+        Each request yields one resolution; ``PathResolution.ok`` says whether exactly one target
+        was found. Nothing is discovered by guessing - ambiguous paths are reported, not picked.
+        """
+        session = self._require_session()
+        return await resolve_paths(session, requests)
 
     async def read_node_details(self, node_id: Any) -> NodeDetails:
         """Read all applicable attributes plus references of one node."""
@@ -735,7 +750,7 @@ class OpcUaService:
         )
         return snapshot
 
-    # -- NodeSet2 export (phase 3) ----------------------------------------
+    # -- NodeSet2 export ---------------------------------------------------
     async def export_nodeset2(
         self,
         path: str | Path,
@@ -754,7 +769,7 @@ class OpcUaService:
         session = self._require_session()
         return await export_nodeset2(client, snapshot, path, config, session=session, progress=progress)
 
-    # -- functional tests (phase 2) ---------------------------------------
+    # -- functional tests --------------------------------------------------
     async def run_functional_tests(
         self,
         config: TestConfig,
@@ -787,6 +802,47 @@ class OpcUaService:
             discover=discover_now,
             progress=progress,
         )
+
+    # -- operator-written sequences ---------------------------------------
+    def _sequence_runner_for_session(self) -> SequenceRunner:
+        """One runner per session, so a second sequence cannot interleave with the first."""
+        if self._sequence_runner is None:
+            self._sequence_runner = SequenceRunner(self._require_client())
+        return self._sequence_runner
+
+    async def run_sequence(
+        self,
+        sequence: Sequence,
+        *,
+        inputs: dict[str, str] | None = None,
+        dry_run: bool = False,
+        on_step: Any = None,
+    ) -> SequenceRun:
+        """Run one operator-written sequence on this session.
+
+        Nothing here is device-specific: the sequence document owns the steps. A dry run
+        resolves every target and type and sends nothing.
+        """
+        self._require_session()
+        runner = self._sequence_runner_for_session()
+        return await runner.run(sequence, inputs=inputs, dry_run=dry_run, on_step=on_step)
+
+    async def release_sequence_gate(
+        self,
+        sequence: Sequence,
+        *,
+        inputs: dict[str, str] | None = None,
+    ) -> SequenceRun:
+        """Execute only the sequence's gate release steps (operator-triggered)."""
+        self._require_session()
+        runner = self._sequence_runner_for_session()
+        return await runner.release_gate(sequence, inputs=inputs)
+
+    @property
+    def last_sequence_run(self) -> SequenceRun | None:
+        """The most recent run of this session, including a cancelled one."""
+        runner = self._sequence_runner
+        return runner.last_run if runner is not None else None
 
     # -- certificate approval ---------------------------------------------
     def certificate_is_trusted(self, certificate_der: bytes | None) -> bool:

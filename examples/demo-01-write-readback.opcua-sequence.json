@@ -1,0 +1,21 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 01 - write, read back and verify",
+  "description": "Writes a Double, a String and an array, each with read-back verification, then compares them with tolerances. Also shows a delay taken from an input. Run against the demo server started with --no-updates.",
+  "inputs": {
+    "temperature": "42.5",
+    "recipe": "Line-1 demo",
+    "samples": "[4.0, 5.5, 6.25]",
+    "settle_s": "0.2"
+  },
+  "steps": [
+    { "kind": "write", "id": "temperature-write", "node_id": "ns=2;s=Temperature", "value": "${temperature}", "verify": true },
+    { "kind": "expect", "id": "temperature-check", "node_id": "ns=2;s=Temperature", "expected": "${temperature}", "tolerance": 0.01 },
+    { "kind": "delay", "id": "settle", "value": "${settle_s}" },
+    { "kind": "write", "id": "recipe-write", "node_id": "ns=2;s=Recipe", "value": "${recipe}", "verify": true },
+    { "kind": "expect", "id": "recipe-check", "node_id": "ns=2;s=Recipe", "expected": "${recipe}" },
+    { "kind": "write", "id": "samples-write", "node_id": "ns=2;s=Samples", "value": "${samples}", "verify": true },
+    { "kind": "expect", "id": "samples-check", "node_id": "ns=2;s=Samples", "expected": "${samples}", "tolerance": 0.001 }
+  ]
+}

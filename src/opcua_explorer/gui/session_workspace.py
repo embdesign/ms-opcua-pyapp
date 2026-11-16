@@ -24,7 +24,7 @@ from ..models import ConnectionInfo
 from ..opcua.client_service import OpcUaService
 from ..project import ProjectSession
 from .async_runner import AsyncRunner
-from .tabs import BrowserTab, ConnectionTab, ExportTab, MonitorTab, TestsTab
+from .tabs import BrowserTab, ConnectionTab, ExportTab, MonitorTab, SequencesTab, TestsTab
 
 _logger = logging.getLogger(__name__)
 
@@ -77,12 +77,14 @@ class SessionWorkspace(QWidget):
         self.tests_tab = TestsTab(
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
         )
+        self.sequences_tab = SequencesTab(runner, service, settings)
 
         self.tabs.addTab(self.connection_tab, "Connection")
         self.tabs.addTab(self.browser_tab, "Address space")
         self.tabs.addTab(self.export_tab, "Export")
         self.tabs.addTab(self.monitor_tab, "Live monitor")
         self.tabs.addTab(self.tests_tab, "Tests")
+        self.tabs.addTab(self.sequences_tab, "Sequences")
 
         self._wire()
 
@@ -130,6 +132,7 @@ class SessionWorkspace(QWidget):
             export=self.export_tab.export_state(),
             monitor=self.monitor_tab.monitor_state(),
             tests=self.tests_tab.tests_state(),
+            sequence=self.sequences_tab.sequence_state(),
         )
 
     def apply_project_state(self, session: ProjectSession) -> None:
@@ -139,6 +142,7 @@ class SessionWorkspace(QWidget):
         self.export_tab.apply_export_state(session.export)
         self.monitor_tab.apply_monitor_state(session.monitor)
         self.tests_tab.apply_tests_state(session.tests)
+        self.sequences_tab.apply_sequence_state(session.sequence)
 
     def set_project_title(self, title: str) -> None:
         """Use the project's own session name for the tab until a server name is known."""
@@ -161,6 +165,7 @@ class SessionWorkspace(QWidget):
         self.export_tab.busy_changed.connect(self._on_export_busy)
         self.export_tab.export_finished.connect(self._report)
         self.tests_tab.report_ready.connect(self._report)
+        self.sequences_tab.report_ready.connect(self._report)
         self.monitor_tab.items_changed.connect(self._on_monitored_items_changed)
 
     def _on_monitored_items_changed(self) -> None:
@@ -194,6 +199,7 @@ class SessionWorkspace(QWidget):
         self.export_tab.set_connected(True)
         self.monitor_tab.set_connected(True)
         self.tests_tab.set_connected(True)
+        self.sequences_tab.set_connected(True)
         self.export_tab.refresh_namespaces()
 
         server = info.server_application_name or "server"
@@ -224,6 +230,7 @@ class SessionWorkspace(QWidget):
         self.export_tab.set_connected(connected)
         self.monitor_tab.set_connected(connected)
         self.tests_tab.set_connected(connected)
+        self.sequences_tab.set_connected(connected)
 
     def _on_connection_lost(self) -> None:
         """The session disappeared without the operator pressing Disconnect."""

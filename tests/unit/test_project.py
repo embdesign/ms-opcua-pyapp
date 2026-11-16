@@ -16,6 +16,7 @@ from opcua_explorer.project import (
     ProjectError,
     ProjectFile,
     ProjectSession,
+    SequenceState,
     TestsState,
 )
 
@@ -70,6 +71,9 @@ def _project() -> ProjectFile:
                         )
                     ],
                 ),
+                sequence=SequenceState(
+                    path="/plants/psu-setpoint.opcua-sequence.json", inputs={"voltage": "24.0"}
+                ),
             ),
             ProjectSession(
                 name="Second",
@@ -98,6 +102,8 @@ def test_roundtrip_preserves_configuration_and_editor_state(tmp_path) -> None:
     assert first.export == _project().sessions[0].export
     assert first.monitor == _project().sessions[0].monitor
     assert first.tests == _project().sessions[0].tests
+    assert first.sequence == _project().sessions[0].sequence
+    assert first.sequence.inputs["voltage"] == "24.0"
     assert loaded.sessions[1].connection.endpoint_url == "opc.tcp://127.0.0.1:4840"
 
 
@@ -120,6 +126,20 @@ def test_load_refuses_a_file_that_carries_secret_fields(tmp_path) -> None:
         ProjectFile.load(path)
     assert "secret" in str(excinfo.value).lower()
     assert "hunter2" not in str(excinfo.value)
+
+
+def test_a_version_1_project_loads_with_an_empty_sequence_state(tmp_path) -> None:
+    path = tmp_path / "older.opcua-project.json"
+    payload = _project().to_dict()
+    payload["version"] = 1
+    for session in payload["sessions"]:
+        session.pop("sequence", None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = ProjectFile.load(path)
+
+    assert loaded.sessions[0].sequence.path == ""
+    assert loaded.sessions[0].sequence.inputs == {}
 
 
 def test_load_rejects_newer_versions_and_empty_projects(tmp_path) -> None:

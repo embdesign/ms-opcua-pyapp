@@ -1,0 +1,39 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo - start the motor through a method",
+  "description": "Shows both ways to call a method: by browse name below the object node, and by method NodeId. Arguments are typed from the server's InputArguments; the output argument is reported in the run.",
+  "inputs": {
+    "speed": "900"
+  },
+  "steps": [
+    {
+      "kind": "call",
+      "id": "start-by-browse-name",
+      "node_id": "ns=2;s=Motor",
+      "method": "2:Start",
+      "arguments": ["${speed}"]
+    },
+    {
+      "kind": "expect",
+      "id": "speed-is-900",
+      "node_id": "ns=2;s=Speed",
+      "expected": "${speed}",
+      "tolerance": 0.01
+    },
+    {
+      "kind": "call",
+      "id": "start-by-nodeid",
+      "node_id": "ns=2;s=Motor",
+      "method_node_id": "ns=2;s=Start",
+      "arguments": ["1200"]
+    },
+    {
+      "kind": "expect",
+      "id": "speed-is-1200",
+      "node_id": "ns=2;s=Speed",
+      "expected": "1200",
+      "tolerance": 0.01
+    }
+  ]
+}

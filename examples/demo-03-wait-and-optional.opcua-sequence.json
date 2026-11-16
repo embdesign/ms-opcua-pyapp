@@ -1,0 +1,18 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 03 - wait for a condition, optional step",
+  "description": "Checks an assert precondition, skips an optional step whose node does not exist, calls Start and then polls two variables with wait_until instead of fixed delays. Run against the demo server started with --no-updates.",
+  "inputs": {
+    "speed": "750"
+  },
+  "preconditions": [
+    { "kind": "assert", "id": "server-running", "node_id": "i=2259", "expected": "0" },
+    { "kind": "ensure", "id": "optional-operation-mode", "path": ["2:Plant", "2:Line1", "2:OperationMode"], "value": "1", "optional": true }
+  ],
+  "steps": [
+    { "kind": "call", "id": "start", "node_id": "ns=2;s=Motor", "method_name": "2:Start", "arguments": ["${speed}"] },
+    { "kind": "wait_until", "id": "speed-reached", "node_id": "ns=2;s=Speed", "expected": "${speed}", "tolerance": 1.0, "timeout_seconds": 5.0, "poll_seconds": 0.2 },
+    { "kind": "wait_until", "id": "motor-running", "node_id": "ns=2;s=Running", "expected": "true", "timeout_seconds": 2.0, "poll_seconds": 0.1 }
+  ]
+}

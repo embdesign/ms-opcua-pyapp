@@ -44,9 +44,5 @@ class ExportError(OpcUaExplorerError):
     """Raised when a snapshot could not be written."""
 
 
-class OperationCancelledError(OpcUaExplorerError):
-    """Raised when a user-cancelled operation is observed by the caller."""
-
-
 class MonitorNotActiveError(OpcUaExplorerError):
     """Raised when a monitored-item operation needs a running subscription."""

@@ -1,0 +1,15 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 05 - continue after a failed step",
+  "description": "The first step writes to a node that does not exist. With abort_on_failure false the sequence continues, still reports the run as FAILED (the command exits 1) and shows both steps in the timeline - the difference between 'stopped' and 'reported'.",
+  "abort_on_failure": false,
+  "inputs": {
+    "temperature": "27.0"
+  },
+  "steps": [
+    { "kind": "write", "id": "intended-failure", "node_id": "ns=2;s=DoesNotExist", "value": "1" },
+    { "kind": "write", "id": "still-executed", "node_id": "ns=2;s=Temperature", "value": "${temperature}", "verify": true },
+    { "kind": "expect", "id": "temperature-check", "node_id": "ns=2;s=Temperature", "expected": "${temperature}", "tolerance": 0.01 }
+  ]
+}
