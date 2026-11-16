@@ -1,6 +1,6 @@
 [project]
 name = "opcua-explorer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop OPC UA address-space browser, exporter and functional interoperability test client"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -21,7 +21,10 @@ classifiers = [
 # verified against; see docs/api-verification.md.
 dependencies = [
     "asyncua==2.1.0",
-    "PySide6==6.12.0",
+    # 6.12.0 crashes with "Fatal Python error: none_dealloc: deallocating None" after a few
+    # thousand QTreeWidgetItem rows (Shiboken refcount regression). 6.11.3 is verified by the
+    # reproducer in tests/integration/test_pyside_stability.py - do not upgrade without it.
+    "PySide6==6.11.3",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +47,10 @@ opcua-explorer = "opcua_explorer.gui.app:main"
 opcua-demo-server = "opcua_explorer.demo.demo_server:main"
 # Headless address-space export (Qt-free, same services as the GUI Export tab).
 opcua-export = "opcua_explorer.cli:main"
+# Headless comparison of two address spaces (Qt-free, read-only).
+opcua-compare = "opcua_explorer.cli_compare:main"
+# Headless run of an operator-written sequence document (Qt-free).
+opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 
 [build-system]
 requires = ["hatchling"]

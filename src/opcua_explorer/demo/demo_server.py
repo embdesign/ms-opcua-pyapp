@@ -162,10 +162,15 @@ async def build_demo_server(
     temperature = await line1.add_variable(node_id("Temperature"), qname("Temperature"), 21.5)
     await temperature.set_writable()
     pressure = await line1.add_variable(node_id("Pressure"), qname("Pressure"), 1013.25)
+    await pressure.set_writable()
     recipe = await line1.add_variable(node_id("Recipe"), qname("Recipe"), "Line-1 standard")
+    await recipe.set_writable()
     samples = await line1.add_variable(node_id("Samples"), qname("Samples"), [1.0, 2.5, 3.75])
+    await samples.set_writable()
     timestamp = await line1.add_variable(node_id("Timestamp"), qname("Timestamp"), datetime.now(UTC))
+    await timestamp.set_writable()
     blob = await line1.add_variable(node_id("Blob"), qname("Blob"), b"\x00\x01\x02\xff")
+    await blob.set_writable()
     operating_range = await line1.add_variable(
         node_id("OperatingRange"),
         qname("OperatingRange"),
@@ -177,6 +182,7 @@ async def build_demo_server(
     speed = await motor.add_variable(node_id("Speed"), qname("Speed"), 0.0)
     await speed.set_writable()
     running = await motor.add_variable(node_id("Running"), qname("Running"), False)
+    await running.set_writable()
     serial_number = await motor.add_property(node_id("SerialNumber"), qname("SerialNumber"), "SN-0001")
 
     async def start_motor(parent: Any, requested_speed: Any) -> list[ua.Variant]:
@@ -199,6 +205,7 @@ async def build_demo_server(
     # A node referenced from two parents: a graph, not a tree.
     shared_config = await objects.add_object(node_id("SharedConfig"), qname("SharedConfig"))
     shared_threshold = await shared_config.add_variable(node_id("SharedThreshold"), qname("SharedThreshold"), 5.0)
+    await shared_threshold.set_writable()
     await plant.add_reference(shared_config, ua.ObjectIds.Organizes)
     await line1.add_reference(shared_config, ua.ObjectIds.Organizes)
 
@@ -329,7 +336,7 @@ async def stop_demo_server(model: DemoModel) -> None:
     await model.server.stop()
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="OPC UA Explorer demo server")
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=4840, help="TCP port (0 = pick a free port)")
@@ -338,9 +345,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="disable the demo username/password identity (anonymous only)",
     )
+    parser.add_argument(
+        "--no-updates",
+        action="store_true",
+        help=(
+            "keep Temperature/Speed/Running static instead of changing them every second; "
+            "use this for the demo sequences and any value check that must be deterministic"
+        ),
+    )
     parser.add_argument("--cert", help="server certificate (.der or .pem) to enable Basic256Sha256/SignAndEncrypt")
     parser.add_argument("--key", help="server private key (.pem)")
     parser.add_argument("--verbose", "-v", action="store_true", help="debug logging")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -357,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_username=not args.no_username,
             certificate=args.cert,
             private_key=args.key,
+            update_values=not args.no_updates,
         )
         print(f"Demo server running at {model.endpoint}")
         print(f"  namespaces: {DEMO_NAMESPACE} (index {model.namespace_index}), {DEMO_EXTRA_NAMESPACE}")

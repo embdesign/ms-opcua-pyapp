@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPC UA address-space comparison</title>
+<style>
+:root {
+  color-scheme: light;
+  --text: #1b2533;
+  --muted: #5b6a7d;
+  --border: #d9dfe7;
+  --surface: #ffffff;
+  --page: #f2f4f7;
+  --accent: #14639e;
+  --passed-bg: #e2f4ea; --passed-fg: #17603a;
+  --failed-bg: #fdeceb; --failed-fg: #8c1d18;
+  --skipped-bg: #fff3d6; --skipped-fg: #7a5200;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 32px 20px 64px;
+  background: var(--page); color: var(--text);
+  font: 14px/1.5 "Segoe UI", "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+}
+main { max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 32px 0 10px; }
+.subtitle { color: var(--muted); margin: 0 0 16px; }
+.disclaimer {
+  background: #fff6e0; border: 1px solid #f0d9a6; color: #7a5200;
+  padding: 10px 14px; border-radius: 8px; margin: 16px 0 24px; font-weight: 600;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 18px; margin-bottom: 16px;
+}
+.tiles { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0; }
+.tile {
+  flex: 1 1 150px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.tile .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.tile .value { font-size: 26px; font-weight: 700; margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: #eef2f7; color: #42536a; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+tr:last-child td { border-bottom: none; }
+tbody tr:nth-child(even) { background: #f7f9fc; }
+code, pre { font-family: "JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; }
+pre {
+  background: #f7f9fc; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+}
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+.pill.passed { background: var(--passed-bg); color: var(--passed-fg); }
+.pill.failed { background: var(--failed-bg); color: var(--failed-fg); }
+.pill.skipped { background: var(--skipped-bg); color: var(--skipped-fg); }
+.check { margin-bottom: 14px; }
+.check h3 { font-size: 15px; margin: 0 0 4px; }
+.meta { color: var(--muted); font-size: 12px; }
+.footer { color: var(--muted); font-size: 12px; margin-top: 32px; }
+a { color: var(--accent); }
+</style></head><body><main>
+<h1>OPC UA address-space comparison</h1>
+<p class="subtitle">opc.tcp://127.0.0.1:4840 → opc.tcp://127.0.0.1:60543</p>
+<p class="disclaimer">A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically.</p>
+<div class="tiles"><div class="tile"><div class="label">Matched</div><div class="value">696</div></div><div class="tile"><div class="label">Missing</div><div class="value">0</div></div><div class="tile"><div class="label">Extra</div><div class="value">0</div></div><div class="tile"><div class="label">Changed</div><div class="value">0</div></div><div class="tile"><div class="label">Not comparable</div><div class="value">0</div></div><div class="tile"><div class="label">Ignored</div><div class="value">0</div></div></div>
+<h2>Comparison configuration</h2>
+<div class="card"><table><tbody><tr><th scope="row">Reference</th><td>opc.tcp://127.0.0.1:4840</td></tr><tr><th scope="row">Candidate</th><td>opc.tcp://127.0.0.1:60543</td></tr><tr><th scope="row">Tolerance</th><td>functional</td></tr><tr><th scope="row">Match by browse path</th><td>yes</td></tr><tr><th scope="row">References compared</th><td>yes</td></tr><tr><th scope="row">Values compared for</th><td>no node</td></tr><tr><th scope="row">Float tolerance</th><td>0.0</td></tr><tr><th scope="row">Ignore list</th><td>empty</td></tr><tr><th scope="row">Reference nodes</th><td>696</td></tr><tr><th scope="row">Candidate nodes</th><td>696</td></tr><tr><th scope="row">Generated</th><td>2026-11-16T12:27:28.235Z</td></tr></tbody></table></div>
+<h2>Result</h2>
+<div class="card"><p>No difference found in the compared scope.</p></div>
+<p class="footer">Node identity: namespace URI + identifier; a NodeId printed above is the one that session used and is not portable to the other server.</p>
+</main></body></html>

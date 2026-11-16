@@ -1,4 +1,4 @@
-"""Guarded write and method-call checks against the demo server (phase 4)."""
+"""Guarded write and method-call checks against the demo server."""
 
 from __future__ import annotations
 

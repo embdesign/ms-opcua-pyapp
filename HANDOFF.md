@@ -1,6 +1,6 @@
 # Task Handoff — OPC UA Explorer (`ms-opcua-pyapp`)
 
-Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.0, package
+Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.1, package
 `opcua_explorer`. This file records the current state, the rules a future change must respect, and what is still
 unverified. It is not a change log. Do not commit without the operator's authorization; make out-of-tree
 backups before bulk edits.
@@ -24,30 +24,42 @@ Completion criteria:
 
 ## Current status
 
-**Complete.** No open implementation work, nothing blocked, no authorization pending.
+**Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-260 tests pass (182 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
-are verification-only (Windows, a manual desktop session, example regeneration) and are listed under *Known
-issues and review findings* and *Next actions*.
+416 tests pass (315 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
+findings* and *Next actions*.
 
-## Implemented changes
+**Qt dependency (2026-11-15).** `PySide6` is pinned to **6.11.3**. 6.12.0 aborts the process with
+`Fatal Python error: none_dealloc: deallocating None` after a few hundred `QTreeWidgetItem` rows; the crash was
+reproduced outside the application (public Qt API only) and is a Shiboken refcount regression. The reproducer
+runs in `tests/integration/test_pyside_stability.py`; an upgrade must keep that test green. Details are in
+`docs/api-verification.md` and `docs/troubleshooting.md` §7.
 
-### Delivered capabilities
+**Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
+`models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
+`SequenceStepResult`, step kinds/statuses), `opcua/method_support.py` (shared DataType/ValueRank,
+`InputArguments`, `Executable` reads), `opcua/type_support.py` (server-driven typing: built-ins, enumerations by
+name or number, structures encoded with their `DefaultEncodingId`; matrices/unions/optional fields refused),
+`opcua/write_service.py` (prepare → one write → read-back; one method call with validated arguments) and
+`opcua/sequence_runner.py` (preconditions, user-defined gate with `finally` release, keepalive, dry run,
+single-flight, `outcome_unknown` on cancelled in-flight writes). `opcua/path_support.py` adds
+`TranslateBrowsePathsToNodeIds` addressing (`node_path` / `path_root` on a step, exposed as
+`OpcUaService.resolve_browse_paths()`), accepting only a complete, unambiguous match. `guarded_operations.py` now
+performs its write and method call through `write_service`, so the application has exactly one write/call
+implementation. Covered by `tests/unit/test_sequence_runner.py`, `tests/unit/test_type_support.py`,
+`tests/unit/test_path_support.py`, `tests/integration/test_path_resolution.py`, `tests/unit/test_sequence_document.py`,
+`tests/integration/test_gui_sequences.py`, `tests/unit/test_cli_sequence.py`,
+`tests/integration/test_cli_sequence.py` and the existing guarded-operation integration tests. The Sequences tab
+is wired into every session, the project stores the document path and inputs (project version 2; version 1 still
+loads), and `opcua-run-sequence` exposes the same run headlessly. The command is not part of a PyInstaller bundle
+yet (`packaging/README.md`).
 
-- **Connection & security** — endpoint discovery, policy/mode selection that never downgrades, explicit server
-  certificate approval and trust store, timeouts, named profiles without secrets, automatic reconnect.
-- **Address space** — lazy tree from Root/Objects or any NodeId, attribute and reference panels, explicit value
-  read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers.
-- **Download & export** — bounded graph traversal (namespace filter, depth/node budget, concurrency, batch
-  size, continuation points, cancellation) to JSON, CSV and NodeSet2 XML with dependency closure and
-  validation; the same NodeSet2 pipeline is available headlessly as `opcua-export`.
-- **Headless export** — `opcua-export` drives the same download/NodeSet2 pipeline without Qt, with explicit
-  certificate approval, JSON manifest output and exit codes suitable for scripting.
-- **Live monitoring** — one data-change subscription per session plus a read-only “All monitors” view.
-- **Functional tests** — eleven read-only checks, JSON/HTML reports, opt-in guarded single-target write and
-  method call behind an explicit confirmation.
-- **Window, projects, demo** — several independent sessions, versioned project files, demo server, example
-  exports and sample reports.
+`compare.py` (Qt/asyncua-free) compares two downloaded address-space snapshots; `cli_compare.py`
+(`opcua-compare`) exposes it headlessly and the shared **Compare** tab exposes it in the window. The tab owns
+no client and no subscription: it downloads through the two selected sessions' services. Either side may be a
+saved JSON export (`exporters/json_loader.py`), so a device that is gone can still be the baseline. Three
+bundles are built now (GUI, export, compare).
 
 ## Decisions and rationale
 
@@ -72,56 +84,62 @@ issues and review findings* and *Next actions*.
 ### Module boundaries and entry points
 
 - Entry points: `opcua_explorer.gui.app:main` (`opcua-explorer`), `opcua_explorer.demo.demo_server:main`
-  (`opcua-demo-server`), `opcua_explorer.cli:main` (`opcua-export`, Qt-free headless NodeSet2 export).
+  (`opcua-demo-server`), `opcua_explorer.cli:main` (`opcua-export`, Qt-free headless NodeSet2 export),
+  `opcua_explorer.cli_compare:main` (`opcua-compare`, Qt-free comparison) and
+  `opcua_explorer.cli_sequence:main` (`opcua-run-sequence`, Qt-free sequence runner).
 - `cli.py` is an adapter only: it maps arguments to `TraversalConfig` / `NodeSet2Config`, calls
   `OpcUaService.download()` and `export_nodeset2()`, prints `NodeSet2Result.summary_text()` and optionally writes
   `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
   into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
-- UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors” and “Logs & reports”).
-  One session = `gui/session_workspace.py` + its five pages under `gui/tabs/`.
+- UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors”, “Compare” and
+  “Logs & reports”). One session = `gui/session_workspace.py` + its six pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
   `asyncua.Client`.
 - Pure layers (no asyncua, no Qt): `models.py`, `config.py`, `defaults.py`, `project.py`,
-  `formatting.py`, `operator_text.py`, `exporters/`, `reporting.py`.
+  `formatting.py`, `operator_text.py`, `sequence_document.py`, `compare.py`, `exporters/`, `reporting.py`.
 - OPC UA helpers: `opcua/ua_names.py` (names), `opcua/check_support.py` (check primitives),
-  `opcua/guarded_operations.py` (opt-in writes/method calls), `opcua/test_runner.py` (read-only checks and run
-  orchestration; re-exports `CheckSkipped`, `environment_info`, `FunctionalTestRunner`,
-  `run_functional_tests`).
+  `opcua/value_parsing.py` / `opcua/type_support.py` (typed values), `opcua/method_support.py`,
+  `opcua/write_service.py` (the one write/call implementation), `opcua/path_support.py`,
+  `opcua/guarded_operations.py` (opt-in writes/method calls), `opcua/sequence_runner.py`,
+  `opcua/test_runner.py` (read-only checks and run orchestration; re-exports `CheckSkipped`,
+  `environment_info`, `FunctionalTestRunner`, `run_functional_tests`).
 - Integration contract: `OpcUaService` methods and the model dataclasses returned to the GUI. Change these
   signatures only deliberately, together with every caller and the GUI tests.
 
 ## Verification
 
-Latest run: 2026-11-14, Python 3.11, Linux.
+Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **182 passed** |
-| Full suite | `uv run pytest -q` | **260 passed** (≈3.5 min idle host, up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **315 passed** |
+| Full suite | `uv run pytest -q` | **416 passed** (≈5:30 on this host; up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
-| Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`) and the demo-server banner |
-| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 78 — deliberate boundaries, see *Known issues* |
+| Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
+| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 97 — deliberate boundaries, see *Known issues* |
 
-Not verified here: native Windows paths, a manual desktop (non-headless) session, and `uv sync --extra
-validation` with the optional `lxml` extra (`lxml` is already installed through the dev group). `examples/`
-matches the current formats; regenerate it whenever a format changes.
+The optional `lxml` extra (`uv sync --extra validation`) was not exercised separately (`lxml` is already
+installed through the dev group); `examples/` matches the current formats and is regenerated whenever a format
+changes.
 
 ## Known issues and review findings
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 260 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 416 tests
   pass; the variance is scheduling/IO contention, not failures.
-- **78 broad `except Exception` handlers** in `src/` (`guarded_operations.py` 11, `client_service.py` 10,
-  `test_runner.py` 7, `nodeset2.py` 7, `attributes.py` 6, `cli.py` 1, …). Most are deliberate boundaries (best-effort
+- **97 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `type_support.py` 8,
+  `test_runner.py` 7, `nodeset2.py` 7, `write_service.py` 6, `sequence_runner.py` 6, `attributes.py` 6, …).
+  Most are deliberate boundaries (best-effort
   teardown, diagnostics for arbitrary server values); do not remove them wholesale without checking the failure
   semantics.
 - **`opcua/nodeset2.py` is 771 lines** — the largest source module; its dependency collector is a single
   coherent algorithm, so split further only if a new concern appears.
-- **Longest test modules**: `tests/integration/test_gui_workflows.py` (~258 lines) and
-  `test_gui_connection_states.py` (~229 lines); grouped by concern, not by accident.
+- **Longest test modules**: `tests/unit/test_sequence_runner.py` (~684 lines) and `tests/unit/test_compare.py`
+  (~520 lines), then `test_cli_compare.py` (~344) and `test_client_service.py` (~322); grouped by concern, not
+  by accident.
 - **A manual two-session run on a real desktop is still worthwhile**: the selection-isolation and monitor
   behaviour are covered headless only.
 
@@ -129,13 +147,9 @@ Not verifiable on this host:
 
 - Windows-only paths (certificate handling, Qt platform integration) — only unit tests cover them.
 - Real desktop rendering: GUI tests run with `QT_QPA_PLATFORM=offscreen`.
-- The optional NodeSet2 XSD validation path installed via `uv sync --extra validation` was not exercised
-  separately (`lxml` is already present through the dev group).
 
-AI review findings — observations, **not** independently confirmed defects:
+AI review finding — an observation, **not** an independently confirmed defect:
 
-- ~~`docs/architecture.md` opens with “phases 1–4 implemented and tested” while `README.md` and `PLAN.md` say
-  “complete and maintained”.~~ **Resolved:** all three now say “complete and maintained”.
 - `.gitignore` ignores `*.log` and `*.pcap` globally while noting that `examples/` is intentionally tracked. No
   current example uses those extensions, but a future one would need an explicit negation rule.
 
@@ -147,15 +161,13 @@ Required: none.
 
 Optional, in priority order:
 
-1. **Commit the `opcua-export` changes** (modified docs/pyproject plus untracked `cli.py` and CLI tests). Needs
-   explicit operator authorization; nothing is staged today.
+1. **Commit the sequence work** — the comparison/sequence sources, docs and examples are modified or untracked
+   on branch `devel_feature_rw_node`. Needs explicit operator authorization; nothing is staged today.
 2. **Manual desktop run**: two sessions against `uv run opcua-demo-server`, live monitor plus “All monitors”,
    project save/open, guarded write with the confirmation accepted and declined.
 3. **Windows run** of install → connect → export before any release claim.
 4. **Regenerate `examples/`** only when an export or report format changes
    (`uv run python scripts/generate_example_exports.py`, `…_report.py`, `…_nodeset.py`).
-5. Only if a new concern appears: split `opcua/nodeset2.py` further, or review broad `except Exception` handlers
-   one at a time.
 
 ## How to resume
 

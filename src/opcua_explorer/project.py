@@ -36,7 +36,7 @@ from .models import MethodCallTarget, WriteTarget
 _logger = logging.getLogger(__name__)
 
 PROJECT_FORMAT = "opcua-explorer-project"
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2
 PROJECT_SUFFIX = ".opcua-project.json"
 PROJECT_FILE_FILTER = "OPC UA Explorer project (*.opcua-project.json *.json);;All files (*)"
 
@@ -232,6 +232,31 @@ def _known(cls: type, data: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in data.items() if key in known}
 
 
+@dataclass(slots=True)
+class SequenceState:
+    """Sequence tab editor state: which document belongs to this session and its inputs.
+
+    The sequence itself stays a file next to the device documentation. A project records only
+    the path and the operator's input values - opening a project never loads or runs a sequence.
+    """
+
+    path: str = ""
+    inputs: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"path": self.path, "inputs": dict(self.inputs)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SequenceState:
+        data = data if isinstance(data, dict) else {}
+        raw_inputs = data.get("inputs") or {}
+        inputs = (
+            {str(name): str(value) for name, value in raw_inputs.items()}
+            if isinstance(raw_inputs, dict)
+            else {}
+        )
+        return cls(path=str(data.get("path") or ""), inputs=inputs)
+
 # ---------------------------------------------------------------------------
 # Session and project documents
 # ---------------------------------------------------------------------------
@@ -249,6 +274,7 @@ class ProjectSession:
     export: ExportState = field(default_factory=ExportState)
     monitor: MonitorState = field(default_factory=MonitorState)
     tests: TestsState = field(default_factory=TestsState)
+    sequence: SequenceState = field(default_factory=SequenceState)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -258,6 +284,7 @@ class ProjectSession:
             "export": self.export.to_dict(),
             "monitor": self.monitor.to_dict(),
             "tests": self.tests.to_dict(),
+            "sequence": self.sequence.to_dict(),
         }
 
     @classmethod
@@ -275,6 +302,7 @@ class ProjectSession:
             export=ExportState.from_dict(data.get("export", {})),
             monitor=MonitorState.from_dict(data.get("monitor", {})),
             tests=TestsState.from_dict(data.get("tests", {})),
+            sequence=SequenceState.from_dict(data.get("sequence", {})),
         )
 
 

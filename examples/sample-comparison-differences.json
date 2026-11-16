@@ -1,0 +1,147 @@
+{
+  "format": "opcua-comparison",
+  "version": 1,
+  "reference_endpoint": "opc.tcp://127.0.0.1:4840",
+  "candidate_endpoint": "synthetic variant of the candidate snapshot",
+  "config": {
+    "tolerance": "functional",
+    "match_by_browse_path": true,
+    "compare_references": true,
+    "value_node_ids": [
+      "i=11193"
+    ],
+    "compare_value_payload": true,
+    "float_tolerance": 0.0,
+    "ignore_node_ids": [
+      "i=11197"
+    ],
+    "max_differences": 2000
+  },
+  "matched": 694,
+  "ignored": 1,
+  "difference_count": 3,
+  "counts": {
+    "missing_in_candidate": 1,
+    "extra_in_candidate": 1,
+    "changed": 1,
+    "not_comparable": 0,
+    "truncated": 0
+  },
+  "reference_differences": 1,
+  "namespace_differences": [],
+  "warnings": [],
+  "limitations": [
+    "A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically."
+  ],
+  "reference": {
+    "nodes": 696,
+    "references": 1270,
+    "references_to_nodes_outside_snapshot": 571,
+    "namespaces_recorded": 4,
+    "node_classes": {
+      "Method": 133,
+      "Object": 82,
+      "Variable": 481
+    },
+    "values_included": true,
+    "cancelled": false,
+    "limits_hit": [],
+    "inaccessible_nodes": 0,
+    "unsupported_value_encodings": 0,
+    "errors": 0,
+    "duration_seconds": 0.464,
+    "started_at_utc": "2026-11-16T12:27:27.049Z",
+    "finished_at_utc": "2026-11-16T12:27:27.513Z"
+  },
+  "candidate": {
+    "nodes": 696,
+    "references": 1270,
+    "references_to_nodes_outside_snapshot": 572,
+    "namespaces_recorded": 4,
+    "node_classes": {
+      "Method": 133,
+      "Object": 83,
+      "Variable": 480
+    },
+    "values_included": true,
+    "cancelled": false,
+    "limits_hit": [],
+    "inaccessible_nodes": 0,
+    "unsupported_value_encodings": 0,
+    "errors": 0,
+    "duration_seconds": 0.389,
+    "started_at_utc": "2026-11-16T12:27:27.519Z",
+    "finished_at_utc": "2026-11-16T12:27:27.908Z"
+  },
+  "differences": [
+    {
+      "kind": "missing_in_candidate",
+      "key": "http://opcfoundation.org/UA/|i=11196",
+      "browse_path": "Server/ServerCapabilities/HistoryServerCapabilities/InsertDataCapability",
+      "node_class": "Variable",
+      "reference_node_id": "i=11196",
+      "candidate_node_id": null,
+      "note": "",
+      "attributes": []
+    },
+    {
+      "kind": "extra_in_candidate",
+      "key": "urn:opcua-explorer:demo|s=OnlyOnTheCandidate",
+      "browse_path": "OnlyOnTheCandidate",
+      "node_class": "Variable",
+      "reference_node_id": null,
+      "candidate_node_id": "ns=2;s=OnlyOnTheCandidate",
+      "note": "",
+      "attributes": []
+    },
+    {
+      "kind": "changed",
+      "key": "http://opcfoundation.org/UA/|i=11193",
+      "browse_path": "Server/ServerCapabilities/HistoryServerCapabilities/AccessHistoryDataCapability",
+      "node_class": "Variable",
+      "reference_node_id": "i=11193",
+      "candidate_node_id": "i=11193",
+      "note": "",
+      "attributes": [
+        {
+          "attribute": "NodeClass",
+          "reference": "Variable",
+          "candidate": "Object",
+          "note": ""
+        },
+        {
+          "attribute": "DataType",
+          "reference": "http://opcfoundation.org/UA/|i=1",
+          "candidate": "",
+          "note": ""
+        },
+        {
+          "attribute": "AccessLevel",
+          "reference": [
+            "CurrentRead"
+          ],
+          "candidate": [],
+          "note": ""
+        },
+        {
+          "attribute": "UserAccessLevel",
+          "reference": [
+            "CurrentRead"
+          ],
+          "candidate": [],
+          "note": ""
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "kind": "missing_in_candidate",
+      "source": "http://opcfoundation.org/UA/|i=11192",
+      "target": "http://opcfoundation.org/UA/|i=11196",
+      "reference_type": "HasProperty"
+    }
+  ],
+  "generated_at_utc": "2026-11-16T12:27:28.268Z",
+  "disclaimer": "A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically."
+}

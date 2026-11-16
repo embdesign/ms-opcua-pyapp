@@ -1,9 +1,11 @@
 # Architecture — OPC UA Explorer
 
-Status: **complete and maintained** (phases 1–4; verified 2026-11-14). Implemented and tested:
-connection/security with background reconnect, browser, download, JSON/CSV/NodeSet2 export (GUI and headless
-`opcua-export`), live monitoring, functional test suite that is read-only by default with JSON/HTML reports,
-and guarded single-target write and method call. See section 12 for what is deliberately out of scope.
+Status: **complete and maintained** (verified 2026-11-16). Implemented and tested: connection/security with
+background reconnect, browser, download, JSON/CSV/NodeSet2 export (GUI and headless `opcua-export`), live
+monitoring, a functional test suite that is read-only by default with JSON/HTML reports, guarded single-target
+write and method call, address-space comparison (`opcua-compare` and the Compare tab) and operator-written
+control sequences (`opcua-run-sequence` and the Sequences tab). See section 12 for what is deliberately out of
+scope.
 
 ---
 
@@ -31,12 +33,13 @@ Derived design rules:
 │ gui/  (PySide6)                                                      │
 │  app.py · main_window.py · session_workspace.py                      │
 │  tabs/{connection,connection_dialogs,browser,export,monitor,tests,   │
-│        logs,unified_monitor}                                         │
+│        sequences,logs,unified_monitor,compare}                       │
 │  async_runner.py  ← only place Qt meets asyncio                      │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py  (PySide6-free)  opcua-export: argparse → service → exports   │
+│ cli.py · cli_compare.py · cli_sequence.py  (Qt-free)                 │
+│ opcua-export · opcua-compare · opcua-run-sequence                    │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -45,28 +48,31 @@ Derived design rules:
 │  security.py  browse.py  attributes.py  traversal.py  serialize.py   │
 │  ua_names.py  value_parsing.py  monitor_service.py  nodeset2.py      │
 │  nodeset2_validation.py  check_support.py  test_runner.py            │
-│  guarded_operations.py                                               │
+│  guarded_operations.py  write_service.py  type_support.py            │
+│  path_support.py  sequence_runner.py  method_support.py              │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ AddressSpace snapshot / TestRun (plain dataclasses)
 ┌───────────────▼──────────────────────────────────────────────────────┐
 │ models.py · config.py · defaults.py · project.py · logging_setup.py  │
 │ formatting.py · operator_text.py · exporters/ · reporting.py         │
+│ sequence_document.py                                                 │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 Rules that keep the layers honest:
 
-* `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `exporters/`,
-  `reporting.py` import neither asyncua nor Qt.
+* `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `sequence_document.py`,
+  `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
 * Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
-* `gui/session_workspace.py` owns one service and its five pages and injects that session's browser
+* `gui/session_workspace.py` owns one service and its six pages and injects that session's browser
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
-* `cli.py` is a second front end (Qt-free): it owns its own event loop through `asyncio.run`, calls
-  `OpcUaService` and the exporters, and never touches asyncua directly. It must not re-implement traversal,
-  dependency collection, writing or validation — the GUI and the CLI share those objects on purpose.
+* `cli.py`, `cli_compare.py` and `cli_sequence.py` are the Qt-free front ends: each owns its own event loop
+  through `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They
+  must not re-implement traversal, dependency collection, writing, validation, certificate approval, the
+  comparison or the sequence engine — the GUI and the CLIs share those objects on purpose.
 
 ## 3. Threading model
 
@@ -107,9 +113,10 @@ A subscription outlives the coroutine that created it, so the monitor uses a sec
 ## 4. Sessions, connection and trust flow
 
 `MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
-bar and two shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors) and `Logs & reports`. A
-`SessionWorkspace` owns exactly one `OpcUaService` and the five pages
-(Connection, Address space, Export, Live monitor, Tests). Sessions are fully independent — separate client,
+bar and three shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors), `CompareTab`
+(read-only structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
+`OpcUaService` and the six pages
+(Connection, Address space, Export, Live monitor, Tests, Sequences). Sessions are fully independent — separate client,
 discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
 two sessions to the same endpoint are allowed. `File → New connection` (`Ctrl+N`) creates a new service on the
 same asyncio runner and the same trust store; closing a session tab releases only that client. All sessions share
@@ -292,20 +299,28 @@ CLI only prints `NodeSet2Result.summary_text()` and optionally writes `to_dict()
 same explicit decision as in the GUI, expressed as an existing trust-store entry, `--trust-server-certificate`
 or a `--server-certificate` file whose SHA-256 must equal the advertised certificate.
 
-## 9. Phase plan
+`opcua-compare` (`cli_compare.py`) follows the same rule for a different question: it reuses the connection,
+traversal and certificate-approval helpers of `cli.py`, downloads both snapshots through
+`OpcUaService.download()` — one session per server, same identity — and only calls `compare_address_spaces()`
+and prints `ComparisonResult.summary_text()`. `compare.py` itself is a pure function over two `AddressSpace`
+objects: node identity is namespace URI + identifier, a renumbered NodeId is matched by its unambiguous
+qualified browse path, values are compared only for nodes named in the config, and results land in the four
+buckets `missing` / `extra` / `changed` / `not comparable`. Partial snapshots (cancelled, limits hit,
+inaccessible nodes, a different identity) produce warnings instead of a false "equal". Either side can also come
+from a JSON export (`exporters/json_loader.py`), which restores the download's `limits_hit` flags so a truncated
+document is reported as partial rather than as "nodes missing on the other side".
 
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Connection & security, lazy browser, bounded download, JSON/CSV | **done** |
-| 2 | Read-only test suite (discovery, auth outcomes, browse/attribute reads, variable reads, subscriptions with configurable intervals, connection loss/recovery, bounded latency), JSON/HTML reports | **done** |
-| 3 | NodeSet2 export with dependency collection, namespace mapping, missing-dependency report, schema validation | **done** |
-| 4 | Guarded write and method call: single target, validated arguments, confirmation showing target/operation/arguments, explicit restore only on request | **done** |
+## 9. Delivered scope and test-suite policy
 
-Test-suite policy (phases 2–4): read-only by default, a subscription that is created but reports no value
-change is not a failure, no unrestricted stress testing, no automatic production-network scanning; results are
-described as functional/interoperability checks, never as OPC UA certification.
+Connection/security, the read-only functional checks with reports, NodeSet2 export and the guarded write and
+method call are delivered, together with address-space comparison and operator sequences; `PLAN.md` §1 is the
+authoritative capability list.
 
-## 10. Functional test design (phase 2)
+Test-suite policy: read-only by default, a subscription that is created but reports no value change is not a
+failure, no unrestricted stress testing, no automatic production-network scanning; results are described as
+functional/interoperability checks, never as OPC UA certification.
+
+## 10. Functional test design
 
 `opcua/test_runner.py` runs eleven checks in order against the *existing* session, so no re-authentication and
 no security change happens during a run:
@@ -342,7 +357,7 @@ the observation window (this is not a failure)" note. No notification at all is 
 dynamic string is HTML-escaped (server-supplied names end up in reports), the page embeds no external assets,
 and the status pills use contrast-checked colours.
 
-## 11. Guarded write and method call (phase 4)
+## 11. Guarded write and method call
 
 Both operations live in `opcua/guarded_operations.py` (the runner schedules them through the same plan as the
 read-only checks) and share three rules:
@@ -363,22 +378,60 @@ Restoring a previous value is a separate, explicit choice (`restore_previous_val
 on, the runner reads the previous value before writing, writes it back afterwards and verifies the restore; a
 failed restore is reported as a failed check even though the write itself succeeded.
 
-Supported write DataTypes are the namespace-0 built-ins (Boolean, integer types with range checks, Float/Double,
-String, DateTime, Guid, ByteString as base64, NodeId/ExpandedNodeId, StatusCode, QualifiedName, LocalizedText,
-XmlElement). Arrays are entered as JSON lists. Matrices, custom structures and enumerations are **refused**
-rather than encoded on a guess.
+Supported write DataTypes are resolved from the server in `opcua/type_support.py`:
 
-## 12. Deliberate limitations (phases 1–4)
+* namespace-0 built-ins (Boolean, integer types with range checks, Float/Double, String, DateTime, Guid,
+  ByteString as base64, NodeId/ExpandedNodeId, StatusCode, QualifiedName, LocalizedText, XmlElement);
+* **enumerations** by name or number, read from `DataTypeDefinition` (`EnumDefinition`) or, on older servers,
+  from the `EnumStrings` / `EnumValues` property — sent as `Int32`;
+* **structures** from `StructureDefinition`, encoded in field order and sent as an `ExtensionObject` whose
+  `TypeId` is the structure's `DefaultEncodingId`; nested structures and rank-1 arrays are supported.
+
+Arrays are entered as JSON lists (a structure as a JSON object). Matrices, unions, optional-field structures and
+custom DataTypes without a readable definition are **refused** rather than encoded on a guess.
+
+The single write/call implementation is `opcua/write_service.py` (`prepare_write` → `send_prepared_write`,
+`prepare_call` → `send_prepared_call`), shared by `guarded_operations.py` and the sequence runner, so a value is
+typed once and a cancellation can be reported with `sent=True` instead of as a plain failure.
+
+A target may also be addressed by browse path: `opcua/path_support.py` builds
+`TranslateBrowsePathsToNodeIds` requests (bounded batches, `Name` or `index:Name` per element) and accepts only
+a **complete, unambiguous** match; no match, a partial match or several targets are reported and must be
+replaced by an explicit NodeId. `OpcUaService.resolve_browse_paths()` exposes the same helper, and sequence
+steps use it through `node_path` / `path_root`.
+
+### 11.1 Operator sequences
+
+`sequence_document.py` parses and validates a `opcua-explorer-sequence` document once, before execution; the GUI
+tab, the project file and the CLI all use it. The document owns everything device-specific: `preconditions`, the
+gate (`on`, `verify`, `keepalive` + interval + `abort`/`warn`, `off`) and the body. `opcua/sequence_runner.py`
+only enforces mechanics: `gate.off` runs in `finally` (success, failed step, cancellation, keepalive abort), a
+failed `gate.verify` prevents the body, each step is sent once, a cancelled in-flight write/call is
+`outcome_unknown`, and one sequence runs at a time per session (`OpcUaService` keeps one runner per client and
+drops it on disconnect). `--dry run` resolves nodes, DataTypes, `InputArguments` and `Executable` and sends
+nothing.
+
+`gui/tabs/sequences_tab.py` loads the document, edits `${name}` inputs, previews the steps, and shows a live run
+timeline plus the gate outcome; **there is no armed state and no per-write dialog** — a write happens because a
+step asks for it and is read back. `cli_sequence.py` (`opcua-run-sequence`) is the Qt-free front end over the
+same service call. The project stores the document path and inputs (project version 2; version 1 still loads);
+opening a project never loads or runs a sequence.
+
+## 12. Deliberate limitations
 
 * No history reads; values are point-in-time.
 * Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
   opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.
 * The test suite covers one session, one browse root and one variable.
 * Writes and method calls are single-target and opt-in; there is no batch write, no restore-all and no
-  stress/scan mode.
+  stress/scan mode. A sequence may contain several steps, but each step is still one operation on one target and
+  nothing is retried.
+* Sequences are declarative, not scripts; a keepalive failure aborts between steps, matrices/unions are refused,
+  and `opcua-run-sequence` is not part of a PyInstaller bundle yet.
 * Sessions share one window and one asyncio loop. Each session has its own client, namespace table, address
-  space, live subscription and reconnect supervisor; there is no cross-session compare or merge, and a server
-  may refuse a second session (`BadTooManySessions`).
+  space, live subscription and reconnect supervisor; the shared **Compare** tab compares two of them without
+  owning a client or a subscription (it downloads through the selected sessions' services), and a server may
+  refuse a second session (`BadTooManySessions`).
 * Custom structures are exported as far as asyncua decoded them; binary ExtensionObject bodies are flagged.
 * Namespace filter keeps namespace 0 to preserve the standard type system and folder structure.
 * Download completeness depends on the session's rights; access-denied nodes are reported, not hidden.

@@ -18,6 +18,17 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .compare import (
+    COMPARISON_FORMAT,
+    COMPARISON_FORMAT_VERSION,
+    COMPARISON_LIMITATION_NOTE,
+    KIND_CHANGED,
+    KIND_EXTRA_IN_CANDIDATE,
+    KIND_LABELS,
+    KIND_MISSING_IN_CANDIDATE,
+    KIND_NOT_COMPARABLE,
+    ComparisonResult,
+)
 from .errors import ExportError
 from .models import (
     FUNCTIONAL_TEST_DISCLAIMER,
@@ -321,3 +332,237 @@ def write_html_report(run: TestRun, path: str | os.PathLike[str]) -> ReportResul
     except OSError as exc:
         raise ExportError(f"Could not write {target}: {exc}") from exc
     return ReportResult(path=target, bytes_written=len(text.encode("utf-8")), checks=len(run.checks))
+
+
+# ---------------------------------------------------------------------------
+# Address-space comparison reports
+# ---------------------------------------------------------------------------
+
+COMPARISON_REPORT_FORMAT = COMPARISON_FORMAT
+COMPARISON_REPORT_VERSION = COMPARISON_FORMAT_VERSION
+
+_BUCKETS: tuple[tuple[str, str], ...] = (
+    (KIND_MISSING_IN_CANDIDATE, "Only on the reference"),
+    (KIND_EXTRA_IN_CANDIDATE, "Only on the candidate"),
+    (KIND_CHANGED, "Different attributes"),
+    (KIND_NOT_COMPARABLE, "Not comparable"),
+)
+
+
+@dataclass(slots=True)
+class ComparisonReport:
+    path: Path
+    bytes_written: int
+    differences: int
+
+
+def comparison_to_document(result: ComparisonResult) -> dict[str, Any]:
+    """Canonical JSON document for a comparison (versioned by ``compare.py``)."""
+    document = result.to_dict()
+    document["generated_at_utc"] = iso_utc(utc_now())
+    document["disclaimer"] = COMPARISON_LIMITATION_NOTE
+    return document
+
+
+def write_comparison_json(
+    result: ComparisonResult,
+    path: str | os.PathLike[str],
+    *,
+    indent: int = 2,
+) -> ComparisonReport:
+    """Write the comparison JSON report atomically."""
+    target = Path(path)
+    document = comparison_to_document(result)
+    text = json.dumps(document, indent=indent, ensure_ascii=False, default=str)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(target)
+    except OSError as exc:
+        raise ExportError(f"Could not write {target}: {exc}") from exc
+    return ComparisonReport(path=target, bytes_written=len(text.encode("utf-8")), differences=result.difference_count)
+
+
+def _comparison_value(value: Any) -> str:
+    """Render one attribute value for the HTML table (scalars inline, structures as text)."""
+    if isinstance(value, (dict, list)):
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):  # pragma: no cover - snapshots are JSON-safe
+            text = str(value)
+        return f"<code>{escape(text)}</code>"
+    if value is None:
+        return '<span class="meta">not set</span>'
+    return f"<code>{escape(str(value))}</code>"
+
+
+def _comparison_attribute_rows(difference: Any) -> str:
+    if not difference.attributes:
+        return '<span class="meta">no attribute detail</span>'
+    rows = "".join(
+        f"<tr><th scope=\"row\">{escape(item.attribute)}</th>"
+        f"<td>{_comparison_value(item.reference)}</td>"
+        f"<td>{_comparison_value(item.candidate)}</td>"
+        f"<td>{escape(item.note)}</td></tr>"
+        for item in difference.attributes
+    )
+    return f"<table><thead><tr><th>Attribute</th><th>Reference</th><th>Candidate</th><th>Note</th></tr></thead><tbody>{rows}</tbody></table>"
+
+
+def _comparison_bucket_table(items: list[Any]) -> str:
+    rows = "".join(
+        _row(
+            [
+                escape(item.browse_path) or '<span class="meta">(no path)</span>',
+                escape(item.node_class),
+                f"<code>{escape(item.reference_node_id or '—')}</code>",
+                f"<code>{escape(item.candidate_node_id or '—')}</code>",
+                escape(item.note),
+                _comparison_attribute_rows(item),
+            ]
+        )
+        for item in items
+    )
+    return (
+        "<table><thead><tr><th>Browse path</th><th>Node class</th><th>Reference NodeId</th>"
+        "<th>Candidate NodeId</th><th>Note</th><th>Attributes</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def render_comparison_html(result: ComparisonResult) -> str:
+    """Render the comparison as a standalone HTML document."""
+    tiles = [
+        ("Matched", result.matched),
+        ("Missing", len(result.missing_in_candidate)),
+        ("Extra", len(result.extra_in_candidate)),
+        ("Changed", len(result.changed)),
+        ("Not comparable", len(result.not_comparable)),
+        ("Ignored", result.ignored),
+    ]
+    tile_html = "".join(
+        f'<div class="tile"><div class="label">{escape(label)}</div>'
+        f'<div class="value">{escape(str(value))}</div></div>'
+        for label, value in tiles
+    )
+    config_rows: list[tuple[str, Any]] = [
+        ("Reference", result.reference_endpoint),
+        ("Candidate", result.candidate_endpoint),
+        ("Tolerance", result.config.tolerance),
+        ("Match by browse path", "yes" if result.config.match_by_browse_path else "no"),
+        ("References compared", "yes" if result.config.compare_references else "no"),
+        ("Values compared for", ", ".join(sorted(result.config.value_node_ids)) or "no node"),
+        ("Float tolerance", result.config.float_tolerance),
+        ("Ignore list", ", ".join(sorted(result.config.ignore_node_ids)) or "empty"),
+        ("Reference nodes", result.reference_summary.get("nodes")),
+        ("Candidate nodes", result.candidate_summary.get("nodes")),
+        ("Generated", iso_utc(utc_now())),
+    ]
+
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>OPC UA address-space comparison</title>",
+        f"<style>{_STYLE}</style></head><body><main>",
+        "<h1>OPC UA address-space comparison</h1>",
+        f'<p class="subtitle">{escape(result.reference_endpoint)} → '
+        f"{escape(result.candidate_endpoint)}</p>",
+        f'<p class="disclaimer">{escape(COMPARISON_LIMITATION_NOTE)}</p>',
+        f'<div class="tiles">{tile_html}</div>',
+        "<h2>Comparison configuration</h2>",
+        f'<div class="card">{_definition_table(config_rows)}</div>',
+        "<h2>Result</h2>",
+        '<div class="card"><p>'
+        + (
+            "No difference found in the compared scope."
+            if result.is_equal
+            else f"{result.difference_count} difference(s) found."
+        )
+        + (" Warnings apply — read them before trusting the result." if result.has_warnings else "")
+        + "</p></div>",
+    ]
+
+    if result.warnings:
+        items = "".join(f"<li>{escape(warning)}</li>" for warning in result.warnings)
+        parts.extend(["<h2>Warnings</h2>", f'<div class="card"><ul>{items}</ul></div>'])
+
+    if result.truncated_differences:
+        parts.append(
+            f'<div class="card"><p>{result.truncated_differences} further difference(s) are counted but not '
+            "listed (row limit). Raise <code>max_differences</code> for the complete list.</p></div>"
+        )
+
+    for kind, title in _BUCKETS:
+        items = [item for item in result.differences if item.kind == kind]
+        if not items:
+            continue
+        parts.extend(
+            [f"<h2>{escape(title)} ({len(items)})</h2>", f'<div class="card">{_comparison_bucket_table(items)}</div>']
+        )
+
+    if result.namespace_differences:
+        rows = "".join(
+            _row(
+                [
+                    f"<code>{escape(str(entry.get('uri', '')))}</code>",
+                    escape(str(entry.get("reference_index") if entry.get("reference_index") is not None else "—")),
+                    escape(str(entry.get("candidate_index") if entry.get("candidate_index") is not None else "—")),
+                ]
+            )
+            for entry in result.namespace_differences
+        )
+        parts.extend(
+            [
+                "<h2>Namespaces</h2>",
+                '<div class="card"><table><thead><tr><th>Namespace URI</th><th>Reference index</th>'
+                f"<th>Candidate index</th></tr></thead><tbody>{rows}</tbody></table></div>",
+            ]
+        )
+
+    if result.reference_differences:
+        rows = "".join(
+            _row(
+                [
+                    escape(KIND_LABELS.get(entry.kind, entry.kind)),
+                    escape(entry.reference_type_name),
+                    f"<code>{escape(entry.source)}</code>",
+                    f"<code>{escape(entry.target)}</code>",
+                ]
+            )
+            for entry in result.reference_differences
+        )
+        parts.extend(
+            [
+                f"<h2>References ({len(result.reference_differences)})</h2>",
+                '<div class="card"><table><thead><tr><th>Kind</th><th>Reference type</th>'
+                f"<th>Source</th><th>Target</th></tr></thead><tbody>{rows}</tbody></table></div>",
+            ]
+        )
+
+    parts.extend(
+        [
+            '<p class="footer">Node identity: namespace URI + identifier; a NodeId printed above is the one '
+            "that session used and is not portable to the other server.</p>",
+            "</main></body></html>",
+        ]
+    )
+    return "\n".join(parts)
+
+
+def write_comparison_html(
+    result: ComparisonResult,
+    path: str | os.PathLike[str],
+) -> ComparisonReport:
+    """Write the comparison HTML report atomically."""
+    target = Path(path)
+    text = render_comparison_html(result)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(target)
+    except OSError as exc:
+        raise ExportError(f"Could not write {target}: {exc}") from exc
+    return ComparisonReport(path=target, bytes_written=len(text.encode("utf-8")), differences=result.difference_count)

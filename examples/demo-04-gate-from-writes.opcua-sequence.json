@@ -1,0 +1,36 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 04 - a gate built from plain writes",
+  "description": "Shows the gate lifecycle without a device lock: 'on', 'verify', 'keepalive' and 'off' are ordinary write steps on the demo's Running flag. The engine still releases the gate in finally (also on Stop or a failed step). Keepalive failures only warn here. Run against the demo server started with --no-updates.",
+  "inputs": {
+    "temperature": "31.5"
+  },
+  "gate": {
+    "on": [
+      { "kind": "write", "id": "claim", "node_id": "ns=2;s=Running", "value": "true", "verify": true }
+    ],
+    "verify": {
+      "kind": "expect",
+      "id": "claim-verified",
+      "node_id": "ns=2;s=Running",
+      "expected": "true"
+    },
+    "keepalive": {
+      "kind": "write",
+      "id": "renew",
+      "node_id": "ns=2;s=Running",
+      "value": "true"
+    },
+    "every_s": 1,
+    "on_failure": "warn",
+    "off": [
+      { "kind": "write", "id": "release", "node_id": "ns=2;s=Running", "value": "false", "verify": true }
+    ]
+  },
+  "steps": [
+    { "kind": "write", "id": "temperature-write", "node_id": "ns=2;s=Temperature", "value": "${temperature}", "verify": true },
+    { "kind": "expect", "id": "temperature-check", "node_id": "ns=2;s=Temperature", "expected": "${temperature}", "tolerance": 0.01 },
+    { "kind": "delay", "id": "hold-gate", "seconds": 2.5 }
+  ]
+}

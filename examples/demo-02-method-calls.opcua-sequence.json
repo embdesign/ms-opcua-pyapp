@@ -1,0 +1,22 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo 02 - the four ways to call a method",
+  "description": "Calls the demo Start method four times: by method NodeId, by namespace-qualified browse name, and twice through a browse path (once with the browse name, once with the NodeId). Arguments are typed from the server's InputArguments; each call is verified through the node the method writes.",
+  "inputs": {
+    "speed": "900"
+  },
+  "steps": [
+    { "kind": "call", "id": "by-method-node-id", "node_id": "ns=2;s=Motor", "method_node_id": "ns=2;s=Start", "arguments": ["${speed}"] },
+    { "kind": "expect", "id": "speed-after-id", "node_id": "ns=2;s=Speed", "expected": "${speed}", "tolerance": 0.01 },
+
+    { "kind": "call", "id": "by-browse-name", "node_id": "ns=2;s=Motor", "method_name": "2:Start", "arguments": ["1200"] },
+    { "kind": "expect", "id": "speed-after-name", "node_id": "ns=2;s=Speed", "expected": "1200", "tolerance": 0.01 },
+
+    { "kind": "call", "id": "by-path-browse-name", "path": ["2:Plant", "2:Line1", "2:Motor"], "method_name": "2:Start", "arguments": ["1500"] },
+    { "kind": "expect", "id": "speed-after-path-name", "node_id": "ns=2;s=Speed", "expected": "1500", "tolerance": 0.01 },
+
+    { "kind": "call", "id": "by-path-method-node-id", "path": ["2:Plant", "2:Line1", "2:Motor"], "method_node_id": "ns=2;s=Start", "arguments": ["300"] },
+    { "kind": "expect", "id": "speed-after-path-id", "node_id": "ns=2;s=Speed", "expected": "300", "tolerance": 0.01 }
+  ]
+}

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from .csv_exporter import CsvExportResult, export_csv
 from .json_exporter import JsonExportResult, export_json, snapshot_to_document
+from .json_loader import load_json_snapshot, snapshot_from_document
 
 __all__ = [
     "CsvExportResult",
     "JsonExportResult",
     "export_csv",
     "export_json",
+    "load_json_snapshot",
+    "snapshot_from_document",
     "snapshot_to_document",
 ]

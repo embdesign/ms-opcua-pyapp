@@ -176,7 +176,7 @@ def test_two_sessions_to_the_same_server_are_independent(qapp, tmp_path, monkeyp
 
         # Open a second session to the same endpoint.
         second_workspace = window.add_session()
-        assert window.tabs.count() == 4  # session 1, session 2, All monitors, logs
+        assert window.tabs.count() == 5  # session 1, session 2, All monitors, Compare, logs
         assert second_workspace.service is not first
         second_workspace.connection_tab.url_edit.setText(url)
         second_workspace.connection_tab._on_connect()
@@ -218,7 +218,7 @@ def test_two_sessions_to_the_same_server_are_independent(qapp, tmp_path, monkeyp
         # Closing the session removes only its tab.
         window.close_session(second_workspace)
         assert len(window.workspaces) == 1
-        assert window.tabs.count() == 3  # session, All monitors, Logs & reports
+        assert window.tabs.count() == 4  # session, All monitors, Compare, Logs & reports
         assert first.is_connected is True
         second_workspace = None
     finally:

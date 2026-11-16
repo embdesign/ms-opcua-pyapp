@@ -7,6 +7,7 @@ and without `uv` on the target machine.
 |---|---|
 | `opcua-explorer.spec` | windowed desktop bundle (`opcua-explorer`, `opcua-explorer.exe`) |
 | `opcua-export.spec` | console bundle (`opcua-export`, `opcua-export.exe`) — Qt-free |
+| `opcua-compare.spec` | console bundle (`opcua-compare`, `opcua-compare.exe`) — Qt-free |
 | `launchers/*.py` | tiny entry scripts PyInstaller analyses as plain scripts |
 | `../.github/actions/build-bundles/action.yml` | shared build step used by the workflows |
 | `../.github/workflows/package.yml` | build on push/PR, upload artefacts |
@@ -17,6 +18,13 @@ locally, and `dist/` and `build/` are already ignored by `.gitignore`.
 
 `opcua-demo-server` is **not** bundled. It is a development aid that starts an
 in-process demo server; use `uv run opcua-demo-server` from a checkout.
+
+`opcua-run-sequence` is also **not** bundled yet: it runs from a `uv` checkout
+(`uv run opcua-run-sequence --help`). Adding a fourth spec is deliberately left
+until a build has been verified on both CI platforms.
+
+`opcua-compare` **is** bundled (console, Qt-free): it can compare two saved JSON
+exports on a machine with no display server and no Python.
 
 ## Build locally
 
@@ -29,6 +37,10 @@ uv run --with pyinstaller==6.22.3 pyinstaller --noconfirm --clean \
 uv run --with pyinstaller==6.22.3 pyinstaller --noconfirm --clean \
     --distpath dist/pyinstaller --workpath build/pyinstaller \
     packaging/opcua-export.spec
+
+uv run --with pyinstaller==6.22.3 pyinstaller --noconfirm --clean \
+    --distpath dist/pyinstaller --workpath build/pyinstaller \
+    packaging/opcua-compare.spec
 ```
 
 Result:
@@ -36,12 +48,12 @@ Result:
 ```
 dist/pyinstaller/opcua-explorer/   opcua-explorer[.exe] + _internal/
 dist/pyinstaller/opcua-export/     opcua-export[.exe]   + _internal/
+dist/pyinstaller/opcua-compare/    opcua-compare[.exe]  + _internal/
 ```
 
-Measured Linux one-folder sizes (2026-11-14, Python 3.11, PySide6 6.12.0,
-PyInstaller 6.22.3): **opcua-explorer 205 MB, opcua-export 53 MB**. Qt's own
-shared libraries dominate the GUI bundle; the Python-level `excludes` in the
-spec cannot remove them, but they do keep the exporter Qt-free.
+Measured Linux one-folder sizes (2026-11-14, PyInstaller 6.22.3, before the PySide6 6.11.3 pin): **opcua-explorer
+205 MB, opcua-export 53 MB, opcua-compare 53 MB**. Qt's own shared libraries dominate the GUI bundle; the
+Python-level `excludes` in the spec cannot remove them, but they do keep both command-line bundles Qt-free.
 
 A wheel (`uv build`) is **not** equivalent: it still needs Python plus a
 dependency install on the target.
@@ -108,16 +120,24 @@ an Authenticode certificate kept outside this repository.
 ```
 opcua-explorer-windows-x64.zip   opcua-explorer-linux-x64.zip
 opcua-export-windows-x64.zip     opcua-export-linux-x64.zip
+opcua-compare-windows-x64.zip    opcua-compare-linux-x64.zip
 ```
 
-Each archive contains the bundle folder (`opcua-explorer/` or `opcua-export/`);
-unpack it and run the executable inside.
+Each archive contains the bundle folder (`opcua-explorer/`, `opcua-export/` or
+`opcua-compare/`); unpack it and run the executable inside.
 
 ## Verifying a build
 
 ```bash
 ./dist/pyinstaller/opcua-export/opcua-export --version
 ./dist/pyinstaller/opcua-export/opcua-export --help
+
+./dist/pyinstaller/opcua-compare/opcua-compare --version
+./dist/pyinstaller/opcua-compare/opcua-compare --help
+# offline smoke test: the same document against itself must compare equal (exit 0)
+./dist/pyinstaller/opcua-compare/opcua-compare \
+    --reference-file examples/demo-address-space.json \
+    --candidate-file examples/demo-address-space.json --quiet > /dev/null
 
 QT_QPA_PLATFORM=offscreen ./dist/pyinstaller/opcua-explorer/opcua-explorer &   # starts, then kill
 ```

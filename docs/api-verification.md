@@ -4,7 +4,7 @@ The brief requires verifying the real library API instead of inventing methods. 
 the installed package (`asyncua 2.1.0`, Python 3.11) via `inspect`/source inspection, and is exercised by the
 test suite.
 
-Environment: Python 3.11.2 · asyncua 2.1.0 · PySide6 6.12.0 · cryptography 50.0.2 · uv 0.13.7.
+Environment: Python 3.11.2 · asyncua 2.1.0 · PySide6 6.11.3 · cryptography 50.0.2 · uv 0.13.7.
 
 ## Client
 
@@ -94,7 +94,7 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
 * `XmlExporter(server, export_values=False)` with `build_etree(node_list, add_all_namespaces=False)`,
   `build_etree_chunked(...)`, `write_xml(path, pretty=True)` — no `export_xml_node` helper.
 
-## Subscription (used by the phase-2 test suite)
+## Subscription (used by the functional test suite)
 
 * `await client.create_subscription(period: float | ua.CreateSubscriptionParameters, handler, publishing=True,
   queue_maxsize=1000, overflow=OverflowPolicy.DROP_OLDEST)` returns a `Subscription`; internally it creates the
@@ -147,7 +147,7 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
-## NodeSet2 export (phase 3)
+## NodeSet2 export
 
 Verified against `asyncua/common/xmlexporter.py` and `asyncua/common/xmlparser.py`:
 
@@ -190,7 +190,7 @@ The command adds **no new asyncua API**: it calls `OpcUaService.discover()`, `co
 * `asyncio.run()` in the CLI owns its event loop, so the command is safe to call from a thread that has no
   running loop (which is how the integration tests drive it next to an in-process demo server).
 
-## Guarded write and method call (phase 4)
+## Guarded write and method call
 
 * `Node.read_data_type()` returns a `ua.NodeId` whose `NodeIdType` is **not** necessarily `Numeric`: built-in
   DataTypes such as `Double` (`i=11`) come back as `NodeIdType.TwoByte`. Compare `NamespaceIndex == 0` and
@@ -200,6 +200,11 @@ The command adds **no new asyncua API**: it calls `OpcUaService.discover()`, `co
   to `write_value` instead of letting `ua.Variant` infer (a Python `int` becomes `Int64`).
 * `Node.write_value(ua.DataValue(ua.Variant(value, variant_type)))` raises `ua.UaStatusCodeError` on rejection
   (`BadNotWritable`, `BadTypeMismatch`, `BadUserAccessDenied`, …); the code is `exc.code`, not `exc.args[0]`.
+* `Node.read_attribute(ua.AttributeIds.ValueRank)` returns the raw `Int32` **ValueRank** (verified against the
+  demo server on 2026-11-15): `Temperature` reports `-1`, while the array variable `Samples` reports **`0`**,
+  because asyncua's `add_variable` never sets the attribute. Per OPC UA Part 3 `0` means "one or more
+  dimensions", so `0` and `1` are a one-dimensional array, `-1` is a scalar, and the ambiguous `-2`/`-3` must be
+  decided from the entered text. Matrices (`>1`) are refused instead of being flattened.
 * A decoded `InputArguments` value contains **`asyncua.ua.uaprotocol_auto.Argument`** objects, while
   `ua.Argument` is the hand-written `uaprotocol_hand.Argument` class — `isinstance(value[0], ua.Argument)` is
   `False`. Duck-type on `Name`/`DataType`/`ValueRank` instead.
@@ -209,3 +214,58 @@ The command adds **no new asyncua API**: it calls `OpcUaService.discover()`, `co
   implementation must unwrap `variant.Value` before using the value.
 * `Node.read_attribute(ua.AttributeIds.UserAccessLevel)` / `Executable` return `DataValue`s whose
   `StatusCode` must be checked before trusting `Value.Value`.
+
+## Server-driven write typing (`opcua/type_support.py`, verified 2026-11-15)
+
+* `ua.AttributeIds.DataTypeDefinition` exists (value `23`) and is read with
+  `read_attribute(..., raise_on_bad_status=False)`; the Variant value is already a **decoded**
+  `ua.EnumDefinition` or `ua.StructureDefinition` (the same shape `nodeset2.py` checks for).
+* `ua.EnumDefinition.Fields` is a `list[ua.EnumField]` (`Value`, `DisplayName`, `Description`), **not**
+  `ua.EnumValueType`. `ua.EnumValueType` is what `EnumValues` properties contain (`Value`, `DisplayName`).
+* `ua.StructureDefinition` = `DefaultEncodingId`, `BaseDataType`, `StructureType`, `Fields`;
+  `ua.StructureField` = `Name`, `Description`, `DataType`, `ValueRank`, `ArrayDimensions`, `MaxStringLength`,
+  `IsOptional` (**default `True`**). `ua.StructureType.Structure` is the only kind this project encodes.
+* `asyncua.ua.ua_binary.struct_to_binary(instance)` serialises a dataclass in field order. Field annotations
+  must resolve to a `ua` type (`ua.Double`, `ua.String`, `ua.LocalizedText`, …) or a `list[...]` of one;
+  a bare Python `float`/`str` raises `UaError: No known way to pack value of type`.
+* Encoding a structure for a write is `ua.ExtensionObject(TypeId=<DefaultEncodingId>, Body=<struct_to_binary(...)>)`
+  inside `ua.Variant(value, ua.VariantType.ExtensionObject)`; `Encoding` stays at its default and the wire form is
+  `NodeId + 0x01 + Int32 length + body`. `ua.register_extension_object` is only needed for *decoding*, not for
+  writing.
+* `ua.datatype_to_varianttype` raises for a custom DataType (identifier > 25), so enumerations are sent with an
+  explicit `ua.VariantType.Int32` and structures with `ua.VariantType.ExtensionObject`.
+* `ua.NodeId.is_null()` exists and is the check for a missing `DefaultEncodingId`.
+
+## Browse-path resolution (`opcua/path_support.py`, verified 2026-11-15)
+
+* `asyncua.Client` has **no** `translate_browsepaths_to_nodeids`; the service lives on
+  `client.uaclient.translate_browsepaths_to_nodeids(paths)` and on
+  `client.uaclient.session.translate_browsepaths_to_nodeids(paths)` (same signature
+  `list[ua.BrowsePath] -> list[ua.BrowsePathResult]`).
+* `ua.BrowsePath(StartingNode, RelativePath)` expects **`ua.RelativePath(Elements=[...])`**, not a plain list;
+  passing a list fails while encoding with `AttributeError: 'list' object has no attribute 'Elements'`.
+* `ua.RelativePathElement(ReferenceTypeId, IsInverse, IncludeSubtypes, TargetName)`; `TargetName` is a
+  `ua.QualifiedName` (a bare name is namespace 0). `ua.ObjectIds.HierarchicalReferences` is `33`.
+* `ua.BrowsePathResult(StatusCode, Targets)`; `ua.BrowsePathTarget(TargetId, RemainingPathIndex)`.
+  A complete match reports `RemainingPathIndex = 0xFFFFFFFF`; a partial target must not be accepted as the
+  answer.
+* `TargetId` is an `ua.ExpandedNodeId` (`Identifier`, `NamespaceIndex`, `NodeIdType`, `NamespaceUri`,
+  `ServerIndex`). Its `to_string()` yields `ns=…` form only while `NamespaceUri` is empty; a URI-bearing target
+  must be refused or mapped explicitly.
+* The asyncua demo server implements the service; the web of virtual nodes makes it a real end-to-end test
+  (`tests/integration/test_path_resolution.py`).
+
+## Qt stability: the PySide6 pin (verified 2026-11-15)
+
+* **PySide6 6.12.0 aborts the interpreter** with
+  `Fatal Python error: none_dealloc: deallocating None: bug likely caused by a refcount error in a C extension`
+  after a few hundred `QTreeWidgetItem` rows are created, populated (`setText`, `setFont`, `setForeground`,
+  `setToolTip`) and discarded. The traceback points at whichever Qt setter happens to run when the corrupted
+  refcount is released; it is a Shiboken/QVariant regression, not application logic.
+* Reproduced with public Qt API only: ~200 rounds of *create parent → create 20 children → set roles →
+  `takeChildren()` → `takeTopLevelItem()`* already abort; 6.11.3 survives 100 000 items and 15 000 rounds.
+  Event processing (`QApplication.processEvents`), constructor-with-parent and role-free items make no
+  difference on 6.12.0, and no 6.12.x patch is published (6.12.0 is the newest release on the index).
+* The project therefore pins **`PySide6==6.11.3`** (`pyproject.toml`). The same churn runs in a subprocess in
+  `tests/integration/test_pyside_stability.py`, so a future upgrade fails a test instead of crashing the GUI
+  in production.

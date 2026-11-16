@@ -29,7 +29,7 @@ from ..opcua.client_service import OpcUaService
 from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectError, ProjectFile
 from .async_runner import AsyncRunner
 from .session_workspace import SessionWorkspace
-from .tabs import LogsTab, UnifiedMonitorTab
+from .tabs import CompareTab, LogsTab, UnifiedMonitorTab
 from .theme import set_chip_state
 
 _logger = logging.getLogger(__name__)
@@ -67,6 +67,8 @@ class MainWindow(QMainWindow):
 
         self.logs_tab = LogsTab()
         self.unified_monitor_tab = UnifiedMonitorTab()
+        #: Read-only comparison of two sessions; it owns no client of its own.
+        self.compare_tab = CompareTab(self._runner, self._settings)
         self.workspaces: list[SessionWorkspace] = []
 
         self._build_status_bar()
@@ -74,9 +76,12 @@ class MainWindow(QMainWindow):
 
         self.add_session(service)
         self.tabs.addTab(self.unified_monitor_tab, "All monitors")
+        self.tabs.addTab(self.compare_tab, "Compare")
         self.tabs.addTab(self.logs_tab, "Logs & reports")
-        for fixed in (self.unified_monitor_tab, self.logs_tab):
+        for fixed in (self.unified_monitor_tab, self.compare_tab, self.logs_tab):
             self._disable_close_button(self.tabs.indexOf(fixed))
+        self.compare_tab.message.connect(self._on_message)
+        self.compare_tab.report.connect(self.logs_tab.append_report)
 
         _logger.info("OPC UA Explorer %s started", __version__)
         self.statusBar().showMessage("Ready. Enter an endpoint URL on the Connection tab.")
@@ -105,6 +110,7 @@ class MainWindow(QMainWindow):
         self.tabs.insertTab(index, workspace, f"Session {self._session_counter}")
         for opened in self.workspaces:
             self.unified_monitor_tab.set_session_title(opened, self._display_title(opened))
+        self._refresh_compare_sessions()
         self._update_tab_text(workspace)
         self.tabs.setCurrentIndex(index)
         self._refresh_status()
@@ -139,6 +145,7 @@ class MainWindow(QMainWindow):
         self.workspaces.remove(workspace)
         if index >= 0:
             self.tabs.removeTab(index)
+        self._refresh_compare_sessions()
         workspace.deleteLater()
 
     @property
@@ -180,7 +187,7 @@ class MainWindow(QMainWindow):
 
     def show_tab(self, widget: Any) -> None:
         """Make the session page containing ``widget`` (or a fixed tab) visible."""
-        if widget is self.logs_tab or widget is self.unified_monitor_tab:
+        if widget in (self.logs_tab, self.unified_monitor_tab, self.compare_tab):
             self.tabs.setCurrentWidget(widget)
             return
         for workspace in self.workspaces:
@@ -301,7 +308,15 @@ class MainWindow(QMainWindow):
         self._update_tab_text(workspace)
         for opened in self.workspaces:
             self.unified_monitor_tab.set_session_title(opened, self._display_title(opened))
+        self._refresh_compare_sessions()
         self._refresh_status()
+
+    def _refresh_compare_sessions(self) -> None:
+        """Keep the Compare tab's selectors in step with the open sessions."""
+        self.compare_tab.set_sessions(
+            [(workspace, self._display_title(workspace)) for workspace in self.workspaces],
+            descriptions={workspace: workspace.describe() for workspace in self.workspaces},
+        )
 
     def _on_message(self, text: str, timeout: int) -> None:
         if text:
@@ -448,6 +463,7 @@ class MainWindow(QMainWindow):
         for workspace in self.workspaces:
             workspace.shutdown()
         self.unified_monitor_tab.shutdown()
+        self.compare_tab.shutdown()
         self.logs_tab.shutdown()
         try:
             self._settings.save()

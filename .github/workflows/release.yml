@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag such as v0.1.0 to build both platform bundles and attach them to a
+# Push a tag such as v0.1.1 to build both platform bundles and attach them to a
 # GitHub Release. The tag must match `version` in pyproject.toml.
 
 on:
@@ -30,7 +30,7 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
 
-      - name: Smoke test the exporter
+      - name: Smoke test the console bundles
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +38,13 @@ jobs:
           if [ "${RUNNER_OS:-}" = "Windows" ]; then exe=".exe"; fi
           ./dist/pyinstaller/opcua-export/opcua-export${exe} --version
           ./dist/pyinstaller/opcua-export/opcua-export${exe} --help > /dev/null
+          ./dist/pyinstaller/opcua-compare/opcua-compare${exe} --version
+          ./dist/pyinstaller/opcua-compare/opcua-compare${exe} --help > /dev/null
+          # Offline comparison: the committed sample against itself must exit 0, which proves
+          # the frozen build can load a JSON export and run the comparison without a server.
+          ./dist/pyinstaller/opcua-compare/opcua-compare${exe} \
+            --reference-file examples/demo-address-space.json \
+            --candidate-file examples/demo-address-space.json --quiet > /dev/null
 
       - name: GUI must start and stay up (Linux)
         if: runner.os == 'Linux'

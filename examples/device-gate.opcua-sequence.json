@@ -1,0 +1,94 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Device - locked setpoint change",
+  "description": "Complete template for a device that guards setpoint changes with a lock object. Replace the NodeIds and browse names with what your device exposes. If a method takes arguments, add them in InputArguments order, for example \"arguments\": [\"${client_id}\"]; methods without arguments need no key.",
+  "inputs": {
+    "setpoint": "24.0",
+    "settle_s": "0.5"
+  },
+  "preconditions": [
+    {
+      "kind": "assert",
+      "id": "device-ready",
+      "path": ["2:Device", "2:Ready"],
+      "expected": "true"
+    },
+    {
+      "kind": "ensure",
+      "id": "remote-mode",
+      "path": ["2:Device", "2:OperationMode"],
+      "value": "Remote",
+      "optional": true
+    }
+  ],
+  "gate": {
+    "on": [
+      {
+        "kind": "call",
+        "id": "acquire",
+        "node": "ns=2;s=Lock",
+        "method": "2:InitLock"
+      }
+    ],
+    "verify": {
+      "kind": "expect",
+      "id": "gate-held",
+      "path": ["2:Device", "2:LockHeld"],
+      "expected": "true"
+    },
+    "keepalive": {
+      "kind": "call",
+      "id": "renew",
+      "node": "ns=2;s=Lock",
+      "method": "2:RenewLock"
+    },
+    "every_s": 5,
+    "on_failure": "abort",
+    "off": [
+      {
+        "kind": "call",
+        "id": "release",
+        "node": "ns=2;s=Lock",
+        "method": "2:ExitLock"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "kind": "write",
+      "id": "setpoint",
+      "path": ["2:Device", "2:Setpoints", "2:Voltage"],
+      "value": "${setpoint}",
+      "verify": true
+    },
+    {
+      "kind": "expect",
+      "id": "setpoint-read-back",
+      "path": ["2:Device", "2:Setpoints", "2:Voltage"],
+      "expected": "${setpoint}",
+      "tolerance": 0.05
+    },
+    {
+      "kind": "call",
+      "id": "apply",
+      "node": "ns=2;s=Device",
+      "method": "2:ApplySetpoints"
+    },
+    {
+      "kind": "delay",
+      "id": "settle",
+      "value": "${settle_s}"
+    },
+    {
+      "kind": "wait_until",
+      "id": "output-stable",
+      "path": ["2:Device", "2:ActualVoltage"],
+      "expected": "${setpoint}",
+      "tolerance": 0.2,
+      "timeout_seconds": 10,
+      "poll_seconds": 0.2
+    }
+  ],
+  "abort_on_failure": true
+}

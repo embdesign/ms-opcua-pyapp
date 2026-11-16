@@ -1,0 +1,30 @@
+{
+  "format": "opcua-explorer-sequence",
+  "version": 1,
+  "name": "Demo - set the line temperature",
+  "description": "Writes the demo server's Temperature node and reads it back, so the Sequences tab and opcua-run-sequence can be tried without a device.",
+  "inputs": {
+    "temperature": "42.5"
+  },
+  "steps": [
+    {
+      "kind": "write",
+      "id": "set-temperature",
+      "node_id": "ns=2;s=Temperature",
+      "value": "${temperature}",
+      "verify": true
+    },
+    {
+      "kind": "expect",
+      "id": "check-temperature",
+      "node_id": "ns=2;s=Temperature",
+      "expected": "${temperature}",
+      "tolerance": 0.01
+    },
+    {
+      "kind": "delay",
+      "id": "settle",
+      "seconds": 0.2
+    }
+  ]
+}
