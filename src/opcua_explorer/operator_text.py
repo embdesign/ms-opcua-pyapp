@@ -45,6 +45,70 @@ def guarded_operation_confirmation(*, endpoint_url: str, config: TestConfig) -> 
     return "\n".join(lines)
 
 
+def write_value_confirmation(
+    *,
+    endpoint_url: str,
+    node_id: str,
+    value_preview: str,
+    data_type_label: str,
+    value_rank: int,
+    restore_previous: bool,
+    previous_value: str = "",
+) -> str:
+    """Confirmation body for one interactive variable write from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one write will be sent, then read back and compared:",
+        f"  WRITE  {node_id}  \u2190  {value_preview}",
+        f"  Type: {data_type_label}, ValueRank {value_rank}",
+    ]
+    if previous_value:
+        lines.append(f"  Current value: {previous_value}")
+    lines.extend(
+        [
+            "  Restore afterwards: " + ("yes, one additional verified write" if restore_previous else "no"),
+            "",
+            "A refused write, a differing read-back, or an unreadable previous value is reported as such. "
+            "Nothing is retried and no value is restored unless you asked for it.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def method_call_confirmation(
+    *,
+    endpoint_url: str,
+    object_node_id: str,
+    method_node_id: str,
+    arguments: list[str],
+    executable_status: str = "",
+) -> str:
+    """Confirmation body for one interactive method call from the Write & call tab."""
+    rendered = ", ".join(arguments) if arguments else "no arguments"
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one method call will be sent:",
+        f"  CALL  {method_node_id} on {object_node_id}",
+        f"  Arguments ({len(arguments)}): {rendered}",
+    ]
+    if executable_status:
+        lines.append(f"  Executable: {executable_status}")
+    lines.extend(
+        [
+            "",
+            "The arguments were parsed with the server's InputArguments. The call is never retried, and its "
+            "output arguments are reported as the server returned them.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
 def acknowledge_condition_confirmation(
     *, endpoint_url: str, condition_node_id: str, event_id: str, comment: str
 ) -> str:

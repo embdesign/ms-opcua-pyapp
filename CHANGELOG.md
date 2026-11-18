@@ -62,6 +62,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `decode_data_value()`, and results are sorted oldest-first. A Good-but-empty answer is not an error: the
   result records the node's `Historizing` attribute and says whether the node does not historize or the range
   holds no values. Nothing is written and no `HistoryUpdate` is sent.
+- **Write & call page** — an interactive page for one variable write and one method call, both through
+  `opcua/write_service.py` with `WriteAuthority("operator-dialog", …)`. **Read node** shows NodeClass, DataType,
+  ValueRank, access level and the current value; **Write value…** parses the text with the server's
+  DataType/ValueRank, shows a confirmation built by `operator_text.write_value_confirmation` (endpoint, node,
+  value, type, previous value, restore choice, equipment warning), sends exactly one write, reads it back and
+  compares it, and — only when ticked — performs one further verified restore write. **Read signature** lists the
+  method's `InputArguments` as editable rows; **Call method…** confirms the exact object/method/arguments, checks
+  `Executable`, sends exactly one call and reports the output arguments. Nothing is retried and a refused value
+  never reaches the confirmation dialog. `WriteResult` reports the write and the optional restore, and
+  `CallOutcome.status_code` is now `Good` on a successful call.
 - **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
   in-memory historian, so the History tab can be exercised locally and in tests.
 - **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one

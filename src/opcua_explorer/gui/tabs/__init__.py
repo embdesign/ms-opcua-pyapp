@@ -14,6 +14,7 @@ from .sequences_tab import SequencesTab
 from .server_tab import ServerTab
 from .tests_tab import TestsTab
 from .unified_monitor_tab import UnifiedMonitorTab
+from .write_tab import WriteCallTab
 
 __all__ = [
     "BrowserTab",
@@ -28,4 +29,5 @@ __all__ = [
     "ServerTab",
     "TestsTab",
     "UnifiedMonitorTab",
+    "WriteCallTab",
 ]

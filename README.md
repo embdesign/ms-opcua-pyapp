@@ -12,11 +12,13 @@ Windows and Linux, no Docker.
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
 > detail view, read-only server status & diagnostics and raw history reads, functional tests (read-only by default)
-> with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
+> with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation, an
+> interactive **Write & call** page (confirmed write with read-back and optional verified restore, confirmed method
+> call with the server's argument types),
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 517 tests. See
+> suite has 537 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -42,6 +44,7 @@ session's client.
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
 | **Server** | Read-only **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **History** | Read-only raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
+| **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write) and call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
@@ -182,6 +185,9 @@ uv run opcua-explorer
    target, value and restore choice; confirm it and the write is read back (and restored only if you ticked the
    restore box). The demo's `Start` method can be called the same way: object `ns=2;s=Motor`, method
    `ns=2;s=Start`, argument `900`.
+   The same operations are available interactively in the **Write & call** page: **Read node** shows the type and
+   current value, **Write value…** confirms the exact target and reads the value back, and **Read signature** +
+   **Call method…** does the same for one method (object `ns=2;s=Motor`, method `ns=2;s=Start`, argument `900`).
 8. **Compare** (two sessions): open a second session with **File → New connection** and connect it to the other
    device, then switch to the shared **Compare** tab, choose *Reference* and *Candidate* and press **Compare**.
    Both address spaces are downloaded again with one scope; the table lists every difference (missing / extra /
@@ -228,11 +234,13 @@ Start with `--no-username` to disable username authentication.
   private-key passwords live only in memory and are cleared from the form after connecting.
 * **No secrets in logs.** A logging filter redacts registered secret values, `password=…`-style patterns, PEM
   private-key blocks — including formatted exception tracebacks.
-* **Read-only unless explicitly confirmed.** Browsing, download, export, live monitoring and the default test
-  suite send only `Read`, `Browse`, `CreateSubscription`/`CreateMonitoredItems`, `DeleteMonitoredItems` and
-  `DeleteSubscriptions`. A write or method call is sent only for the single target the operator configured and
-  confirmed (section 8); nothing is discovered, repeated or automated. The one disruptive check (connection
-  recovery) is opt-in and runs last.
+* **Read-only unless explicitly confirmed.** Browsing, download, export, live monitoring, history and the default
+  test suite send only `Read`, `Browse`, `CreateSubscription`/`CreateMonitoredItems`, `HistoryRead`,
+  `DeleteMonitoredItems`, `DeleteSubscriptions` and `FindServers`. A write or method call is sent only for the
+  single target the operator configured and confirmed — in the **Tests** tab, the **Write & call** page or an
+  operator-written sequence document — and every one of them goes through the same
+  `opcua/write_service.py` path with `WriteAuthority`. Nothing is discovered, repeated or automated. The one
+  disruptive check (connection recovery) is opt-in and runs last.
 
 Trust store location: `%APPDATA%\opcua-explorer\trusted_server_certificates.json` on Windows,
 `~/.config/opcua-explorer/trusted_server_certificates.json` on Linux. It is managed in the GUI via
@@ -310,9 +318,9 @@ src/opcua_explorer/
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
-│   ├── session_workspace.py  one session: its service and nine pages
+│   ├── session_workspace.py  one session: its service and ten pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
-│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, events, server, history, tests, sequences, logs, unified monitor, compare
+│   └── tabs/             connection (+ connection_dialogs, server_directory_dialog), browser, export, monitor, events, server, history, write, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
 examples/                 generated sample exports and sample reports
@@ -668,7 +676,8 @@ uv run pytest tests/unit -q   # fast, no network
   reference classification, report documents and HTML escaping, NodeSet2 structural/schema validation,
   guarded-write value parsing (built-in scalars, arrays, ISO dates; enumerations and structures are typed from
   the server; matrices, unions and optional-field structures are refused), the raw-history request shape and
-  its continuation-point handling (against a fake session) and the export CLI's argument
+  its continuation-point handling (against a fake session), the interactive write result semantics (a failed
+  write is never hidden by a restore) and method-signature rows, and the export CLI's argument
   mapping and certificate-approval decisions (no network).
 * **Integration**: against the in-process demo server — discovery (endpoints and the FindServers
   directory, including the URI filter and a refusing endpoint), anonymous and username authentication,
@@ -679,7 +688,8 @@ uv run pytest tests/unit -q   # fast, no network
   mutual certificates, certificate-change
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
   and the opt-in recovery check), server status/diagnostics, raw history of a historized and a
-  non-historized node and report files. Sequence documents are exercised against the demo server
+  non-historized node, an interactive write (with and without restore, refused value, non-variable target),
+  one method call (signature, wrong argument count, output) and report files. Sequence documents are exercised against the demo server
   (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
   downloads end to end. The headless `opcua-export` command is exercised end to end
   (Objects scope, start-node scope with parent closure, namespace scope, manifest, unsupported custom DataType,
@@ -690,7 +700,8 @@ uv run pytest tests/unit -q   # fast, no network
   confirmation accepted/declined; connection loss and automatic reconnect; two independent sessions; project
   save/load; live-monitor markers in the address-space tree; Compare tab runs against two sessions and a saved
   JSON export; Sequences tab load, dry run and run; History tab reads a historized node and reports a
-  non-historized one; the Find servers dialog lists the demo server and fills the endpoint field).
+  non-historized one; the Find servers dialog lists the demo server and fills the endpoint field; the Write & call
+  page declines and accepts a write, restores the previous value and calls a method).
 
 ## 10. Limitations
 
@@ -703,9 +714,10 @@ The implemented scope is complete; the following are **not** claimed:
   `RolePermissions`/`UserRolePermissions`, `Symmetric`/`IsAbstract` of custom ReferenceTypes and `IsAbstract`
   of custom DataTypes — and `View` nodes are listed in the export's `limitations` instead of being dropped
   silently.
-* **Writes and method calls are single-target and opt-in.** One node, one value, one call, one confirmation.
-  There is no batch write, no "write to all writable nodes", no discovery-driven method invocation, no
-  automatic value restore and no write stress mode. Writes are typed from the server: built-in DataTypes,
+* **Writes and method calls are single-target and opt-in.** One node, one value, one call, one confirmation — in
+  the **Write & call** page, in the guarded checks and in a sequence step alike. There is no batch write, no
+  "write to all writable nodes", no discovery-driven method invocation, no automatic value restore and no write
+  stress mode. Writes are typed from the server: built-in DataTypes,
   enumerations (by name or number) and structures with a readable `DataTypeDefinition` (sent as
   `ExtensionObject`); matrices, unions and types without a definition are refused rather than encoded on a guess.
 * **No stress testing.** Latency is a bounded sample of ordinary reads, not a benchmark; there is no load or

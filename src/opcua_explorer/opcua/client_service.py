@@ -98,8 +98,13 @@ from .server_diagnostics import read_server_status
 from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .ua_names import node_class_name
-from .write_service import CallOutcome
+from .write_service import CallOutcome, Inspection, WriteResult
 from .write_service import acknowledge_condition as acknowledge_condition_impl
+from .write_service import call_method as invoke_method_impl
+from .write_service import inspect_call as call_preview_impl
+from .write_service import inspect_write as write_preview_impl
+from .write_service import read_method_signature as read_method_signature_impl
+from .write_service import write_and_restore as write_node_value_impl
 
 CLIENT_NAME = "OPC UA Explorer"
 CLIENT_APPLICATION_NAME = "OPC UA Explorer"
@@ -955,6 +960,77 @@ class OpcUaService:
         )
         return await acknowledge_condition_impl(
             client, condition_node_id, event_id, comment, authorization=authorization
+        )
+
+    # -- interactive write / call ------------------------------------------
+    async def method_signature(self, method_node_id: Any) -> list[dict[str, Any]]:
+        """``InputArguments`` of one method as plain rows; nothing is called."""
+        client = self._require_client()
+        target = _normalise_node_id(method_node_id)
+        return await read_method_signature_impl(client, target)
+
+    async def write_preview(self, node_id: Any, value_text: str) -> Inspection:
+        """Validate one write without sending it (type, ValueRank, parsed preview)."""
+        client = self._require_client()
+        return await write_preview_impl(client, _normalise_node_id(node_id), value_text)
+
+    async def call_preview(
+        self, object_node_id: Any, method_node_id: Any, argument_texts: list[str]
+    ) -> Inspection:
+        """Validate one method call without calling it."""
+        client = self._require_client()
+        return await call_preview_impl(
+            client,
+            _normalise_node_id(object_node_id),
+            _normalise_node_id(method_node_id),
+            [str(text) for text in argument_texts],
+        )
+
+    async def write_node_value(
+        self,
+        node_id: Any,
+        value_text: str,
+        *,
+        restore_previous: bool = False,
+        reference: str = "",
+    ) -> WriteResult:
+        """One operator-requested write of one variable, read back and optionally restored.
+
+        The operator dialog is the authority. Exactly one write is sent, then read
+        back; a restore is one further verified write and happens only when asked.
+        """
+        client = self._require_client()
+        self._require_session()
+        target = _normalise_node_id(node_id)
+        authorization = WriteAuthority(AUTHORITY_OPERATOR_DIALOG, reference or f"write {target}")
+        return await write_node_value_impl(
+            client,
+            target,
+            value_text,
+            authorization=authorization,
+            restore_previous=restore_previous,
+        )
+
+    async def invoke_method(
+        self,
+        object_node_id: Any,
+        method_node_id: Any,
+        argument_texts: list[str],
+        *,
+        reference: str = "",
+    ) -> CallOutcome:
+        """One operator-requested method call on one object node; exactly once."""
+        client = self._require_client()
+        self._require_session()
+        owner = _normalise_node_id(object_node_id)
+        method = _normalise_node_id(method_node_id)
+        authorization = WriteAuthority(AUTHORITY_OPERATOR_DIALOG, reference or f"call {method}")
+        return await invoke_method_impl(
+            client,
+            owner,
+            method,
+            [str(text) for text in argument_texts],
+            authorization=authorization,
         )
 
     # -- download ----------------------------------------------------------

@@ -1,4 +1,4 @@
-"""One OPC UA session: its own service, connection state and nine tabs.
+"""One OPC UA session: its own service, connection state and ten tabs.
 
 The window shell (:class:`~opcua_explorer.gui.main_window.MainWindow`) hosts any
 number of these workspaces as top-level tabs. Each workspace owns an independent
@@ -34,6 +34,7 @@ from .tabs import (
     SequencesTab,
     ServerTab,
     TestsTab,
+    WriteCallTab,
 )
 
 _logger = logging.getLogger(__name__)
@@ -90,6 +91,9 @@ class SessionWorkspace(QWidget):
         self.history_tab = HistoryTab(
             runner, service, selection_provider=self.browser_tab.current_node_id
         )
+        self.write_tab = WriteCallTab(
+            runner, service, selection_provider=self.browser_tab.current_node_id
+        )
         self.server_tab = ServerTab(runner, service)
         self.tests_tab = TestsTab(
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
@@ -102,6 +106,7 @@ class SessionWorkspace(QWidget):
         self.tabs.addTab(self.monitor_tab, "Live monitor")
         self.tabs.addTab(self.events_tab, "Events")
         self.tabs.addTab(self.history_tab, "History")
+        self.tabs.addTab(self.write_tab, "Write & call")
         self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.tests_tab, "Tests")
         self.tabs.addTab(self.sequences_tab, "Sequences")
@@ -221,6 +226,7 @@ class SessionWorkspace(QWidget):
         self.monitor_tab.set_connected(True)
         self.events_tab.set_connected(True)
         self.history_tab.set_connected(True)
+        self.write_tab.set_connected(True)
         self.server_tab.set_connected(True)
         self.tests_tab.set_connected(True)
         self.sequences_tab.set_connected(True)
@@ -255,6 +261,7 @@ class SessionWorkspace(QWidget):
         self.monitor_tab.set_connected(connected)
         self.events_tab.set_connected(connected)
         self.history_tab.set_connected(connected)
+        self.write_tab.set_connected(connected)
         self.server_tab.set_connected(connected)
         self.tests_tab.set_connected(connected)
         self.sequences_tab.set_connected(connected)
@@ -325,6 +332,7 @@ class SessionWorkspace(QWidget):
         self.monitor_tab.shutdown()
         self.events_tab.shutdown()
         self.history_tab.shutdown()
+        self.write_tab.shutdown()
         self.server_tab.shutdown()
         self.tests_tab.shutdown()
         self.sequences_tab.shutdown()

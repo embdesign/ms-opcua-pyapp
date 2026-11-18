@@ -83,6 +83,7 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
             "Live monitor",
             "Events",
             "History",
+            "Write & call",
             "Server",
             "Tests",
             "Sequences",

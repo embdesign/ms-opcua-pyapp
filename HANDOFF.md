@@ -26,7 +26,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-517 tests pass (388 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+537 tests pass (399 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -82,6 +82,17 @@ opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters
 name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
 deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
 lists itself as `urn:opcua-explorer:demo:server`.
+
+**Interactive write & call — delivered.** `gui/tabs/write_tab.py` is the third surface over
+`opcua/write_service.py` (after the guarded checks and the sequence runner): `OpcUaService.write_preview` /
+`write_node_value` / `method_signature` / `call_preview` / `invoke_method`, all under
+`WriteAuthority("operator-dialog", …)`. **Read node** shows NodeClass/DataType/ValueRank/access level and the
+current value; a write is previewed (so a refused value never reaches a dialog), confirmed with
+`operator_text.write_value_confirmation`, sent once, read back and compared, and optionally restored with one
+further verified write (`WriteResult`). A method call reads the server's `InputArguments` into editable rows,
+confirms the exact object/method/arguments (`operator_text.method_call_confirmation`), checks `Executable`, sends
+once and reports `output_values`. `CallOutcome.status_code` is `Good` on success. The tab is the tenth session
+page; `ask_confirmation` is a module function so GUI tests stub the dialog.
 
 **Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
 `models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
@@ -142,7 +153,7 @@ bundles are built now (GUI, export, compare).
   `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
   into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
 - UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors”, “Compare” and
-  “Logs & reports”). One session = `gui/session_workspace.py` + its nine pages under `gui/tabs/`.
+  “Logs & reports”). One session = `gui/session_workspace.py` + its ten pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
   `asyncua.Client`.
 - Pure layers (no asyncua, no Qt): `models.py`, `config.py`, `defaults.py`, `project.py`,
@@ -163,8 +174,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **388 passed** |
-| Full suite | `uv run pytest -q` | **517 passed** (≈6–10 min on this host; up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **399 passed** |
+| Full suite | `uv run pytest -q` | **537 passed** (≈7–10 min on this host; up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -178,7 +189,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 517 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 537 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

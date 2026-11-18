@@ -269,6 +269,21 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
+## Interactive write and method call (verified 2026-11-18)
+
+* `Node.write_value(ua.DataValue(ua.Variant(value, variant_type)))` sends one `WriteRequest`; a Bad result raises
+  `ua.UaStatusCodeError` whose `.code` can be turned into a StatusCode name. Reading the previous value uses
+  `Node.read_data_value()` (StatusCode + Variant + timestamps).
+* `ObjectNode.call_method(method_node, *args)` returns the method result. **asyncua unwraps a single output
+  argument** (a plain value, not a list) while multi-output methods return a list; the caller must normalise both
+  (the project stores `CallOutcome.output_values`).
+* `read_input_arguments()` returns `uaprotocol_auto.Argument` objects (not `ua.Argument`) with `Name`, `DataType`,
+  `ValueRank` and `Description` (`LocalizedText` with `Text` first in its constructor).
+* `Node.get_child(["InputArguments"])` raises when the property is absent — a method without arguments — so an
+  empty signature is a normal result, not an error.
+* A Good service result is not proof of effect: the project always reads the value back and compares it, and
+  reports a differing read-back as a failure.
+
 ## NodeSet2 export
 
 Verified against `asyncua/common/xmlexporter.py` and `asyncua/common/xmlparser.py`:

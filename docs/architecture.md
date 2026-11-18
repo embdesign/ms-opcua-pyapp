@@ -33,8 +33,8 @@ Derived design rules:
 │ gui/  (PySide6)                                                      │
 │  app.py · main_window.py · session_workspace.py                      │
 │  tabs/{connection,connection_dialogs,browser,export,monitor,events,  │
-│        history,server,tests,sequences,logs,unified_monitor,compare,   │
-│        server_directory_dialog}                                     │
+│        history,write,server,tests,sequences,logs,                    │
+│        unified_monitor,compare,server_directory_dialog}             │
 │  async_runner.py  ← only place Qt meets asyncio                      │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
@@ -68,7 +68,7 @@ Rules that keep the layers honest:
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
 * Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
-* `gui/session_workspace.py` owns one service and its nine pages and injects that session's browser
+* `gui/session_workspace.py` owns one service and its ten pages and injects that session's browser
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
@@ -196,8 +196,8 @@ there is no retry. `FindServersOnNetwork` (multicast/GDS discovery) is not offer
 `MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
 bar and three shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors), `CompareTab`
 (read-only structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
-`OpcUaService` and the nine pages
-(Connection, Address space, Export, Live monitor, Events, History, Server, Tests, Sequences). Sessions are fully independent — separate client,
+`OpcUaService` and the ten pages
+(Connection, Address space, Export, Live monitor, Events, History, Write & call, Server, Tests, Sequences). Sessions are fully independent — separate client,
 discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
 two sessions to the same endpoint are allowed. `File → New connection` (`Ctrl+N`) creates a new service on the
 same asyncio runner and the same trust store; closing a session tab releases only that client. All sessions share
@@ -442,6 +442,12 @@ dynamic string is HTML-escaped (server-supplied names end up in reports), the pa
 and the status pills use contrast-checked colours.
 
 ## 11. Guarded write and method call
+
+There are three operator-facing surfaces for a write or a call — the guarded checks in the **Tests** tab, the
+interactive **Write & call** page (`gui/tabs/write_tab.py`) and a sequence document step — and all three call the
+same `opcua/write_service.py` primitives. The interactive page adds one wrinkle: it previews (`write_preview` /
+`call_preview`), confirms, then sends, and reports the write, its read-back and the optional restore as one
+`WriteResult`.
 
 Both operations live in `opcua/guarded_operations.py` (the runner schedules them through the same plan as the
 read-only checks) and share three rules:

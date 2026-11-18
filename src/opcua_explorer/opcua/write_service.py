@@ -106,6 +106,30 @@ class RestoreOutcome:
 
 
 @dataclass(slots=True)
+class WriteResult:
+    """One operator-requested write: the write itself plus an optional explicit restore.
+
+    The restore is a separate, equally single and verified write (``restore_value``);
+    it never happens unless the caller asked for it.
+    """
+
+    write: WriteOutcome
+    restore: RestoreOutcome | None = None
+
+    @property
+    def status(self) -> str:
+        if self.restore is None or self.write.status != STATUS_PASSED:
+            return self.write.status
+        return self.restore.status
+
+    def summary_text(self) -> str:
+        parts = [self.write.detail or self.write.status]
+        if self.restore is not None:
+            parts.append(self.restore.detail or self.restore.status)
+        return " ".join(part for part in parts if part)
+
+
+@dataclass(slots=True)
 class PreparedCall:
     """A validated method call, including the signature read from ``InputArguments``."""
 
@@ -144,6 +168,8 @@ class Inspection:
     ok: bool
     detail: str
     preview: str = ""
+    data_type_label: str = ""
+    value_rank: int = 0
 
 
 async def prepare_write(client: Any, node_id: str, value_text: str) -> PreparedWrite:
@@ -195,6 +221,8 @@ async def inspect_write(client: Any, node_id: str, value_text: str) -> Inspectio
             f"({label}, ValueRank {prepared.value_rank}) and read it back"
         ),
         preview=preview,
+        data_type_label=label,
+        value_rank=int(prepared.value_rank),
     )
 
 
@@ -364,6 +392,42 @@ async def restore_value(
     return outcome
 
 
+async def write_and_restore(
+    client: Any,
+    node_id: str,
+    value_text: str,
+    *,
+    authorization: WriteAuthority,
+    restore_previous: bool = False,
+) -> WriteResult:
+    """Prepare and send one write, optionally restoring the value that was read first.
+
+    This is the interactive path (an operator typed the value in a dialog).
+    It sends exactly one write, reads it back, and - only when asked - one
+    restore write of the previously read value.
+    """
+    try:
+        prepared = await prepare_write(client, node_id, value_text)
+    except PrepareError as exc:
+        return WriteResult(
+            WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc), authorization=authorization)
+        )
+    outcome = await send_prepared_write(prepared, authorization=authorization)
+    result = WriteResult(outcome)
+    if not restore_previous:
+        return result
+    if not outcome.sent or not outcome.previous_known:
+        result.restore = RestoreOutcome(
+            node_id=node_id,
+            status=STATUS_SKIPPED,
+            detail="The previous value could not be read, so nothing was restored.",
+            authorization=authorization,
+        )
+        return result
+    result.restore = await restore_value(prepared, outcome.previous_raw, authorization=authorization)
+    return result
+
+
 async def resolve_method_node_id(client: Any, object_node_id: str, method_node_id: str, method_name: str) -> str:
     """Resolve a method below an object by browse name when no NodeId was given."""
     if method_node_id.strip():
@@ -382,6 +446,30 @@ async def resolve_method_node_id(client: Any, object_node_id: str, method_node_i
     return str(method_node.nodeid.to_string())
 
 
+def _signature_row(argument: Any) -> dict[str, Any]:
+    """One ``InputArguments`` entry as a plain row for confirmation and display."""
+    description = getattr(argument, "Description", None)
+    description_text = (
+        (description.Text or "") if isinstance(description, ua.LocalizedText) else str(description or "")
+    )
+    return {
+        "name": argument.Name or "",
+        "data_type": argument.DataType.to_string(),
+        "data_type_name": describe_data_type(argument.DataType),
+        "value_rank": int(argument.ValueRank),
+        "description": description_text,
+    }
+
+
+async def read_method_signature(client: Any, method_node_id: str) -> list[dict[str, Any]]:
+    """``InputArguments`` of one method as plain rows; nothing is called."""
+    try:
+        arguments = await read_input_arguments(client, method_node_id)
+    except MetadataUnavailable as exc:
+        raise PrepareError(str(exc)) from exc
+    return [_signature_row(argument) for argument in arguments]
+
+
 async def prepare_call(
     client: Any,
     object_node_id: str,
@@ -394,15 +482,7 @@ async def prepare_call(
     except MetadataUnavailable as exc:
         raise PrepareError(str(exc)) from exc
 
-    signature = [
-        {
-            "name": argument.Name,
-            "data_type": argument.DataType.to_string(),
-            "data_type_name": describe_data_type(argument.DataType),
-            "value_rank": int(argument.ValueRank),
-        }
-        for argument in arguments
-    ]
+    signature = [_signature_row(argument) for argument in arguments]
 
     if len(argument_texts) != len(arguments):
         rendered = ", ".join(
@@ -501,6 +581,7 @@ async def send_prepared_call(prepared: PreparedCall, *, authorization: WriteAuth
         return outcome
     outcome.sent = True
     outcome.status = STATUS_PASSED
+    outcome.status_code = "Good"
     # asyncua unwraps a single output argument; multi-output methods return a list.
     if result is None:
         outcome.output_values = []

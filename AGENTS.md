@@ -20,8 +20,8 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 517 passed (≈4–14 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 388 passed, ~3 s
+uv run pytest -q                           # full suite, 537 passed (≈7–14 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 399 passed, ~3 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -43,8 +43,8 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Integration tests start in-process demo servers on free loopback ports; they need no Docker and no sudo.
 - GUI tests run headless (`QT_QPA_PLATFORM=offscreen`) and are split by concern (`test_gui_smoke`,
   `test_gui_workflows`, `test_gui_monitor`, `test_gui_events`, `test_gui_server`, `test_gui_history`,
-  `test_gui_connection_states`, `test_gui_project`, `test_gui_compare`, `test_gui_sequences`;
-  `test_pyside_stability` guards the Qt pin). Shared helpers live in
+  `test_gui_write`, `test_gui_directory`, `test_gui_connection_states`, `test_gui_project`, `test_gui_compare`,
+  `test_gui_sequences`; `test_pyside_stability` guards the Qt pin). Shared helpers live in
   `tests/integration/gui_support.py`; the module-scoped `qapp` fixture lives in
   `tests/integration/conftest.py` and closes/deletes top-level widgets after each module. Do not remove that
   cleanup.
@@ -83,9 +83,14 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   aggregate, at-time or event-history paths without a verified asyncua API.
 - There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
   (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`). The
-  guarded checks and the sequence runner both use it; do not add another path that parses and sends a value.
+  guarded checks, the sequence runner and the **Write & call** tab (`gui/tabs/write_tab.py`) all use it; do not
+  add another path that parses and sends a value.
   Every sending function requires a keyword-only `authorization: WriteAuthority` (no default), so a write can
   never be sent without naming the operator dialog or the sequence document that asked for it.
+- `gui/tabs/write_tab.py` is a thin surface over `OpcUaService.write_preview` / `write_node_value` /
+  `method_signature` / `call_preview` / `invoke_method`. Its confirmation text lives in `operator_text
+  .write_value_confirmation` / `method_call_confirmation`, and `ask_confirmation` stays a module-level function
+  so tests can stub the dialog. Never bypass the preview: a refused value must not reach a confirmation dialog.
   `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
   `write_service.py` (the demo server excepted), and no default for `authorization`.
 - Condition acknowledgement is the **only** action of the Events tab: one `Acknowledge` method call through
