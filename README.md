@@ -6,15 +6,16 @@ deliberate, explicit security handling.
 Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.11.3 · managed with `uv` · native
 Windows and Linux, no Docker.
 
-> **Status — complete and maintained (2026-11-16)**
+> **Status — complete and maintained (2026-11-17)**
 > Implemented and tested: connection & security with automatic reconnect, multi-session window, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
-> (`opcua-export`), live data-change monitoring with a merged view, functional tests (read-only by default)
+> (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
+> detail view, read-only server status & diagnostics, functional tests (read-only by default)
 > with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 416 tests. See
+> suite has 489 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -25,8 +26,8 @@ Windows and Linux, no Docker.
 ## 1. What you can do with it
 
 Each session lives in its own tab (**File → New connection**, `Ctrl+N`) with its own OPC UA client, so you can
-work with several devices — or the same server twice — at the same time. A session tab contains the first six
-pages below. Three tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
+work with several devices — or the same server twice — at the same time. A session tab contains the pages below.
+Three tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
 and notification log, with a session filter), **Compare** (a read-only structural comparison of two sessions) and
 **Logs & reports** (operator summaries prefixed with the session name). Closing a session tab releases only that
 session's client.
@@ -34,9 +35,11 @@ session's client.
 | Page | Capability |
 |---|---|
 | **Connection** | Enter an endpoint URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
-| **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel, references panel with direction, explicit value read, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
-| **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
-| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals and bounded row retention |
+| **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
+| **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
+| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
+| **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
+| **Server** | Read-only **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
@@ -135,15 +138,30 @@ uv run opcua-explorer
    are shown bold and prefixed with **●** while the subscription runs, or **○** when they are added but not yet
    subscribed (per session); the marker disappears when the node is removed from the monitor list.
 4. **Live monitor** tab: add `ns=2;s=Temperature` (or press **Monitor node** in the Address space tab), set a
-   publishing/sampling interval and press **Start monitoring**. The left table keeps **one row per node and
-   overwrites it with the latest value, StatusCode, source timestamp and notification count**; the right table is
-   an append-only notification log. Select a monitored item or a log row to see the full payload. **Add node**
-   subscribes further nodes into the same subscription while it runs, **Pause** freezes the log but keeps the
-   latest values updating, **Stop** deletes the subscription. With several sessions open, the shared **All
+   publishing/sampling interval and press **Start monitoring**. Optionally choose a **Trigger** and an absolute or
+   percent **Deadband** before starting; the filter is sent as a `DataChangeFilter` and the server applies it. The
+   left table keeps **one row per node and overwrites it with the latest value, StatusCode, source timestamp and
+   notification count**; the right table is an append-only notification log. Select a monitored item or a log row
+   to see the full payload. **Add node** subscribes further nodes into the same subscription while it runs,
+   **Pause** freezes the log but keeps the latest values updating, **Apply intervals** modifies the running
+   subscription (`ModifySubscription`/`ModifyMonitoredItems`, the server may revise), and **Server mode** applies
+   `SetMonitoringMode` (Reporting / Sampling / Disabled) to every monitored item. **Stop** deletes the
+   subscription. With several sessions open, the shared **All
    monitors** tab shows every session's items in one table (session column, filter, merged log) — read-only;
    start/stop stays in each session's own tab.
+   The **Events** tab is the read-only counterpart for event notifications: start the demo server with
+   `uv run opcua-demo-server --event-interval 1`, add the Server object (`i=2253`) and press **Start events**;
+   select a row to see every field the server published. With an event type such as `ConditionType` (`i=2782`) the
+   selected condition event can be acknowledged: **Acknowledge condition…** asks for an optional comment, shows the
+   exact target and EventId, and sends one `Acknowledge` method call after confirmation.
+   The **Server** tab reads `ServerStatus`, the `ServerDiagnostics` summary and the ServerCapabilities limits with
+   one batched Read when the session connects or **Refresh** is pressed; it also lists this session's live-monitor
+   items. Optional values the server returns as null are shown as *not provided*, never as zero.
 5. **Export** tab: keep *whole address space*, set *Maximum nodes* to e.g. 500, press **Download**. Progress,
-   counters and cancellation are available, then **Export JSON…**, **Export CSV…** or **Export NodeSet2…**.
+   counters and cancellation are available. The *Export content* group decides whether variable values and node
+   descriptions become part of the snapshot (values are off by default), and *Export coverage* lists exactly
+   what was collected, which options were off and what a snapshot can never contain. Then **Export JSON…**,
+   **Export CSV…** or **Export NodeSet2…**.
 6. **Tests** tab: optionally put a variable NodeId (e.g. `ns=2;s=Temperature`) in *Variable node*, press
    **Run tests**. Eleven read-only checks run against the existing session; select a row to see StatusCodes and
    measurements, then **Export JSON report…** or **Export HTML report…**. Leave the variable empty and one is
@@ -168,7 +186,8 @@ first when a session is connected).
 
 A project stores, per session: endpoint URL, security policy and mode, identity mode, user name (never the
 password), client certificate/key **paths** (never the key password), timeouts, the auto-reconnect choice, the
-address-space start NodeId, the export settings (scope, limits, namespace filter, value/dependency options), the
+address-space start NodeId, the export settings (scope, limits, namespace filter, value/description/dependency
+options), the
 live-monitor target NodeIds and intervals, and the Tests settings including configured write/method targets.
 
 It deliberately does **not** store passwords, private-key passwords, server certificates, trust decisions,
@@ -267,7 +286,7 @@ src/opcua_explorer/
 │   ├── nodeset2_validation.py  well-formedness, structural checks, optional XSD validation
 │   ├── test_runner.py    read-only functional checks and run orchestration
 │   ├── guarded_operations.py  opt-in single-target write / method-call checks
-│   ├── write_service.py  the one write/method-call implementation (prepare → send → read back)
+│   ├── write_service.py  the one write/method-call/restore implementation (prepare → send → read back)
 │   ├── value_parsing.py  operator text → typed value (built-in scalars and arrays)
 │   ├── type_support.py   server-driven typing: built-ins, enumerations, structures
 │   ├── method_support.py shared DataType/ValueRank, InputArguments and Executable reads
@@ -279,7 +298,7 @@ src/opcua_explorer/
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
-│   ├── session_workspace.py  one session: its service and six pages
+│   ├── session_workspace.py  one session: its service and eight pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
 │   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
@@ -303,11 +322,15 @@ second, Qt-free front end: it owns its own event loop and calls the very same `O
 * `references` is a separate de-duplicated list of **forward** edges (`source`, `target`, `reference_type`,
   `reference_type_name`, `target_included`);
 * `namespaces` always carries the **URI table**, because namespace indexes are session-local;
-* `source` documents endpoint, security configuration, roots, limits and `limitations`;
+* `source` documents endpoint, security configuration, roots, the complete traversal configuration (depth/node
+  limits, references per node, namespace filter, value/description/subtype switches) and `limitations`;
 * `summary` holds counts, duration, limits hit, inaccessible nodes and unsupported encodings.
 
 **CSV** — one row per node with the important attributes, reference in/out counts, and (only when enabled)
-value, status and timestamps. UTF-8 with BOM so Excel on Windows detects the encoding.
+value, status, encoding and timestamps. `unavailable_attributes` lists every attribute the server refused as
+sorted `Attribute=StatusCode` pairs, and `value_status`/`value_encoding` stay populated for a refused or
+undecodable Value, so such a value cannot be mistaken for one that was not requested. UTF-8 with BOM so Excel
+on Windows detects the encoding.
 
 Values are **excluded by default**. When enabled, supported values are encoded consistently:
 arrays keep order, `DateTime` → `{"$type":"DateTime","iso":…}`, `ByteString` → base64,
@@ -659,7 +682,11 @@ The implemented scope is complete; the following are **not** claimed:
 
 * **NodeSet2 export is not a model authoring tool.** It writes what the session could read and says so. It does
   not merge, patch or version models, and it does not attempt to make an arbitrary subtree independently
-  importable: custom DataTypes without a `DataTypeDefinition` are excluded and reported.
+  importable: custom DataTypes without a `DataTypeDefinition` are excluded and reported. Attributes asyncua's
+  XML exporter cannot write — `WriteMask`/`UserWriteMask`, `AccessRestrictions`,
+  `RolePermissions`/`UserRolePermissions`, `Symmetric`/`IsAbstract` of custom ReferenceTypes and `IsAbstract`
+  of custom DataTypes — and `View` nodes are listed in the export's `limitations` instead of being dropped
+  silently.
 * **Writes and method calls are single-target and opt-in.** One node, one value, one call, one confirmation.
   There is no batch write, no "write to all writable nodes", no discovery-driven method invocation, no
   automatic value restore and no write stress mode. Writes are typed from the server: built-in DataTypes,
@@ -693,6 +720,32 @@ The implemented scope is complete; the following are **not** claimed:
 * **A comparison is structural evidence, not an equivalence guarantee.** The **Compare** tab and
   `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
   Neither compares behaviour under load, internal limits, or anything that requires a write.
+* **Events are notifications, not alarm management.** The **Events** tab subscribes to a source's `EventNotifier`
+  and shows the selected fields. Its only action is acknowledging one selected condition event: exactly one
+  `Acknowledge` method call, after an explicit confirmation, through the single write path with
+  `operator-dialog` authority. It never calls `Confirm`, `Enable` or `AddComment`, is never retried, and an
+  acknowledgement is not proof that the process condition has gone away. Acknowledging requires a
+  condition-type subscription (`ConditionType` or a subtype such as `AcknowledgeableConditionType`) so the event
+  carries a condition identity and an EventId. There is no `ConditionRefresh`, no event history, no automatic
+  acknowledgement and no change to a condition's enabled state. A source that cannot publish events (no
+  `EventNotifier`, unknown NodeId, unsupported service) is reported per source with its StatusCode. Event
+  sources are session state, not project state: a project does not store them.
+* **`EventNotifier` is read on demand, not downloaded.** The Address space panel reads it for the selected node
+  and shows the decoded names (`0 (none)`, `1 (SubscribeToEvents)`, …), but the bounded download and the
+  JSON/CSV exports do not carry it, and the tree does not mark event sources. Adding it to the snapshot would
+  change the export format and is therefore a versioned change.
+* **Server status is what the server exposes.** The **Server** tab reads the standard `ServerStatus`,
+  `ServerDiagnostics` and `ServerCapabilities` variables; optional values reported as Good-but-null are shown as
+  *not provided*, and a Bad StatusCode is shown with that StatusCode. The monitored-item list is this client's own
+  view of its subscription — `GetMonitoredItems` is deliberately not called, because the client has exactly one
+  guarded method-call path. There is no history, no aggregate statistics and no sampling/subscription diagnostics
+  array; nothing on this tab is written.
+* **Data-change filters are evaluated by the server.** The Live monitor sends the requested trigger/deadband
+  unchanged; whether it is honoured depends on the server and on the variable (a percent deadband needs an
+  `EURange` property, and non-numeric values cannot use a deadband). The demo server accepts the filter but does
+  not implement deadband suppression. The publishing/sampling intervals are requests; the server may revise them
+  and the UI reports the revised publishing interval. A filter is fixed at start — changing it recreates the
+  subscription — while intervals and the monitoring mode can be changed while it runs.
 * Downloads reflect what the session was allowed to browse: access-denied nodes, timeouts and disconnects are
   reported (`inaccessible_nodes`) instead of being hidden.
 

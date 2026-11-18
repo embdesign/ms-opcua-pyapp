@@ -45,6 +45,7 @@ def _project() -> ProjectFile:
                     batch_size=11,
                     max_references_per_node=7,
                     include_values=True,
+                    include_description=False,
                     namespaces=[0, 2],
                     include_dependencies=False,
                     max_dependency_nodes=50,

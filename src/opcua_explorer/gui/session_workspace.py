@@ -1,4 +1,4 @@
-"""One OPC UA session: its own service, connection state and five tabs.
+"""One OPC UA session: its own service, connection state and eight tabs.
 
 The window shell (:class:`~opcua_explorer.gui.main_window.MainWindow`) hosts any
 number of these workspaces as top-level tabs. Each workspace owns an independent
@@ -24,7 +24,16 @@ from ..models import ConnectionInfo
 from ..opcua.client_service import OpcUaService
 from ..project import ProjectSession
 from .async_runner import AsyncRunner
-from .tabs import BrowserTab, ConnectionTab, ExportTab, MonitorTab, SequencesTab, TestsTab
+from .tabs import (
+    BrowserTab,
+    ConnectionTab,
+    EventsTab,
+    ExportTab,
+    MonitorTab,
+    SequencesTab,
+    ServerTab,
+    TestsTab,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -74,6 +83,10 @@ class SessionWorkspace(QWidget):
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
         )
         self.monitor_tab = MonitorTab(runner, service)
+        self.events_tab = EventsTab(
+            runner, service, selection_provider=self.browser_tab.current_node_id
+        )
+        self.server_tab = ServerTab(runner, service)
         self.tests_tab = TestsTab(
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
         )
@@ -83,6 +96,8 @@ class SessionWorkspace(QWidget):
         self.tabs.addTab(self.browser_tab, "Address space")
         self.tabs.addTab(self.export_tab, "Export")
         self.tabs.addTab(self.monitor_tab, "Live monitor")
+        self.tabs.addTab(self.events_tab, "Events")
+        self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.tests_tab, "Tests")
         self.tabs.addTab(self.sequences_tab, "Sequences")
 
@@ -166,6 +181,7 @@ class SessionWorkspace(QWidget):
         self.export_tab.export_finished.connect(self._report)
         self.tests_tab.report_ready.connect(self._report)
         self.sequences_tab.report_ready.connect(self._report)
+        self.events_tab.report_ready.connect(self._report)
         self.monitor_tab.items_changed.connect(self._on_monitored_items_changed)
 
     def _on_monitored_items_changed(self) -> None:
@@ -198,6 +214,8 @@ class SessionWorkspace(QWidget):
         self.browser_tab.set_connected(True, info)
         self.export_tab.set_connected(True)
         self.monitor_tab.set_connected(True)
+        self.events_tab.set_connected(True)
+        self.server_tab.set_connected(True)
         self.tests_tab.set_connected(True)
         self.sequences_tab.set_connected(True)
         self.export_tab.refresh_namespaces()
@@ -229,6 +247,8 @@ class SessionWorkspace(QWidget):
         self.browser_tab.set_connected(connected)
         self.export_tab.set_connected(connected)
         self.monitor_tab.set_connected(connected)
+        self.events_tab.set_connected(connected)
+        self.server_tab.set_connected(connected)
         self.tests_tab.set_connected(connected)
         self.sequences_tab.set_connected(connected)
 
@@ -266,6 +286,7 @@ class SessionWorkspace(QWidget):
         self._report("Connection restored automatically.")
         self.export_tab.refresh_namespaces()
         self.monitor_tab.resubscribe_after_reconnect()
+        self.events_tab.resubscribe_after_reconnect()
 
     # -- intra-session navigation -----------------------------------------
     def _on_download_requested(self, node_id: str) -> None:
@@ -292,6 +313,10 @@ class SessionWorkspace(QWidget):
     def shutdown(self) -> None:
         """Stop UI work for this session (the service is released by the shell)."""
         self.connection_tab.shutdown()
+        self.browser_tab.shutdown()
         self.export_tab.shutdown()
         self.monitor_tab.shutdown()
+        self.events_tab.shutdown()
+        self.server_tab.shutdown()
         self.tests_tab.shutdown()
+        self.sequences_tab.shutdown()

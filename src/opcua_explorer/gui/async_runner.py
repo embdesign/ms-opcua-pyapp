@@ -235,6 +235,9 @@ class AsyncRunner(QObject):
         try:
             result = await factory()
         except asyncio.CancelledError:
+            # A cancelled task never reports done/failed, so release its callbacks here;
+            # otherwise the closures (and the widgets they reference) are retained until stop().
+            self._callbacks.pop(key, None)
             self.cancelled.emit(key)
         except Exception as exc:
             _logger.debug("Async task %s failed", key, exc_info=True)

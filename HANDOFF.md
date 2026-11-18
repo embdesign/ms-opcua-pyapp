@@ -26,7 +26,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-416 tests pass (315 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+489 tests pass (369 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -36,18 +36,51 @@ reproduced outside the application (public Qt API only) and is a Shiboken refcou
 runs in `tests/integration/test_pyside_stability.py`; an upgrade must keep that test green. Details are in
 `docs/api-verification.md` and `docs/troubleshooting.md` §7.
 
+**Event subscriptions — delivered.** `opcua/event_service.py` owns one event subscription per session
+(`Subscription.subscribe_events`, server-driven field selection); the Events tab reports a source that cannot
+publish events per source with its StatusCode. Event monitoring is read-only; its one action is the confirmed
+condition acknowledgement described below. `opcua-demo-server --event-interval SECONDS` emits demo events for
+local runs and the tests. Event sources are not stored in project files. The Address space panel shows
+`EventNotifier` for the selected node (details-only: it is not part of a download or JSON/CSV export).
+
+**Live-monitor filters and runtime controls — delivered.** `opcua/monitor_service.py` builds a
+`DataChangeFilter` and, because asyncua's `subscribe_data_change` has no filter parameter, creates filtered
+monitored items through the public `create_monitored_items` path. While a subscription runs, the tab can apply
+`SetMonitoringMode` (Reporting/Sampling/Disabled), modify the publishing interval (`ModifySubscription` via
+`Subscription.update`) and every item's sampling interval (`ModifyMonitoredItems` via
+`modify_monitored_item`). The demo server accepts the filter but does not implement deadband suppression, and
+the server may revise any interval — tests must assert acceptance/flow, never deadband counts.
+
+**Condition acknowledgement — delivered.** A `ConditionType` subscription makes `EventNotification` carry the
+condition identity (`ConditionId`/`NodeId`, falling back to `SourceNode`) plus the EventId. The Events tab's one
+action is `write_service.acknowledge_condition`: resolve the instance's namespace-0 `Acknowledge` method under
+the condition node, require `InputArguments` (ByteString, LocalizedText), and send exactly one call with
+`WriteAuthority("operator-dialog", …)` after the confirmation from
+`operator_text.acknowledge_condition_confirmation`. No `Confirm`/`Enable`/`AddComment`, no retry, no automatic
+acknowledgement. asyncua's demo server has no condition object; integration tests create a real object +
+`Acknowledge` method at runtime, the GUI test drives the dialogs with a fake service call.
+
+**Server status & diagnostics — delivered.** `opcua/server_diagnostics.py` reads the standard ServerStatus,
+ServerDiagnosticsSummary and ServerCapabilities variables in one batched Read and surfaces them in the **Server**
+tab. Good-but-null values are `not_provided` (asyncua's demo returns nulls for every counter), Bad values are
+kept per name, and the monitored-item list is `LiveMonitor.items_snapshot()` — `GetMonitoredItems` is not called
+because the project keeps exactly one guarded method-call path.
+
 **Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
 `models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
 `SequenceStepResult`, step kinds/statuses), `opcua/method_support.py` (shared DataType/ValueRank,
 `InputArguments`, `Executable` reads), `opcua/type_support.py` (server-driven typing: built-ins, enumerations by
 name or number, structures encoded with their `DefaultEncodingId`; matrices/unions/optional fields refused),
-`opcua/write_service.py` (prepare → one write → read-back; one method call with validated arguments) and
+`opcua/write_service.py` (prepare → one write → read-back; one method call with validated arguments; one
+`restore_value` for an optional restore) and
 `opcua/sequence_runner.py` (preconditions, user-defined gate with `finally` release, keepalive, dry run,
 single-flight, `outcome_unknown` on cancelled in-flight writes). `opcua/path_support.py` adds
 `TranslateBrowsePathsToNodeIds` addressing (`node_path` / `path_root` on a step, exposed as
 `OpcUaService.resolve_browse_paths()`), accepting only a complete, unambiguous match. `guarded_operations.py` now
-performs its write and method call through `write_service`, so the application has exactly one write/call
-implementation. Covered by `tests/unit/test_sequence_runner.py`, `tests/unit/test_type_support.py`,
+performs its write, method call **and restore** through `write_service`, so the application has exactly one
+write/call implementation. Every sending function requires a keyword-only `WriteAuthority` (no default), and
+`tests/unit/test_layer_boundaries.py` fails if a `write_value` / `call_method` call appears outside
+`write_service.py` or if `authorization` ever gains a default. Covered by `tests/unit/test_sequence_runner.py`, `tests/unit/test_type_support.py`,
 `tests/unit/test_path_support.py`, `tests/integration/test_path_resolution.py`, `tests/unit/test_sequence_document.py`,
 `tests/integration/test_gui_sequences.py`, `tests/unit/test_cli_sequence.py`,
 `tests/integration/test_cli_sequence.py` and the existing guarded-operation integration tests. The Sequences tab
@@ -92,7 +125,7 @@ bundles are built now (GUI, export, compare).
   `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
   into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
 - UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors”, “Compare” and
-  “Logs & reports”). One session = `gui/session_workspace.py` + its six pages under `gui/tabs/`.
+  “Logs & reports”). One session = `gui/session_workspace.py` + its eight pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
   `asyncua.Client`.
 - Pure layers (no asyncua, no Qt): `models.py`, `config.py`, `defaults.py`, `project.py`,
@@ -113,8 +146,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **315 passed** |
-| Full suite | `uv run pytest -q` | **416 passed** (≈5:30 on this host; up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **369 passed** |
+| Full suite | `uv run pytest -q` | **489 passed** (≈6–10 min on this host; up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -128,7 +161,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 416 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 489 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **97 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `type_support.py` 8,
   `test_runner.py` 7, `nodeset2.py` 7, `write_service.py` 6, `sequence_runner.py` 6, `attributes.py` 6, …).

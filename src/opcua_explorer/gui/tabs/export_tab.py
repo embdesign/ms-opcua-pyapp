@@ -44,6 +44,18 @@ from ..theme import mono_font
 
 _logger = logging.getLogger(__name__)
 
+#: What each output format carries beyond the snapshot itself. Shown in the
+#: "Export coverage" panel so the tab answers "is everything exported?".
+_FORMAT_NOTES = (
+    "JSON / CSV: contain exactly what the snapshot holds (values and descriptions only when the\n"
+    "             download included them).\n"
+    "NodeSet2:    writes the downloaded nodes plus parents, type definitions, encodings and method\n"
+    "             arguments, reading each written node's attributes from the live session at export\n"
+    "             time. The XML exporter cannot write WriteMask/UserWriteMask, AccessRestrictions,\n"
+    "             RolePermissions/UserRolePermissions, Symmetric/IsAbstract of custom ReferenceTypes,\n"
+    "             IsAbstract of custom DataTypes or View nodes; every export lists what it omitted."
+)
+
 
 class ExportTab(QWidget):
     """Bounded download with progress/cancel, then JSON or CSV export."""
@@ -179,18 +191,26 @@ class ExportTab(QWidget):
         namespaces_layout.addLayout(buttons)
         layout.addWidget(namespaces_box)
 
-        values_box = QGroupBox("Variable values")
-        values_layout = QVBoxLayout(values_box)
+        content_box = QGroupBox("Export content")
+        content_layout = QVBoxLayout(content_box)
         self.include_values_check = QCheckBox("Include variable values (Value, SourceTimestamp, ServerTimestamp)")
-        values_layout.addWidget(self.include_values_check)
-        values_warning = QLabel(
-            "Off by default. Enabling values makes the export larger and reads live data from the process; "
-            "unsupported encodings are flagged rather than silently dropped."
+        content_layout.addWidget(self.include_values_check)
+        self.include_description_check = QCheckBox("Include node descriptions (Description attribute)")
+        self.include_description_check.setChecked(True)
+        content_layout.addWidget(self.include_description_check)
+        content_hint = QLabel(
+            "Values are off by default: enabling them makes the export larger and reads live data from the "
+            "process; unsupported encodings are flagged, never silently dropped. JSON/CSV contain exactly "
+            "what the download collected, while NodeSet2 reads the written nodes' attributes from the live "
+            "session at export time. Standard attributes that only the Address space panel shows (event "
+            "notifier, write/role masks, historizing, sampling interval, abstract/symmetric/inverse name, "
+            "data type definition, access restrictions, executable) are never part of a snapshot - see "
+            "Export coverage."
         )
-        values_warning.setObjectName("hintLabel")
-        values_warning.setWordWrap(True)
-        values_layout.addWidget(values_warning)
-        layout.addWidget(values_box)
+        content_hint.setObjectName("hintLabel")
+        content_hint.setWordWrap(True)
+        content_layout.addWidget(content_hint)
+        layout.addWidget(content_box)
 
         nodeset_box = QGroupBox("NodeSet2 XML")
         nodeset_layout = QFormLayout(nodeset_box)
@@ -277,6 +297,19 @@ class ExportTab(QWidget):
         self.counters_label.setObjectName("hintLabel")
         progress_layout.addWidget(self.counters_label)
         layout.addWidget(progress_box, 0)
+
+        coverage_box = QGroupBox("Export coverage")
+        coverage_layout = QVBoxLayout(coverage_box)
+        self.coverage_view = QPlainTextEdit()
+        self.coverage_view.setObjectName("coverage")
+        self.coverage_view.setReadOnly(True)
+        self.coverage_view.setFont(mono_font(9))
+        self.coverage_view.setPlaceholderText(
+            "Download an address space to see exactly what the snapshot contains and what the exporters "
+            "can and cannot carry."
+        )
+        coverage_layout.addWidget(self.coverage_view, 1)
+        layout.addWidget(coverage_box, 1)
 
         summary_box = QGroupBox("Export summary")
         summary_layout = QVBoxLayout(summary_box)
@@ -373,6 +406,7 @@ class ExportTab(QWidget):
             batch_size=self.batch_size_spin.value(),
             max_references_per_node=self.max_refs_spin.value(),
             include_values=self.include_values_check.isChecked(),
+            include_description=self.include_description_check.isChecked(),
             namespaces=namespaces,
             include_dependencies=self.dependencies_check.isChecked(),
             max_dependency_nodes=self.max_dependencies_spin.value(),
@@ -392,6 +426,7 @@ class ExportTab(QWidget):
         self.batch_size_spin.setValue(int(state.batch_size))
         self.max_refs_spin.setValue(int(state.max_references_per_node))
         self.include_values_check.setChecked(bool(state.include_values))
+        self.include_description_check.setChecked(bool(state.include_description))
         self.dependencies_check.setChecked(bool(state.include_dependencies))
         self.max_dependencies_spin.setValue(int(state.max_dependency_nodes))
         self.schema_edit.setText(state.schema_path or "")
@@ -421,6 +456,7 @@ class ExportTab(QWidget):
             max_references_per_node=self.max_refs_spin.value(),
             namespace_filter=namespace_filter,
             include_values=self.include_values_check.isChecked(),
+            include_description=self.include_description_check.isChecked(),
         )
 
     def _roots(self) -> list[str] | None:
@@ -446,6 +482,7 @@ class ExportTab(QWidget):
         self._set_busy(True)
         self.status_label.setText("Preparing download…")
         self.summary_view.clear()
+        self.coverage_view.clear()
 
         key = self._runner.new_key()
         progress_callback = self._runner.progress_callback(key)
@@ -476,6 +513,7 @@ class ExportTab(QWidget):
             "Download cancelled (partial snapshot)." if snapshot.cancelled else "Download complete."
         )
         self.summary_view.setPlainText(snapshot.summary_text())
+        self.coverage_view.setPlainText(snapshot.coverage_text() + "\n\n" + _FORMAT_NOTES)
         self.snapshot_ready.emit(snapshot)
         self.export_finished.emit(
             f"Download from {snapshot.endpoint_url}: {len(snapshot.nodes)} node(s), "

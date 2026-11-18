@@ -39,10 +39,14 @@ from ..errors import (
 )
 from ..logging_setup import register_secret
 from ..models import (
+    AUTHORITY_OPERATOR_DIALOG,
     AddressSpace,
     ChildEntry,
     ConnectionInfo,
     DiscoveryResult,
+    EventConfig,
+    EventSourceInfo,
+    EventStart,
     MonitorConfig,
     MonitoredItemInfo,
     MonitorStart,
@@ -51,12 +55,14 @@ from ..models import (
     ReferenceInfo,
     Sequence,
     SequenceRun,
+    ServerStatusSnapshot,
     TestConfig,
     TestProgress,
     TestRun,
     TraversalConfig,
     TraversalProgress,
     ValueSnapshot,
+    WriteAuthority,
     utc_now,
 )
 from .attributes import AttributeSpec, read_attributes_bulk, read_node_attributes, read_values_bulk
@@ -68,6 +74,7 @@ from .browse import (
     parse_node_id,
     resolve_browse_names,
 )
+from .event_service import LiveEvents, event_id_bytes
 from .monitor_service import LiveMonitor
 from .nodeset2 import NodeSet2Config, NodeSet2Result, export_nodeset2
 from .path_support import PathRequest, PathResolution, resolve_paths
@@ -81,9 +88,12 @@ from .security import (
     summarize_certificate,
 )
 from .sequence_runner import SequenceRunner
+from .server_diagnostics import read_server_status
 from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .ua_names import node_class_name
+from .write_service import CallOutcome
+from .write_service import acknowledge_condition as acknowledge_condition_impl
 
 CLIENT_NAME = "OPC UA Explorer"
 CLIENT_APPLICATION_NAME = "OPC UA Explorer"
@@ -146,6 +156,7 @@ class OpcUaService:
         self._namespace_index: dict[int, str] = {}
         self._endpoint_url: str = ""
         self._monitor: LiveMonitor | None = None
+        self._events: LiveEvents | None = None
         self._sequence_runner: SequenceRunner | None = None
 
     # -- state -------------------------------------------------------------
@@ -458,6 +469,7 @@ class OpcUaService:
         )
 
     async def disconnect(self) -> None:
+        await self.event_monitor_stop()
         await self.monitor_stop()
         client = self._client
         self._client = None
@@ -524,6 +536,16 @@ class OpcUaService:
             self._connection.namespaces = namespaces
         return namespaces
 
+    # -- server status & diagnostics ---------------------------------------
+    async def server_status(self) -> ServerStatusSnapshot:
+        """One read-only ServerStatus/ServerDiagnostics snapshot.
+
+        Includes this session's live-monitor subscription and items as the
+        client sees them; no diagnostic method is called.
+        """
+        session = self._require_session()
+        return await read_server_status(session, monitor=self._monitor)
+
     # -- browsing ----------------------------------------------------------
     async def browse_children(self, node_id: Any, *, follow_subtypes: bool = True) -> list[ChildEntry]:
         session = self._require_session()
@@ -554,6 +576,7 @@ class OpcUaService:
             node_id_string,
             node_class=node_class,
             include_value=True,
+            extended=True,
             namespace_uri_of=self._namespace_index.get,
         )
 
@@ -724,6 +747,117 @@ class OpcUaService:
         monitor, self._monitor = self._monitor, None
         if monitor is not None:
             await monitor.stop()
+
+    async def monitor_set_mode(self, mode: str) -> str:
+        """Apply ``SetMonitoringMode`` (Reporting/Sampling/Disabled) to the monitor."""
+        monitor = self._monitor
+        if monitor is None:
+            raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+        return await monitor.set_monitoring_mode(mode)
+
+    async def monitor_apply_intervals(
+        self, *, publishing_interval_ms: float, sampling_interval_ms: float
+    ) -> tuple[float, list[str]]:
+        """Modify the running subscription's publishing and sampling intervals.
+
+        Returns the publishing interval the server revised to and any per-item
+        refusal texts; nothing is changed when the monitor is not running.
+        """
+        monitor = self._monitor
+        if monitor is None:
+            raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+        revised = await monitor.set_publishing_interval(publishing_interval_ms)
+        failures = await monitor.set_sampling_interval(sampling_interval_ms)
+        return revised, failures
+
+    # -- event monitoring --------------------------------------------------
+    @property
+    def is_monitoring_events(self) -> bool:
+        return self._events is not None and self._events.is_active
+
+    async def start_event_monitor(
+        self,
+        source_node_ids: list[Any],
+        config: EventConfig,
+        *,
+        emit: Callable[[Any], None],
+    ) -> EventStart:
+        """Create one event subscription for the given source nodes.
+
+        ``emit`` is called from the asyncio thread for every event
+        (:class:`~..models.EventNotification`) and subscription status change
+        (:class:`~..models.MonitorStatusEvent`). It must be thread-safe.
+        """
+        client = self._require_client()
+        self._require_session()
+        ids = [_normalise_node_id(node_id) for node_id in source_node_ids]
+        if not ids:
+            raise InvalidNodeIdError("Add at least one source NodeId before starting event monitoring.")
+
+        await self.event_monitor_stop()
+        self._events = LiveEvents(client, emit)
+        try:
+            start = await self._events.start(ids, config)
+        except BaseException:
+            self._events = None
+            raise
+        _logger.info(
+            "Event subscription started: subscription %s, %d of %d source(s) accepted",
+            start.subscription_id,
+            sum(1 for source in start.sources if source.ok),
+            len(start.sources),
+        )
+        return start
+
+    async def event_monitor_add(self, source_node_ids: list[Any]) -> list[EventSourceInfo]:
+        """Listen to events of more source nodes on the running event subscription."""
+        events = self._events
+        if events is None:
+            raise MonitorNotActiveError("No event subscription is running. Start event monitoring first.")
+        ids = [_normalise_node_id(node_id) for node_id in source_node_ids]
+        if not ids:
+            return []
+        return await events.add(ids)
+
+    async def event_monitor_remove(self, handles: list[int]) -> None:
+        """Stop listening to the given event sources."""
+        events = self._events
+        if events is None:
+            raise MonitorNotActiveError("No event subscription is running. Start event monitoring first.")
+        await events.remove(handles)
+
+    async def event_monitor_stop(self) -> None:
+        """Delete the event subscription; safe to call when none runs."""
+        events, self._events = self._events, None
+        if events is not None:
+            await events.stop()
+
+    async def acknowledge_condition(
+        self,
+        condition_node_id: str,
+        event_id_hex: str,
+        comment: str,
+        *,
+        reference: str = "",
+    ) -> CallOutcome:
+        """Acknowledge one condition event: one ``Acknowledge`` call, exactly once.
+
+        The operator dialog is the authority; there is no retry, no automatic
+        comment and no other condition method (``Confirm``/``Enable``) is called.
+        """
+        client = self._require_client()
+        self._require_session()
+        event_id = event_id_bytes(event_id_hex)
+        if event_id is None:
+            raise OpcUaExplorerError(
+                "The event has no usable EventId; nothing was acknowledged."
+            )
+        authorization = WriteAuthority(
+            AUTHORITY_OPERATOR_DIALOG, reference or f"acknowledge {condition_node_id}"
+        )
+        return await acknowledge_condition_impl(
+            client, condition_node_id, event_id, comment, authorization=authorization
+        )
 
     # -- download ----------------------------------------------------------
     async def download(

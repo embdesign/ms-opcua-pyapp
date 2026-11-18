@@ -8,6 +8,84 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Event subscriptions** (`opcua/event_service.py`) — one event subscription per session on explicitly added
+  source nodes. The source's `EventNotifier` is monitored through `Subscription.subscribe_events`, so the
+  server's event type decides which fields are requested (`BaseEventType` by default, a named custom type on
+  request). Every selected field is reduced to bounded text in the asyncio thread and delivered as a plain
+  `EventNotification`; a source that cannot publish events (no `EventNotifier`, unknown NodeId, unsupported
+  service) is reported as a rejected `EventSourceInfo` with its StatusCode instead of aborting the subscription.
+  Reconnect rebuilds the subscription, and stopping or disconnecting deletes it.
+- **Events tab** — one page per session: add/remove event sources (the Server object `i=2253` is offered by
+  default), choose the event type and publishing interval, then read a bounded event log (received time, event
+  time, severity, type, source, message) with a per-field detail view for the selected event. Its only action is
+  a confirmed condition acknowledgement (below); plain event monitoring stays read-only.
+- **Demo server events** — `opcua-demo-server --event-interval SECONDS` publishes a demo event on the Server
+  object at that rate (off by default), so an event subscription can be exercised locally and in tests.
+- **Complete standard attributes in the address-space panel** — the details panel now reads and shows every
+  standard attribute of the selected NodeClass: `EventNotifier` (decoded to `0 (none)` /
+  `1 (SubscribeToEvents)`), `WriteMask`/`UserWriteMask`, `Historizing`, `MinimumSamplingInterval`,
+  `IsAbstract`/`Symmetric`/`InverseName`, `ContainsNoLoops`, `DataTypeDefinition` and the optional
+  `AccessRestrictions`/`RolePermissions`/`UserRolePermissions` (shown only when the server implements them).
+  Bit fields display their member names, which also improves `AccessLevel`/`UserAccessLevel`. Downloads, JSON
+  and CSV exports are deliberately unchanged: the extra attributes are read for the panel only.
+- **Events tab: *Use browser selection*** — takes the source NodeId from this session's address-space tree,
+  next to the manual entry and the default Server object.
+- **Live monitor: `DataChangeFilter` and runtime subscription controls** — the Live monitor can request a
+  trigger (`Status`, `StatusValue`, `StatusValueTimestamp`) and an absolute or percent deadband. Because
+  asyncua's `subscribe_data_change` cannot carry a filter, a filtered subscription creates its monitored items
+  through the public `create_monitored_items` path; a filter is fixed at start. While running, **Apply
+  intervals** modifies the publishing interval (`ModifySubscription`) and every item's sampling interval
+  (`ModifyMonitoredItems`), and **Server mode** applies `SetMonitoringMode`
+  (`Reporting`/`Sampling`/`Disabled`) to all items. Refused modes and per-item refusals are reported; a server
+  may revise the intervals, and the revised publishing interval is shown.
+- **Condition acknowledgement** — a condition event from a `ConditionType`/`AcknowledgeableConditionType`
+  subscription now carries its condition identity (`ConditionId`/`NodeId`, falling back to `SourceNode`) and
+  EventId. Selecting it enables **Acknowledge condition…**: the operator may add a comment, sees the exact
+  endpoint, condition node and EventId in the confirmation built by
+  `operator_text.acknowledge_condition_confirmation`, and exactly one `Acknowledge` method call is sent through
+  `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`. The method's
+  `InputArguments` must be (ByteString, LocalizedText) or nothing is sent; `Confirm`, `Enable` and `AddComment`
+  are never called, nothing is retried, and a cancelled request sends nothing.
+- **Server status & diagnostics tab** — one read-only batched Read of the standard `ServerStatus` values
+  (state, current/start time, uptime, shutdown fields), the `ServerDiagnostics` summary counters and the
+  `ServerCapabilities` limits this client depends on (`MaxNodesPerRead`, `MaxNodesPerBrowse`,
+  `MaxMonitoredItemsPerCall`, continuation points, sessions/subscriptions, sample rate). The tab also shows this
+  session's live-monitor subscription and items as the client sees them. Optional values a server returns as
+  Good-but-null are shown as *not provided*; bad StatusCodes are shown with their code. Nothing is written and
+  no method is called — `GetMonitoredItems` is deliberately not invoked.
+
+### Changed
+
+- **NodeSet2 export reports what it cannot write.** `NodeSet2Result.limitations` now names `WriteMask` /
+  `UserWriteMask`, `AccessRestrictions`, `RolePermissions` / `UserRolePermissions`, `Symmetric` / `IsAbstract`
+  of custom ReferenceTypes, `IsAbstract` of custom DataTypes and skipped `View` nodes, because asyncua's XML
+  exporter has no writer for them. The NodeSet2 summary text, the JSON manifest and the GUI/CLI output
+  therefore state the omissions instead of presenting the file as lossless.
+- **CSV export keeps value provenance.** The flat inventory gains `value_encoding` (`json` / `unsupported` /
+  `unavailable`) and `unavailable_attributes` (sorted `Attribute=StatusCode` pairs, matching the JSON), and
+  `value_status` now carries the StatusCode of a refused or undecodable Value instead of an empty cell. Readers
+  that use the header row are unaffected; the JSON and NodeSet2 formats are unchanged. The example
+  `examples/demo-address-space.csv` is regenerated.
+- **JSON snapshots record the complete traversal configuration.** `source.traversal` now also stores
+  `max_references_per_node`, `include_description` and `follow_subtypes`, and a loaded snapshot keeps those
+  bounds. Existing version-1 documents keep loading unchanged (a missing key falls back to its default), so
+  `format_version` stays 1.
+- **Export tab reworked around completeness.** The new *Export content* group carries both switches — variable
+  values and node descriptions (new, and persisted in the project's export state) — and a new **Export coverage**
+  panel states what the downloaded snapshot contains, which options were off, the limits/inaccessible/refused
+  counts, the attributes that are details-panel-only, and what each output format can carry. NodeSet2's own
+  omissions remain in its export summary.
+
+- **One write path, now enforced.** The optional "restore the previous value" write in the guarded checks runs
+  through `opcua/write_service.py` (`restore_value`: one write + read-back, `outcome_unknown` when the effect
+  cannot be checked) instead of sending on its own. Every sending function in that module takes a keyword-only
+  `authorization: WriteAuthority` without a default — `operator-dialog` plus the check id for guarded checks,
+  `sequence-document` plus the step for sequences — and records it on the outcome (and in the check data /
+  step result). `tests/unit/test_layer_boundaries.py` now fails if a `write_value` / `call_method` call appears
+  outside `write_service.py`, or if `authorization` gains a default.
+
 ## [0.1.1] - 2026-11-16
 
 ### Added

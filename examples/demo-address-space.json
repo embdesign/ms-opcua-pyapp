@@ -5,7 +5,7 @@
     "name": "opcua-explorer",
     "version": "0.1.1"
   },
-  "generated_at_utc": "2026-11-16T12:26:17.557Z",
+  "generated_at_utc": "2026-11-17T16:02:37.634Z",
   "source": {
     "endpoint_url": "opc.tcp://127.0.0.1:4840",
     "connection": {
@@ -41,7 +41,7 @@
           "uri": "urn:opcua-explorer:demo:extra"
         }
       ],
-      "connected_at_utc": "2026-11-16T12:26:17.361Z"
+      "connected_at_utc": "2026-11-17T16:02:36.935Z"
     },
     "download_roots": [
       "i=85"
@@ -52,8 +52,11 @@
       "max_nodes": 300,
       "concurrency": 4,
       "batch_size": 25,
+      "max_references_per_node": 0,
       "namespace_filter": null,
-      "include_values": false
+      "include_values": false,
+      "include_description": true,
+      "follow_subtypes": true
     },
     "limitations": [
       "A download from a live server contains what this session was allowed to browse. It is not guaranteed to be a complete, independently importable information model.",
@@ -97,9 +100,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.195,
-    "started_at_utc": "2026-11-16T12:26:17.361Z",
-    "finished_at_utc": "2026-11-16T12:26:17.556Z"
+    "duration_seconds": 0.687,
+    "started_at_utc": "2026-11-17T16:02:36.935Z",
+    "finished_at_utc": "2026-11-17T16:02:37.622Z"
   },
   "nodes": {
     "i=11192": {

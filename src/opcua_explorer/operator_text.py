@@ -45,6 +45,27 @@ def guarded_operation_confirmation(*, endpoint_url: str, config: TestConfig) -> 
     return "\n".join(lines)
 
 
+def acknowledge_condition_confirmation(
+    *, endpoint_url: str, condition_node_id: str, event_id: str, comment: str
+) -> str:
+    """Confirmation body for one condition acknowledgement (Acknowledge method)."""
+    return "\n".join(
+        [
+            f"Endpoint: {endpoint_url}",
+            "",
+            "One method call will be sent exactly once:",
+            f"  CALL Acknowledge on {condition_node_id}",
+            f"  EventId: {event_id}",
+            f"  Comment: {comment or '(empty)'}",
+            "",
+            "This acknowledges one condition event. It does not write a variable, does not confirm the "
+            "condition and is never retried; the server decides whether the acknowledgement is accepted.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+
+
 def connection_diagnostics_text(
     *,
     discovery: DiscoveryResult | None = None,

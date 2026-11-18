@@ -27,10 +27,10 @@ def wait_for_port(port: int, timeout: float = 120.0) -> None:
     raise AssertionError(f"demo server did not start on port {port}")
 
 
-def start_demo_server(port: int) -> subprocess.Popen:
+def start_demo_server(port: int, *extra_args: str) -> subprocess.Popen:
     """Start the packaged demo server as a separate process."""
     return subprocess.Popen(
-        [sys.executable, "-m", "opcua_explorer.demo.demo_server", "--port", str(port)],
+        [sys.executable, "-m", "opcua_explorer.demo.demo_server", "--port", str(port), *extra_args],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

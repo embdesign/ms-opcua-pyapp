@@ -9,7 +9,13 @@ import pytest
 from opcua_explorer.compare import ComparisonConfig, compare_address_spaces
 from opcua_explorer.errors import ExportError
 from opcua_explorer.exporters import export_json, load_json_snapshot, snapshot_from_document
-from opcua_explorer.models import AddressSpace, NamespaceEntry, NodeRecord, ValueSnapshot
+from opcua_explorer.models import (
+    AddressSpace,
+    NamespaceEntry,
+    NodeRecord,
+    TraversalConfig,
+    ValueSnapshot,
+)
 
 
 def _write(document: dict, path) -> str:  # noqa: ANN001 - pytest tmp_path
@@ -39,6 +45,29 @@ def test_export_then_load_round_trips_the_snapshot(sample_snapshot, tmp_path) ->
     assert loaded.namespaces == sample_snapshot.namespaces
     assert loaded.inaccessible == sample_snapshot.inaccessible
     assert loaded.limitations == sample_snapshot.limitations
+    # The download bounds are part of the record, so a baseline keeps its provenance.
+    assert loaded.config == sample_snapshot.config
+
+
+def test_traversal_configuration_round_trips(sample_snapshot, tmp_path) -> None:
+    sample_snapshot.config = TraversalConfig(
+        max_depth=4,
+        max_nodes=25,
+        concurrency=3,
+        batch_size=15,
+        max_references_per_node=9,
+        namespace_filter=frozenset({0, 2}),
+        include_values=True,
+        include_description=False,
+        follow_subtypes=False,
+    )
+    target = tmp_path / "snapshot.json"
+    export_json(sample_snapshot, target)
+
+    loaded = load_json_snapshot(target)
+
+    assert loaded.config == sample_snapshot.config
+    assert loaded.config.namespace_filter == frozenset({0, 2})
 
 
 def test_loaded_snapshot_compares_equal_to_the_original(sample_snapshot, tmp_path) -> None:

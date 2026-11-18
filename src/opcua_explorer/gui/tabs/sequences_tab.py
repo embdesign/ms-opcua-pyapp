@@ -517,6 +517,18 @@ class SequencesTab(QWidget):
         self.status_label.setText(message)
         QMessageBox.warning(self, "Sequences", message)
 
+    # -- shutdown ------------------------------------------------------------
+    def shutdown(self) -> None:
+        """Cancel a run in flight; the runner releases its gate from ``finally``.
+
+        Closing the session must not leave a sequence on the worker loop, where its
+        completion callback would target a widget that is about to be deleted.
+        """
+        if self._handle is not None:
+            self._handle.cancel()
+            self._handle = None
+        self._task_key = None
+
     # -- project state -------------------------------------------------------
     def sequence_state(self) -> SequenceState:
         return SequenceState(path=str(self._path) if self._path is not None else "", inputs=self.current_inputs())

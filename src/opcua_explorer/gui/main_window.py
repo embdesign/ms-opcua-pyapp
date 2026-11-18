@@ -1,8 +1,8 @@
 """Main window: any number of OPC UA sessions plus a shared log/report view.
 
 Each session is a :class:`~opcua_explorer.gui.session_workspace.SessionWorkspace`
-with its own five tabs (Connection, Address space, Export, Live monitor, Tests)
-and its own ``OpcUaService``. The window shell owns the tab bar, the menus and
+with its own eight tabs (Connection, Address space, Export, Live monitor, Events,
+Server, Tests, Sequences) and its own ``OpcUaService``. The window shell owns the tab bar, the menus and
 the status bar, and keeps one global "Logs & reports" tab shared by all
 sessions (operator summaries are prefixed with the session name).
 """
@@ -180,6 +180,14 @@ class MainWindow(QMainWindow):
     @property
     def monitor_tab(self) -> Any:
         return self.workspaces[0].monitor_tab
+
+    @property
+    def events_tab(self) -> Any:
+        return self.workspaces[0].events_tab
+
+    @property
+    def server_tab(self) -> Any:
+        return self.workspaces[0].server_tab
 
     @property
     def tests_tab(self) -> Any:

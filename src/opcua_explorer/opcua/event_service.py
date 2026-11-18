@@ -1,0 +1,368 @@
+"""Live event subscriptions on an existing OPC UA session.
+
+One :class:`LiveEvents` owns exactly one subscription whose monitored items
+listen to the ``EventNotifier`` attribute of one or more source nodes (usually
+the Server object). Every event the server publishes is reduced to display-safe
+text and handed to ``emit``. This module never writes: the one action of event
+monitoring, a condition acknowledgement, is a separate guarded call in
+:mod:`opcua_explorer.opcua.write_service`.
+
+Threading contract
+------------------
+Everything in this module runs on the asyncio worker loop. ``emit`` is supplied
+by the GUI as a thread-safe reporter; no asyncio object ever escapes to the GUI
+thread.
+
+Field selection is server-driven: the subscription requests the fields of the
+configured event type (``BaseEventType`` by default), so a custom event type
+contributes its own properties without this module hard-coding a field list.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import Callable, Iterable
+from datetime import datetime
+from typing import Any
+
+from asyncua import ua
+from asyncua.common.subscription import EventNotificationHandlerAsync
+
+from ..errors import InvalidNodeIdError, MonitorNotActiveError, OpcUaExplorerError
+from ..models import (
+    EVENT_FIELD_CHAR_LIMIT,
+    EventConfig,
+    EventNotification,
+    EventSourceInfo,
+    EventStart,
+    MonitorStatusEvent,
+    iso_utc,
+)
+from .attributes import status_name
+from .serialize import SerializationContext, serialize_value
+
+_logger = logging.getLogger(__name__)
+
+#: The OPC UA Server object: the only source most servers expose events for.
+SERVER_OBJECT_NODE_ID = ua.NodeId(ua.ObjectIds.Server).to_string()
+#: Standard base event type: every event, with the standard fields.
+BASE_EVENT_TYPE_NODE_ID = ua.NodeId(ua.ObjectIds.BaseEventType).to_string()
+
+#: Requested lifetime/keep-alive pair, matching the data-change subscription.
+_LIFETIME_COUNT = 10_000
+_MAX_KEEP_ALIVE_COUNT = 20
+#: Events arrive in bursts far more readily than data changes; keep more per publish.
+_MAX_NOTIFICATIONS_PER_PUBLISH = 1_000
+
+#: Attributes of ``asyncua.common.subscription.Event`` that are bookkeeping, not fields.
+_INTERNAL_EVENT_ATTRIBUTES = frozenset(
+    {"server_handle", "select_clauses", "event_fields", "data_types", "emitting_node", "internal_properties"}
+)
+
+#: Top-level event-type properties that only a condition subtype selects. Their
+#: presence in the accepted filter proves the subscription is a condition one.
+_CONDITION_SELECTIONS = frozenset(
+    {"AckedState", "ConfirmedState", "EnabledState", "Retain", "ConditionName", "BranchId"}
+)
+
+
+def event_id_bytes(text: str) -> bytes | None:
+    """Decode the hex ``EventId`` stored on a notification; ``None`` when unusable."""
+    cleaned = (text or "").strip()
+    if not cleaned or len(cleaned) % 2:
+        return None
+    try:
+        return bytes.fromhex(cleaned)
+    except ValueError:
+        return None
+
+
+def _selects_condition_fields(event: Any) -> bool:
+    """True when the filter selected a condition-only property."""
+    for clause in getattr(event, "select_clauses", None) or []:
+        browse_path = getattr(clause, "BrowsePath", None) or []
+        if browse_path and getattr(browse_path[0], "Name", "") in _CONDITION_SELECTIONS:
+            return True
+    return False
+
+
+def event_type_name(value: Any) -> str:
+    """Display name of an ``EventType`` NodeId, falling back to its string form."""
+    if isinstance(value, ua.Variant):
+        value = value.Value
+    if isinstance(value, ua.NodeId):
+        if value.NamespaceIndex == 0 and isinstance(value.Identifier, int):
+            return ua.ObjectIdNames.get(value.Identifier, value.to_string())
+        return value.to_string()
+    return "" if value is None else str(value)
+
+
+def event_type_id(value: Any) -> str:
+    """Canonical NodeId string of an ``EventType`` value."""
+    if isinstance(value, ua.Variant):
+        value = value.Value
+    if isinstance(value, ua.NodeId):
+        return value.to_string()
+    return "" if value is None else str(value)
+
+
+def event_field_text(value: Any, *, limit: int = EVENT_FIELD_CHAR_LIMIT) -> str:
+    """Render one event field (any OPC UA value) as bounded display text."""
+    text = _field_text(value)
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
+def _field_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, ua.Variant):
+        return _field_text(value.Value)
+    if isinstance(value, ua.LocalizedText):
+        if value.Text:
+            return value.Text
+        return "" if not value.Locale else f"<{value.Locale}>"
+    if isinstance(value, ua.NodeId):
+        return value.to_string()
+    if isinstance(value, ua.QualifiedName):
+        return value.Name if not value.NamespaceIndex else f"{value.NamespaceIndex}:{value.Name}"
+    if isinstance(value, ua.StatusCode):
+        return status_name(value)
+    if isinstance(value, (bytes, bytearray)):
+        return value.hex()
+    if isinstance(value, datetime):
+        return iso_utc(value) or ""
+    if isinstance(value, ua.TimeZoneDataType):
+        return f"offset={value.Offset} min, daylight={value.DaylightSavingInOffset}"
+    if isinstance(value, (bool, int, float, str)):
+        return str(value)
+
+    context = SerializationContext()
+    try:
+        encoded = serialize_value(value, context)
+        return json.dumps(encoded, ensure_ascii=False, default=str, separators=(",", ":"))
+    except Exception:  # pragma: no cover - the encoder is designed not to raise
+        _logger.debug("Encoding an event field failed", exc_info=True)
+        return f"<unrepresentable {type(value).__name__}>"
+
+
+class _LiveEventsHandler(EventNotificationHandlerAsync):
+    """Forwards event and status notifications to the subscription owner."""
+
+    def __init__(self, events: LiveEvents) -> None:
+        self._events = events
+
+    async def event_notification(self, event: Any) -> None:
+        self._events._handle_event(event)
+
+    async def status_change_notification(self, status: Any) -> None:
+        self._events._handle_status_change(status)
+
+
+class LiveEvents:
+    """Owns one event subscription and its per-source monitored items."""
+
+    def __init__(self, client: Any, emit: Callable[[Any], None]) -> None:
+        self._client = client
+        self._emit = emit
+        self._subscription: Any | None = None
+        self._config = EventConfig()
+        self._event_type: ua.NodeId = ua.NodeId(ua.ObjectIds.BaseEventType)
+        self._sources: dict[int, EventSourceInfo] = {}
+        self._sequence = 0
+
+    # -- state -------------------------------------------------------------
+    @property
+    def is_active(self) -> bool:
+        return self._subscription is not None
+
+    @property
+    def subscription_id(self) -> int | None:
+        if self._subscription is None:
+            return None
+        return getattr(self._subscription, "subscription_id", None)
+
+    def source_count(self) -> int:
+        return len(self._sources)
+
+    # -- lifecycle ---------------------------------------------------------
+    async def start(self, source_node_ids: Iterable[str], config: EventConfig) -> EventStart:
+        """Create the subscription and listen to events on the given source nodes."""
+        ids = list(dict.fromkeys(source_node_ids))
+        if not ids:
+            raise OpcUaExplorerError("At least one source NodeId is required to monitor events.")
+
+        self._config = config.normalised()
+        self._event_type = self._parse_event_type(self._config.event_type_node_id)
+
+        if self._subscription is not None:
+            await self.stop()
+
+        params = ua.CreateSubscriptionParameters()
+        params.RequestedPublishingInterval = float(self._config.publishing_interval_ms)
+        params.RequestedLifetimeCount = _LIFETIME_COUNT
+        params.RequestedMaxKeepAliveCount = _MAX_KEEP_ALIVE_COUNT
+        params.MaxNotificationsPerPublish = _MAX_NOTIFICATIONS_PER_PUBLISH
+        params.PublishingEnabled = True
+        params.Priority = 0
+
+        subscription = await self._client.create_subscription(params, _LiveEventsHandler(self))
+        self._subscription = subscription
+        self._sources = {}
+        _logger.info("Event subscription %s created", self.subscription_id)
+
+        result = EventStart(
+            subscription_id=self.subscription_id,
+            requested_publishing_interval_ms=float(self._config.publishing_interval_ms),
+        )
+        result.sources = await self.add(ids)
+        return result
+
+    async def add(self, source_node_ids: Iterable[str]) -> list[EventSourceInfo]:
+        """Listen to events of additional source nodes on the running subscription."""
+        if self._subscription is None:
+            raise MonitorNotActiveError("No event subscription is running. Start event monitoring first.")
+
+        ids = list(dict.fromkeys(source_node_ids))
+        infos: list[EventSourceInfo] = []
+        for node_id in ids:
+            info = EventSourceInfo(node_id=node_id)
+            try:
+                handle = await self._subscription.subscribe_events(
+                    self._client.get_node(node_id),
+                    self._event_type,
+                    queuesize=int(self._config.queue_size),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - one bad source must not abort the rest
+                code = getattr(exc, "code", None)
+                info.ok = False
+                info.status = status_name(code) if code is not None else "Failed"
+                info.detail = f"The server refused event notifications for {node_id}: {exc}"
+            else:
+                if isinstance(handle, ua.StatusCode):
+                    info.ok = False
+                    info.status = status_name(handle)
+                    info.detail = f"The server refused event notifications for {node_id} (see the StatusCode)."
+                else:
+                    info.client_handle = handle
+                    info.status = "Good"
+                    self._sources[handle] = info
+            infos.append(info)
+            if not info.ok:
+                _logger.warning("Event source %s was not accepted: %s", node_id, info.status)
+        return infos
+
+    async def remove(self, handles: Iterable[int]) -> None:
+        """Stop listening to the source nodes with the given handles."""
+        if self._subscription is None:
+            raise MonitorNotActiveError("No event subscription is running. Start event monitoring first.")
+        wanted = [handle for handle in handles if handle in self._sources]
+        if not wanted:
+            return
+        await self._subscription.unsubscribe(wanted)
+        for handle in wanted:
+            self._sources.pop(handle, None)
+
+    async def stop(self) -> None:
+        """Delete the subscription; safe to call when nothing runs."""
+        subscription, self._subscription = self._subscription, None
+        self._sources = {}
+        if subscription is None:
+            return
+        try:
+            await subscription.delete()
+        except Exception as exc:  # pragma: no cover - server teardown is best effort
+            _logger.warning("Deleting the event subscription reported: %s", exc)
+        else:
+            _logger.info("Event subscription deleted")
+
+    # -- notification handling (called on the asyncio thread) --------------
+    def _handle_event(self, event: Any) -> None:
+        try:
+            notification = self._build_notification(event)
+        except Exception:  # pragma: no cover - a bad payload must not kill the publish loop
+            _logger.exception("Building an event notification failed")
+            return
+        self._sequence += 1
+        notification.sequence = self._sequence
+        try:
+            self._emit(notification)
+        except Exception:  # pragma: no cover - reporter must not raise
+            _logger.exception("Delivering an event notification failed")
+
+    def _build_notification(self, event: Any) -> EventNotification:
+        fields: dict[str, str] = {}
+        names = getattr(event, "data_types", None) or {}
+        for name in names:
+            if name in _INTERNAL_EVENT_ATTRIBUTES:
+                continue
+            fields[str(name)] = event_field_text(getattr(event, name, None))
+
+        event_type_value = getattr(event, "EventType", None)
+        severity_value = getattr(event, "Severity", None)
+        if isinstance(severity_value, ua.Variant):
+            severity_value = severity_value.Value
+        try:
+            severity = int(severity_value) if severity_value is not None else None
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            severity = None
+
+        condition_node_id = ""
+        if _selects_condition_fields(event):
+            # ConditionId/NodeId identify the condition; the demo server leaves
+            # both empty, where SourceNode is the condition object by definition.
+            condition_node_id = (
+                fields.get("ConditionId") or fields.get("NodeId") or fields.get("SourceNode", "")
+            )
+
+        return EventNotification(
+            sequence=0,
+            event_type=event_type_name(event_type_value),
+            event_type_id=event_type_id(event_type_value),
+            source_node=fields.get("SourceNode", ""),
+            source_name=fields.get("SourceName", ""),
+            severity=severity,
+            message=fields.get("Message", ""),
+            time=fields.get("Time") or None,
+            receive_time=fields.get("ReceiveTime") or None,
+            event_id=fields.get("EventId", ""),
+            condition_node_id=condition_node_id,
+            fields=fields,
+        )
+
+    def _handle_status_change(self, status: Any) -> None:
+        code = getattr(status, "Status", status)
+        name = status_name(code)
+        diagnostic = getattr(status, "DiagnosticInfos", None) or []
+        detail = f"{len(diagnostic)} diagnostic info entr(y/ies)" if diagnostic else ""
+        _logger.warning("Event subscription status changed: %s", name)
+        try:
+            self._emit(MonitorStatusEvent(status=name, detail=detail))
+        except Exception:  # pragma: no cover - reporter must not raise
+            _logger.exception("Delivering an event subscription status event failed")
+
+    # -- configuration -----------------------------------------------------
+    @staticmethod
+    def _parse_event_type(text: str) -> ua.NodeId:
+        if not text:
+            return ua.NodeId(ua.ObjectIds.BaseEventType)
+        try:
+            return ua.NodeId.from_string(text)
+        except Exception as exc:
+            raise InvalidNodeIdError(f"The event type NodeId {text!r} cannot be parsed.") from exc
+
+
+__all__ = [
+    "BASE_EVENT_TYPE_NODE_ID",
+    "SERVER_OBJECT_NODE_ID",
+    "LiveEvents",
+    "event_field_text",
+    "event_id_bytes",
+    "event_type_id",
+    "event_type_name",
+]

@@ -30,3 +30,18 @@ def flatten_for_csv(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
     except (TypeError, ValueError):  # pragma: no cover - serializer output is JSON-safe
         return safe_repr(value)
+
+
+def format_duration(seconds: float | None) -> str:
+    """Human-readable duration for diagnostics (``3 d 04:05:06`` / ``04:05:06``).
+
+    ``None`` renders as an empty string; negative values are clamped to 0.
+    """
+    if seconds is None:
+        return ""
+    total = max(0, int(round(float(seconds))))
+    days, remainder = divmod(total, 86_400)
+    hours, remainder = divmod(remainder, 3_600)
+    minutes, secs = divmod(remainder, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{days} d {clock}" if days else clock

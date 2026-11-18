@@ -104,6 +104,7 @@ class DemoModel:
     extra_value: Any
     start_method: Any
     custom_data_type: Any
+    event_generator: Any = None
     node_ids: dict[str, str] = field(default_factory=dict)
 
 
@@ -301,6 +302,23 @@ async def _update_values(model: DemoModel, interval: float = 1.0) -> None:
             _logger.debug("Demo value update failed", exc_info=True)
 
 
+async def _emit_events(model: DemoModel, interval: float = 1.0) -> None:
+    """Publish one demo event per interval so an event subscription has something to show."""
+    generator = model.event_generator
+    if generator is None:  # pragma: no cover - only called after the generator exists
+        return
+    sequence = 0
+    while True:
+        await asyncio.sleep(interval)
+        sequence += 1
+        try:
+            await generator.trigger(message=f"Demo event {sequence} from the OPC UA Explorer demo server")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - the demo must survive client churn
+            _logger.debug("Demo event trigger failed", exc_info=True)
+
+
 async def start_demo_server(
     *,
     host: str = "127.0.0.1",
@@ -309,8 +327,13 @@ async def start_demo_server(
     certificate: str | None = None,
     private_key: str | None = None,
     update_values: bool = True,
+    event_interval: float | None = None,
 ) -> DemoModel:
-    """Start a demo server and return its model (``model.endpoint`` is usable)."""
+    """Start a demo server and return its model (``model.endpoint`` is usable).
+
+    ``event_interval`` (seconds) publishes a demo event on the Server object at
+    that rate; it is off by default so ordinary runs stay deterministic.
+    """
     chosen_port = find_free_port(host) if port in (None, 0) else int(port)
     endpoint = f"opc.tcp://{host}:{chosen_port}"
     model = await build_demo_server(
@@ -323,16 +346,23 @@ async def start_demo_server(
     if update_values:
         task = asyncio.create_task(_update_values(model))
         model.server._demo_update_task = task
+    if event_interval and float(event_interval) > 0:
+        model.event_generator = await model.server.get_event_generator(
+            ua.ObjectIds.BaseEventType, ua.ObjectIds.Server
+        )
+        event_task = asyncio.create_task(_emit_events(model, interval=float(event_interval)))
+        model.server._demo_event_task = event_task
     _logger.info("Demo server listening on %s", endpoint)
     return model
 
 
 async def stop_demo_server(model: DemoModel) -> None:
-    task = getattr(model.server, "_demo_update_task", None)
-    if task is not None:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
+    for attribute in ("_demo_update_task", "_demo_event_task"):
+        task = getattr(model.server, attribute, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
     await model.server.stop()
 
 
@@ -352,6 +382,13 @@ def build_parser() -> argparse.ArgumentParser:
             "keep Temperature/Speed/Running static instead of changing them every second; "
             "use this for the demo sequences and any value check that must be deterministic"
         ),
+    )
+    parser.add_argument(
+        "--event-interval",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="publish one demo event on the Server object at this rate (0 = off, the default)",
     )
     parser.add_argument("--cert", help="server certificate (.der or .pem) to enable Basic256Sha256/SignAndEncrypt")
     parser.add_argument("--key", help="server private key (.pem)")
@@ -378,12 +415,15 @@ def main(argv: list[str] | None = None) -> int:
             certificate=args.cert,
             private_key=args.key,
             update_values=not args.no_updates,
+            event_interval=args.event_interval or None,
         )
         print(f"Demo server running at {model.endpoint}")
         print(f"  namespaces: {DEMO_NAMESPACE} (index {model.namespace_index}), {DEMO_EXTRA_NAMESPACE}")
         if not args.no_username:
             print(f"  identity:   anonymous, or username={DEMO_USERNAME!r} password={DEMO_PASSWORD!r}")
         print(f"  start node: Objects folder (i=85) or ns={model.namespace_index};s=Plant")
+        if model.event_generator is not None:
+            print(f"  events:     one demo event every {args.event_interval:g} s on the Server object (i=2253)")
         print("Press Ctrl+C to stop.")
         try:
             while True:

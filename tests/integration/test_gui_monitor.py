@@ -44,7 +44,10 @@ def test_monitor_tab_streams_notifications_and_stops(qapp, tmp_path) -> None:
         assert tab.notifications_table.rowCount() > 0, tab.status_label.text()
         assert tab._running is True
         assert tab.stop_btn.isEnabled() is True
-        assert tab.publishing_spin.isEnabled() is False
+        # Intervals stay editable while running; "Apply intervals" changes the live subscription.
+        assert tab.publishing_spin.isEnabled() is True
+        assert tab.apply_intervals_btn.isEnabled() is True
+        assert tab.mode_combo.isEnabled() is True
         assert tab.items_table.item(0, 2).text() == "Good"
 
         # The per-node row is updated in place instead of appending rows.
@@ -251,5 +254,97 @@ def test_address_space_marks_nodes_of_the_live_monitor(qapp, tmp_path, monkeypat
         window.shutdown()
         for session_service in window.services:
             runner.run_until_complete(session_service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)
+
+
+def test_monitor_tab_applies_filter_server_mode_and_intervals(qapp, tmp_path) -> None:
+    """The tab drives DataChangeFilter, SetMonitoringMode and the interval changes."""
+    port = free_port()
+    server = start_demo_server(port)
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        connect_window(window, port, qapp)
+        tab = window.monitor_tab
+        window.show_tab(tab)
+
+        assert tab.trigger_combo.currentText() == "StatusValue"
+        assert tab.deadband_combo.currentText() == "None"
+        assert tab.deadband_spin.isEnabled() is False
+        assert tab.apply_intervals_btn.isEnabled() is False
+        assert tab.mode_combo.isEnabled() is False
+
+        tab.node_edit.setText("ns=2;s=Temperature")
+        tab.add_btn.click()
+        tab.deadband_combo.setCurrentText("Absolute")
+        assert tab.deadband_spin.isEnabled() is True
+        tab.deadband_spin.setValue(0.01)
+        tab.publishing_spin.setValue(200)
+        tab.sampling_spin.setValue(100)
+        tab._on_start()
+
+        deadline = time.monotonic() + 30
+        while tab.notifications_table.rowCount() == 0 and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.notifications_table.rowCount() > 0, tab.status_label.text()
+
+        # The filter is fixed at start; intervals and the server mode are live.
+        assert tab.trigger_combo.isEnabled() is False
+        assert tab.deadband_combo.isEnabled() is False
+        assert tab.apply_intervals_btn.isEnabled() is True
+        assert tab.mode_combo.isEnabled() is True
+        assert tab.mode_combo.currentText() == "Reporting"
+
+        # Disabled at the server stops delivery; the rows stay.
+        tab.mode_combo.setCurrentText("Disabled")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            if "mode is Disabled" in tab.status_label.text():
+                break
+            time.sleep(0.03)
+        assert "mode is Disabled" in tab.status_label.text(), tab.status_label.text()
+        rows = tab.notifications_table.rowCount()
+        quiet_until = time.monotonic() + 1.6
+        while time.monotonic() < quiet_until:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.notifications_table.rowCount() == rows
+
+        # Reporting resumes delivery.
+        tab.mode_combo.setCurrentText("Reporting")
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            if "mode is Reporting" in tab.status_label.text():
+                break
+            time.sleep(0.03)
+        assert "mode is Reporting" in tab.status_label.text(), tab.status_label.text()
+        deadline = time.monotonic() + 20
+        while tab.notifications_table.rowCount() == rows and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.notifications_table.rowCount() > rows, "notifications did not resume"
+
+        # Apply new intervals to the running subscription.
+        tab.publishing_spin.setValue(300)
+        tab.sampling_spin.setValue(250)
+        tab.apply_intervals_btn.click()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            if "Intervals applied" in tab.status_label.text() or "was refused" in tab.status_label.text():
+                break
+            time.sleep(0.03)
+        status = tab.status_label.text()
+        assert "Intervals applied" in status or "was refused" in status, status
+        assert "publishing revised to" in status, status
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)

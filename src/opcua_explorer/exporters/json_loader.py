@@ -24,7 +24,15 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import ExportError
-from ..models import AddressSpace, ConnectionInfo, Edge, NamespaceEntry, NodeRecord, ValueSnapshot
+from ..models import (
+    AddressSpace,
+    ConnectionInfo,
+    Edge,
+    NamespaceEntry,
+    NodeRecord,
+    TraversalConfig,
+    ValueSnapshot,
+)
 from .json_exporter import FORMAT_NAME, FORMAT_VERSION
 
 
@@ -74,6 +82,28 @@ def _connection(raw: Any) -> ConnectionInfo | None:
         software_version=_text(raw.get("software_version")),
         build_number=_text(raw.get("build_number")),
         server_certificate_sha256=_text(raw.get("server_certificate_sha256")),
+    )
+
+
+def _traversal_config(raw: Any) -> TraversalConfig:
+    """Restore the recorded download bounds; missing keys keep their defaults."""
+    data = raw if isinstance(raw, Mapping) else {}
+    defaults = TraversalConfig()
+    namespace_filter = data.get("namespace_filter")
+    return TraversalConfig(
+        max_depth=None if data.get("max_depth") is None else int(data["max_depth"]),
+        max_nodes=None if data.get("max_nodes") is None else int(data["max_nodes"]),
+        concurrency=int(data.get("concurrency", defaults.concurrency)),
+        batch_size=int(data.get("batch_size", defaults.batch_size)),
+        max_references_per_node=int(
+            data.get("max_references_per_node", defaults.max_references_per_node)
+        ),
+        namespace_filter=(
+            None if namespace_filter is None else frozenset(int(item) for item in namespace_filter)
+        ),
+        include_values=bool(data.get("include_values", defaults.include_values)),
+        include_description=bool(data.get("include_description", defaults.include_description)),
+        follow_subtypes=bool(data.get("follow_subtypes", defaults.follow_subtypes)),
     )
 
 
@@ -161,6 +191,7 @@ def snapshot_from_document(document: Any, *, name: str | None = None) -> Address
         namespaces=namespaces,
         connection=_connection(source_document.get("connection")),
         values_included=bool(source_document.get("values_included")),
+        config=_traversal_config(source_document.get("traversal")),
         limitations=[str(item) for item in source_document.get("limitations") or ()],
         inaccessible={
             str(entry.get("node_id")): str(entry.get("status") or "")

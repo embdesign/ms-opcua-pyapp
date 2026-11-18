@@ -20,8 +20,8 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 416 passed (≈4–14 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 315 passed, ~3 s
+uv run pytest -q                           # full suite, 489 passed (≈4–14 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 369 passed, ~3 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -73,9 +73,18 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.
-- There is exactly **one** write/method-call implementation: `opcua/write_service.py`
-  (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`). The guarded checks and the
-  sequence runner both use it; do not add another path that parses and sends a value.
+- There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
+  (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`). The
+  guarded checks and the sequence runner both use it; do not add another path that parses and sends a value.
+  Every sending function requires a keyword-only `authorization: WriteAuthority` (no default), so a write can
+  never be sent without naming the operator dialog or the sequence document that asked for it.
+  `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
+  `write_service.py` (the demo server excepted), and no default for `authorization`.
+- Condition acknowledgement is the **only** action of the Events tab: one `Acknowledge` method call through
+  `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`, after the explicit
+  confirmation text in `operator_text.acknowledge_condition_confirmation`. It is never retried, never calls
+  `Confirm`/`Enable`/`AddComment`, and refuses a method whose `InputArguments` are not
+  (ByteString, LocalizedText). Event notifications stay read-only; there is no automatic acknowledgement.
 - Writes are typed from the server by `opcua/type_support.py` (built-ins, enumerations, structures) and targets
   may be addressed by browse path through `opcua/path_support.py` (complete, unambiguous matches only).
 - `opcua/sequence_runner.py` is device-neutral: it never names a lock, a vendor or a method. A sequence document

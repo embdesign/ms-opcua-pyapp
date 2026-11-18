@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -34,7 +34,7 @@ from ...models import AddressSpace, AttributeResult, NodeDetails, ValueSnapshot
 from ...opcua.attributes import format_attribute_value
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
-from ..async_runner import AsyncRunner
+from ..async_runner import AsyncRunner, TaskHandle
 from ..theme import ACCENT, mono_font
 
 _logger = logging.getLogger(__name__)
@@ -81,6 +81,8 @@ class BrowserTab(QWidget):
         self._runner = runner
         self._service = service
         self._loading: set[str] = set()
+        #: In-flight reads by task key, so shutdown can cancel them.
+        self._tasks: dict[str, TaskHandle] = {}
         self._detail_token = 0
         self._snapshot: AddressSpace | None = None
         self._matches: list[str] = []
@@ -399,7 +401,7 @@ class BrowserTab(QWidget):
         if not self._service.is_connected:
             return
         self._loading.add(node_id)
-        self._runner.submit(
+        self._submit(
             lambda: self._service.browse_children(str(node_id)),
             on_done=lambda children: self._on_children(item, str(node_id), children),
             on_error=lambda message: self._on_children_error(item, str(node_id), message),
@@ -459,7 +461,7 @@ class BrowserTab(QWidget):
         self._detail_token += 1
         token = self._detail_token
         self._clear_details()
-        self._runner.submit(
+        self._submit(
             lambda: self._service.read_node_details(node_id),
             on_done=lambda details: self._on_details(token, details),
             on_error=lambda message: self._on_details_error(token, node_id, message),
@@ -504,7 +506,8 @@ class BrowserTab(QWidget):
         for row, attribute in enumerate(attributes):
             name_item = QTableWidgetItem(attribute.attribute)
             name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            value_item = QTableWidgetItem(_format_cell(attribute.value))
+            text = attribute.display if attribute.display is not None else _format_cell(attribute.value)
+            value_item = QTableWidgetItem(text)
             value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
             if not attribute.ok:
                 value_item.setToolTip(attribute.status)
@@ -546,7 +549,7 @@ class BrowserTab(QWidget):
             return
         node_id = self._current_node_id
         self.value_meta.setText(f"Reading {node_id}…")
-        self._runner.submit(
+        self._submit(
             lambda: self._service.read_value(node_id),
             on_done=self._render_value,
             on_error=lambda message: self._set_status(f"Reading the value failed: {message}", error=True),
@@ -654,6 +657,35 @@ class BrowserTab(QWidget):
             return
         self.monitor_requested.emit(self._current_node_id)
         self._set_status(f"{self._current_node_id} added to the Live monitor tab.")
+
+    # -- background work ---------------------------------------------------
+    def _submit(
+        self,
+        coro: Callable[[], Awaitable[Any]],
+        *,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[str], None],
+    ) -> None:
+        """Submit one read and remember its handle so ``shutdown()`` can cancel it."""
+        key = self._runner.new_key()
+        handle = self._runner.submit(
+            coro,
+            key=key,
+            on_done=lambda result: self._finish(key, on_done, result),
+            on_error=lambda message: self._finish(key, on_error, message),
+        )
+        self._tasks[key] = handle
+
+    def _finish(self, key: str, callback: Callable[[Any], None], payload: Any) -> None:
+        self._tasks.pop(key, None)
+        callback(payload)
+
+    def shutdown(self) -> None:
+        """Cancel reads still in flight so no callback targets a deleted widget."""
+        pending = list(self._tasks.values())
+        self._tasks.clear()
+        for handle in pending:
+            handle.cancel()
 
     def _set_status(self, message: str, *, error: bool = False) -> None:
         self.status_label.setText(("⚠ " if error else "") + message)

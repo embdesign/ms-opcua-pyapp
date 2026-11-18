@@ -6,7 +6,7 @@ import csv
 import json
 
 from opcua_explorer.exporters import export_csv, export_json, snapshot_to_document
-from opcua_explorer.models import AddressSpace, ValueSnapshot
+from opcua_explorer.models import AddressSpace, TraversalConfig, ValueSnapshot
 
 
 def test_json_document_structure(sample_snapshot: AddressSpace) -> None:
@@ -36,6 +36,34 @@ def test_json_document_structure(sample_snapshot: AddressSpace) -> None:
 
     denied = document["nodes"]["ns=2;s=Denied"]
     assert denied["unavailable_attributes"] == {"Value": "BadUserAccessDenied"}
+
+
+def test_json_records_the_full_traversal_configuration(sample_snapshot: AddressSpace) -> None:
+    sample_snapshot.config = TraversalConfig(
+        max_depth=3,
+        max_nodes=50,
+        concurrency=2,
+        batch_size=10,
+        max_references_per_node=7,
+        namespace_filter=frozenset({2}),
+        include_values=True,
+        include_description=False,
+        follow_subtypes=False,
+    )
+
+    traversal = snapshot_to_document(sample_snapshot)["source"]["traversal"]
+
+    assert traversal == {
+        "max_depth": 3,
+        "max_nodes": 50,
+        "concurrency": 2,
+        "batch_size": 10,
+        "max_references_per_node": 7,
+        "namespace_filter": [2],
+        "include_values": True,
+        "include_description": False,
+        "follow_subtypes": False,
+    }
 
 
 def test_json_references_are_forward_edges_with_inclusion_flag(sample_snapshot: AddressSpace) -> None:
@@ -106,7 +134,17 @@ def test_csv_rows_and_columns(sample_snapshot: AddressSpace, tmp_path) -> None:
     assert temperature["references_out"] == "0"
     assert temperature["references_in"] == "1"
     assert temperature["value"] == ""  # values excluded
+    assert temperature["value_status"] == ""
+    assert temperature["value_encoding"] == ""
+    assert temperature["unavailable_attributes"] == ""
     assert temperature["description"] == 'Line temperature, in "°C", sampled'
+
+    # A refused Value keeps its StatusCode instead of looking like an excluded value.
+    denied = by_id["ns=2;s=Denied"]
+    assert denied["value"] == ""
+    assert denied["value_status"] == "BadUserAccessDenied"
+    assert denied["value_encoding"] == "unavailable"
+    assert denied["unavailable_attributes"] == "Value=BadUserAccessDenied"
 
     plant = by_id["ns=2;s=Plant"]
     assert plant["references_in"] == "1"
@@ -125,5 +163,34 @@ def test_csv_includes_values_when_requested(sample_snapshot: AddressSpace, tmp_p
         rows = {row["node_id"]: row for row in csv.DictReader(handle)}
     temperature = rows["ns=2;s=Temperature"]
     assert temperature["value"] == "[1.0,2.0]"
+    assert temperature["value_status"] == "Good"
+    assert temperature["value_encoding"] == "json"
     assert temperature["value_variant_type"] == "Double"
     assert temperature["value_source_timestamp"].startswith("2026-01-01")
+
+
+def test_csv_preserves_encoding_and_every_unavailable_attribute(sample_snapshot: AddressSpace, tmp_path) -> None:
+    sample_snapshot.values_included = True
+    temperature = sample_snapshot.nodes["ns=2;s=Temperature"]
+    temperature.value = ValueSnapshot(
+        value={"$type": "ByteString", "base64": "AAE="},
+        variant_type="ByteString",
+        status="Good",
+        encoding="unsupported",
+        unsupported=[{"kind": "binary", "detail": "undecoded ExtensionObject"}],
+    )
+    temperature.unavailable.update(
+        {"DataType": "BadAttributeIdInvalid", "AccessLevel": "BadNotReadable"}
+    )
+    target = tmp_path / "space.csv"
+    export_csv(sample_snapshot, target)
+
+    with target.open(encoding="utf-8-sig", newline="") as handle:
+        rows = {row["node_id"]: row for row in csv.DictReader(handle)}
+    row = rows["ns=2;s=Temperature"]
+
+    assert row["value_encoding"] == "unsupported"
+    # Sorted Attribute=StatusCode pairs, so the column is stable between runs.
+    assert row["unavailable_attributes"] == (
+        "AccessLevel=BadNotReadable;DataType=BadAttributeIdInvalid"
+    )

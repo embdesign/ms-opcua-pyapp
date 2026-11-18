@@ -10,7 +10,7 @@ Schema (``format_version`` 1)
       "generator": {...},
       "generated_at_utc": "...,",
       "source": {"endpoint_url": ..., "connection": {...}, "download_roots": [...],
-                 "values_included": false, "limitations": [...]},
+                 "values_included": false, "traversal": {...}, "limitations": [...]},
       "namespaces": [{"index": 0, "uri": "http://opcfoundation.org/UA/"}],
       "summary": {...},
       "nodes": {"ns=2;i=1": {...}},
@@ -101,10 +101,13 @@ def snapshot_to_document(snapshot: AddressSpace) -> dict[str, Any]:
                 "max_nodes": snapshot.config.max_nodes,
                 "concurrency": snapshot.config.concurrency,
                 "batch_size": snapshot.config.batch_size,
+                "max_references_per_node": snapshot.config.max_references_per_node,
                 "namespace_filter": (
                     None if snapshot.config.namespace_filter is None else sorted(snapshot.config.namespace_filter)
                 ),
                 "include_values": snapshot.config.include_values,
+                "include_description": snapshot.config.include_description,
+                "follow_subtypes": snapshot.config.follow_subtypes,
             },
             "limitations": list(snapshot.limitations),
         },

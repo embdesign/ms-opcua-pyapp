@@ -13,9 +13,34 @@ from opcua_explorer.models import (
 )
 from opcua_explorer.operator_text import (
     EQUIPMENT_WARNING,
+    acknowledge_condition_confirmation,
     connection_diagnostics_text,
     guarded_operation_confirmation,
 )
+
+
+def test_acknowledge_confirmation_names_the_target_event_and_limits() -> None:
+    text = acknowledge_condition_confirmation(
+        endpoint_url="opc.tcp://plant:4840",
+        condition_node_id="ns=2;s=PumpCondition",
+        event_id="0102ff",
+        comment="checked on site",
+    )
+
+    assert "Endpoint: opc.tcp://plant:4840" in text
+    assert "CALL Acknowledge on ns=2;s=PumpCondition" in text
+    assert "EventId: 0102ff" in text
+    assert "Comment: checked on site" in text
+    assert "does not write a variable" in text
+    assert "never retried" in text
+    assert EQUIPMENT_WARNING in text
+
+
+def test_acknowledge_confirmation_renders_an_empty_comment() -> None:
+    text = acknowledge_condition_confirmation(
+        endpoint_url="opc.tcp://x", condition_node_id="i=1", event_id="00", comment=""
+    )
+    assert "Comment: (empty)" in text
 
 
 def test_guarded_confirmation_lists_exact_operations_and_warning() -> None:

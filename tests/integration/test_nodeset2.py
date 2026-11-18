@@ -51,6 +51,9 @@ async def test_export_objects_subtree_writes_file(service, demo_model, tmp_path)
     assert any("urn:opcua-explorer:demo" in entry["uri"] for entry in result.namespaces)
     # Namespace 0 nodes are referenced, never written into the file.
     assert all(not node_id.startswith("ns=0;") for node_id in result.node_ids_written)
+    # Attributes the XML exporter cannot write are reported, not dropped silently.
+    assert any("WriteMask" in note for note in result.limitations)
+    assert any("RolePermissions" in note for note in result.limitations)
 
 
 @pytest.mark.asyncio

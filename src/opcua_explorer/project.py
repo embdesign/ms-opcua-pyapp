@@ -87,6 +87,7 @@ class ExportState:
     batch_size: int = DEFAULT_BATCH_SIZE
     max_references_per_node: int = 0
     include_values: bool = False
+    include_description: bool = True
     #: Checked namespace indexes; ``None`` means "all namespaces".
     namespaces: list[int] | None = None
     include_dependencies: bool = True
@@ -121,6 +122,7 @@ class ExportState:
                 data, "max_references_per_node", defaults.max_references_per_node
             ),
             include_values=bool(data.get("include_values", defaults.include_values)),
+            include_description=bool(data.get("include_description", defaults.include_description)),
             namespaces=namespaces,
             include_dependencies=bool(data.get("include_dependencies", defaults.include_dependencies)),
             max_dependency_nodes=_as_int(
@@ -264,7 +266,11 @@ class SequenceState:
 
 @dataclass(slots=True)
 class ProjectSession:
-    """One session: connection configuration plus the state of its five pages."""
+    """One session: connection configuration plus the state of its persisted pages.
+
+    The Events page is deliberately not part of a project: its sources are live
+    session state, like the event log itself.
+    """
 
     name: str = "Session"
     connection: ConnectionProfile = field(

@@ -20,6 +20,7 @@ bisecting the chunk, so a broken value costs exactly that value.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -74,19 +75,93 @@ _METHOD_SPECS: tuple[AttributeSpec, ...] = (
     AttributeSpec(ua.AttributeIds.UserExecutable, "UserExecutable"),
 )
 
+#: Per-NodeClass attributes that are only read for the details panel, not for a
+#: download: they make the panel complete without enlarging every export.
+_WRITE_MASK_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.WriteMask, "WriteMask"),
+    AttributeSpec(ua.AttributeIds.UserWriteMask, "UserWriteMask"),
+)
 
-def specs_for(node_class: str) -> list[AttributeSpec]:
+_OBJECT_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.EventNotifier, "EventNotifier"),
+)
+
+_VIEW_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.EventNotifier, "EventNotifier"),
+    AttributeSpec(ua.AttributeIds.ContainsNoLoops, "ContainsNoLoops"),
+)
+
+_VARIABLE_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.MinimumSamplingInterval, "MinimumSamplingInterval"),
+    AttributeSpec(ua.AttributeIds.Historizing, "Historizing"),
+)
+
+_TYPE_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.IsAbstract, "IsAbstract"),
+)
+
+_REFERENCE_TYPE_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.IsAbstract, "IsAbstract"),
+    AttributeSpec(ua.AttributeIds.Symmetric, "Symmetric"),
+    AttributeSpec(ua.AttributeIds.InverseName, "InverseName"),
+)
+
+_DATA_TYPE_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.IsAbstract, "IsAbstract"),
+    AttributeSpec(ua.AttributeIds.DataTypeDefinition, "DataTypeDefinition"),
+)
+
+#: Optional attributes every node may have; read for the details panel only, so a
+#: server that does not implement them adds a BadAttributeIdInvalid row there and
+#: does not affect a download.
+_COMMON_EXTRA_SPECS: tuple[AttributeSpec, ...] = (
+    AttributeSpec(ua.AttributeIds.AccessRestrictions, "AccessRestrictions"),
+    AttributeSpec(ua.AttributeIds.RolePermissions, "RolePermissions"),
+    AttributeSpec(ua.AttributeIds.UserRolePermissions, "UserRolePermissions"),
+)
+
+#: These attributes are optional in OPC UA. When a server reports
+#: BadAttributeIdInvalid for one, it is simply not part of that node's details.
+_SILENTLY_ABSENT_ATTRIBUTES = frozenset({"AccessRestrictions", "RolePermissions", "UserRolePermissions"})
+
+
+def _class_extra_specs(node_class: str) -> tuple[AttributeSpec, ...]:
+    if node_class == "Object":
+        return _OBJECT_EXTRA_SPECS
+    if node_class == "View":
+        return _VIEW_EXTRA_SPECS
+    if node_class in VARIABLE_NODE_CLASSES:
+        return _VARIABLE_EXTRA_SPECS
+    if node_class == "ReferenceType":
+        return _REFERENCE_TYPE_EXTRA_SPECS
+    if node_class == "DataType":
+        return _DATA_TYPE_EXTRA_SPECS
+    if node_class in ("ObjectType", "VariableType"):
+        return _TYPE_EXTRA_SPECS
+    return ()
+
+
+def specs_for(node_class: str, *, extended: bool = False) -> list[AttributeSpec]:
     """Attributes worth reading for a given NodeClass.
 
     The Value attribute is deliberately *not* included: values are read through
     :func:`read_values_bulk` so that StatusCode/timestamps/variant type are
     preserved, and so that "values included" stays an explicit opt-in.
+
+    ``extended`` adds the attributes the browser's details panel shows but a
+    download does not need (write masks, ``EventNotifier``, ``Historizing``,
+    type flags, access restrictions and role permissions).
     """
     specs = list(_BASE_SPECS)
+    if extended:
+        specs.extend(_WRITE_MASK_SPECS)
     if node_class in VARIABLE_NODE_CLASSES:
         specs.extend(_VARIABLE_SPECS)
     elif node_class in METHOD_NODE_CLASSES:
         specs.extend(_METHOD_SPECS)
+    if extended:
+        specs.extend(_class_extra_specs(node_class))
+        specs.extend(_COMMON_EXTRA_SPECS)
     return specs
 
 
@@ -94,7 +169,8 @@ def decode_attribute(name: str, data_value: ua.DataValue) -> AttributeResult:
     """Decode one DataValue into a display/export-friendly AttributeResult.
 
     Values stay *native* (NodeId, QualifiedName, LocalizedText, int, ...); use
-    :func:`format_attribute_value` for strings.
+    :func:`format_attribute_value` for strings. Bit fields also get a
+    ``display`` string with their decoded member names.
     """
     status = status_name(data_value.StatusCode)
     if not data_value.StatusCode.is_good():
@@ -103,6 +179,10 @@ def decode_attribute(name: str, data_value: ua.DataValue) -> AttributeResult:
         return AttributeResult(attribute=name, value=None, status=status, ok=True)
 
     raw = data_value.Value.Value if isinstance(data_value.Value, ua.Variant) else data_value.Value
+    if raw is None:
+        # A good StatusCode with no value (some servers do this) is not an error.
+        return AttributeResult(attribute=name, value=None, status=status, ok=True)
+    display: str | None = None
     if name == "NodeClass":
         try:
             value: Any = ua.NodeClass(int(raw)).name
@@ -110,15 +190,59 @@ def decode_attribute(name: str, data_value: ua.DataValue) -> AttributeResult:
             value = str(raw)
     elif name in ("AccessLevel", "UserAccessLevel"):
         value = int(raw)
-    elif name in ("Executable", "UserExecutable"):
-        value = bool(raw)
-    elif name in ("ValueRank", "MinimumSamplingInterval"):
+        display = _bitfield_display(value, decode_access_level(value))
+    elif name == "EventNotifier":
         value = int(raw)
+        display = _bitfield_display(value, decode_event_notifier(value))
+    elif name in ("WriteMask", "UserWriteMask"):
+        value = int(raw)
+        display = _bitfield_display(value, decode_write_mask(value))
+    elif name == "AccessRestrictions":
+        value = int(raw)
+        display = _bitfield_display(value, decode_access_restrictions(value))
+    elif name in ("Executable", "UserExecutable", "Historizing", "IsAbstract", "Symmetric", "ContainsNoLoops"):
+        value = bool(raw)
+    elif name == "ValueRank":
+        value = int(raw)
+    elif name == "MinimumSamplingInterval":
+        value = float(raw)
     elif name == "ArrayDimensions":
         value = [int(item) for item in raw] if raw else []
+    elif name in ("RolePermissions", "UserRolePermissions"):
+        value = raw
+        display = format_role_permissions(raw)
+    elif name == "DataTypeDefinition":
+        value = raw
+        display = _definition_display(raw)
     else:
         value = raw
-    return AttributeResult(attribute=name, value=value, status=status, ok=True)
+    return AttributeResult(attribute=name, value=value, status=status, ok=True, display=display)
+
+
+def _bitfield_names(enum_class: Any, value: int | None) -> list[str]:
+    """Names of a bit-*position* enum (``parse_bitfield``), as AccessLevel uses."""
+    if value is None:
+        return []
+    try:
+        members = enum_class.parse_bitfield(int(value))
+    except Exception:  # pragma: no cover - defensive
+        return _flag_names(enum_class, value)
+    return [member.name for member in sorted(members, key=lambda member: int(member.value))]
+
+
+def _flag_names(enum_class: Any, value: int | None) -> list[str]:
+    """Names of a bit-*mask* enum, as AttributeWriteMask and PermissionType use."""
+    if value is None:
+        return []
+    try:
+        flags = int(value)
+        return [member.name for member in enum_class if int(member) and flags & int(member)]
+    except Exception:  # pragma: no cover - defensive
+        return []
+
+
+def _bitfield_display(value: int, names: list[str]) -> str:
+    return f"{value} ({', '.join(names)})" if names else f"{value} (none)"
 
 
 def decode_access_level(value: int | None) -> list[str]:
@@ -127,13 +251,52 @@ def decode_access_level(value: int | None) -> list[str]:
     asyncua models AccessLevel as bit *positions* (CurrentRead=0,
     CurrentWrite=1, ...), so ``parse_bitfield`` is the correct helper.
     """
-    if value is None:
-        return []
+    return _bitfield_names(ua.AccessLevel, value)
+
+
+def decode_event_notifier(value: int | None) -> list[str]:
+    """Decode the EventNotifier bit field (``SubscribeToEvents``, …).
+
+    An Object or View with an empty list cannot be used as an event source.
+    """
+    return _bitfield_names(ua.EventNotifier, value)
+
+
+def decode_write_mask(value: int | None) -> list[str]:
+    """Decode WriteMask/UserWriteMask into the attribute names it covers."""
+    return _flag_names(ua.AttributeWriteMask, value)
+
+
+def decode_access_restrictions(value: int | None) -> list[str]:
+    """Decode AccessRestrictions (SigningRequired, EncryptionRequired, …)."""
+    return _flag_names(ua.AccessRestrictionType, value)
+
+
+def decode_permissions(value: int | None) -> list[str]:
+    """Decode a PermissionType bit mask (Browse, Read, WriteAttribute, …)."""
+    return _flag_names(ua.PermissionType, value)
+
+
+def format_role_permissions(value: Any) -> str:
+    """Render RolePermissions/UserRolePermissions as ``role: permissions`` pairs."""
+    parts: list[str] = []
+    for item in value or []:
+        role = getattr(item, "RoleId", None)
+        role_text = role.to_string() if isinstance(role, ua.NodeId) else str(role)
+        permissions = decode_permissions(int(getattr(item, "Permissions", 0) or 0))
+        parts.append(f"{role_text}: {', '.join(permissions) if permissions else 'none'}")
+    return "; ".join(parts)
+
+
+def _definition_display(value: Any) -> str:
+    """Render a DataTypeDefinition as bounded JSON (structures can be large)."""
     try:
-        members = ua.AccessLevel.parse_bitfield(int(value))
-    except Exception:  # pragma: no cover - defensive
-        return []
-    return [member.name for member in sorted(members, key=lambda member: int(member.value))]
+        encoded = serialize_value(value, SerializationContext())
+        text = json.dumps(encoded, ensure_ascii=False, default=str, separators=(",", ":"))
+    except Exception:  # pragma: no cover - the encoder is designed not to raise
+        return f"<unrepresentable {type(value).__name__}>"
+    limit = 600
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def format_attribute_value(value: Any) -> str:
@@ -392,14 +555,25 @@ async def read_node_attributes(
     *,
     node_class: str,
     include_value: bool = True,
+    extended: bool = False,
     namespace_uri_of: Any = lambda index: None,
 ) -> tuple[NodeRecord, list[AttributeResult]]:
     """Read every applicable attribute of one node (used by the details panel)."""
     node_id_string = node_id_to_string(node_id)
-    specs = specs_for(node_class)
+    specs = specs_for(node_class, extended=extended)
     results = await read_attributes_bulk(session, ((node_id_string, spec) for spec in specs), chunk_size=64)
 
     attributes = [results[(node_id_string, spec.name)] for spec in specs]
+    if extended:
+        # Optional attributes a server does not implement are simply not shown.
+        attributes = [
+            result
+            for result in attributes
+            if not (
+                result.attribute in _SILENTLY_ABSENT_ATTRIBUTES
+                and result.status == "BadAttributeIdInvalid"
+            )
+        ]
     record = NodeRecord(node_id=node_id_string)
     apply_attributes_to_record(record, {result.attribute: result for result in attributes}, namespace_uri_of=namespace_uri_of)
 

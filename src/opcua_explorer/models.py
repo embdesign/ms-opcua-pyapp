@@ -14,6 +14,7 @@ from typing import Any
 from .defaults import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CONCURRENCY,
+    DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
     DEFAULT_LATENCY_SAMPLES,
     DEFAULT_MAX_NODES,
     DEFAULT_NOTIFICATION_WAIT_SECONDS,
@@ -302,12 +303,18 @@ class ReferenceInfo:
 
 @dataclass(slots=True)
 class AttributeResult:
-    """One attribute of one node, already decoded for display."""
+    """One attribute of one node, already decoded for display.
+
+    ``value`` stays native (NodeId, QualifiedName, int, bool, ...) so a caller can
+    compare it; ``display`` optionally carries a human-readable rendering such as
+    the decoded names of a bit field (``"1 (SubscribeToEvents)"``).
+    """
 
     attribute: str
     value: Any = None
     status: str = "Good"
     ok: bool = True
+    display: str | None = None
 
 
 @dataclass(slots=True)
@@ -377,6 +384,30 @@ STATUS_SKIPPED = "skipped"
 FUNCTIONAL_TEST_DISCLAIMER = (
     "Functional and interoperability checks - not official OPC UA certification."
 )
+
+
+#: Where one write or method call was authorised. Every send records its authority, so a
+#: result can never look like an unattributed write.
+AUTHORITY_OPERATOR_DIALOG = "operator-dialog"
+AUTHORITY_SEQUENCE_DOCUMENT = "sequence-document"
+
+
+@dataclass(frozen=True, slots=True)
+class WriteAuthority:
+    """Who authorised one write or method call, and what that authority pointed at.
+
+    ``source`` is one of the ``AUTHORITY_*`` constants; ``reference`` names the check id or the
+    sequence step, so a report can be traced back to the confirmation the operator saw.
+    """
+
+    source: str
+    reference: str = ""
+
+    def describe(self) -> str:
+        return f"{self.source}: {self.reference}" if self.reference else self.source
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"source": self.source, "reference": self.reference}
 
 
 @dataclass(slots=True)
@@ -599,6 +630,28 @@ class TestRun:
         return "\n".join(lines)
 
 
+#: Standard OPC UA attributes read only for the Address space details panel
+#: (``opcua/attributes.py``), never during a download, so no snapshot export carries
+#: them. Kept as text here because ``models`` must not import the asyncua-based reader.
+DETAILS_ONLY_ATTRIBUTES: tuple[str, ...] = (
+    "EventNotifier",
+    "WriteMask",
+    "UserWriteMask",
+    "Historizing",
+    "MinimumSamplingInterval",
+    "IsAbstract",
+    "Symmetric",
+    "InverseName",
+    "ContainsNoLoops",
+    "DataTypeDefinition",
+    "AccessRestrictions",
+    "RolePermissions",
+    "UserRolePermissions",
+    "Executable",
+    "UserExecutable",
+)
+
+
 @dataclass(slots=True)
 class AddressSpace:
     """A downloaded (possibly partial) address-space snapshot."""
@@ -684,6 +737,50 @@ class AddressSpace:
             lines.append(f"Note:            {note}")
         return "\n".join(lines)
 
+    def coverage_text(self) -> str:
+        """What this snapshot contains and what no snapshot export can contain.
+
+        The snapshot is the authoritative record: ``config`` holds the options the
+        *download* used, which may differ from the options the Export tab shows now.
+        """
+        included = ["base attributes and references"]
+        excluded: list[str] = []
+        if self.config.include_values:
+            included.append("variable values (Value, SourceTimestamp, ServerTimestamp)")
+        else:
+            excluded.append("variable values (Value, SourceTimestamp, ServerTimestamp)")
+        if self.config.include_description:
+            included.append("node descriptions")
+        else:
+            excluded.append("node descriptions")
+
+        lines = [
+            f"Nodes:          {len(self.nodes)}",
+            f"References:     {len(self.references)}",
+            f"Included:       {', '.join(included)}",
+        ]
+        if excluded:
+            lines.append(f"NOT included:   {', '.join(excluded)}")
+        lines.append(
+            "Never in a snapshot (details panel only): " + ", ".join(DETAILS_ONLY_ATTRIBUTES) + "."
+        )
+        if self.cancelled:
+            lines.append("State:          CANCELLED (partial snapshot)")
+        if self.limits_hit:
+            lines.append(f"Limits hit:     {', '.join(self.limits_hit)} (partial snapshot)")
+        if self.inaccessible:
+            lines.append(f"Inaccessible:   {len(self.inaccessible)} node(s) could not be browsed")
+        refused = sum(len(record.unavailable) for record in self.nodes.values())
+        if refused:
+            lines.append(f"Refused attrs:  {refused} attribute read(s) returned a bad StatusCode")
+        if self.unsupported_encodings:
+            lines.append(
+                f"Unsupported:    {len(self.unsupported_encodings)} value encoding(s) flagged as approximate"
+            )
+        if self.errors:
+            lines.append(f"Errors:         {len(self.errors)}")
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Live monitoring (data-change subscriptions)
@@ -693,32 +790,61 @@ class AddressSpace:
 #: GUI, so a burst of large arrays cannot exhaust memory.
 MONITOR_VALUE_CHAR_LIMIT = 4000
 
+#: Data change triggers the client can request (``DataChangeTrigger`` values).
+DATA_CHANGE_TRIGGERS = ("Status", "StatusValue", "StatusValueTimestamp")
+#: Deadband types the client can request (``DeadbandType`` values).
+DEADBAND_TYPES = ("None", "Absolute", "Percent")
+
 
 @dataclass(slots=True)
 class MonitorConfig:
-    """Timing for one live-monitoring subscription.
+    """Timing and filter for one live-monitoring subscription.
 
     The server may revise both intervals; the values here are the requested
     ones. Sampling interval ``0`` means "fastest the server supports".
+
+    ``trigger`` and ``deadband_type`` map to the OPC UA ``DataChangeFilter``.
+    The default pair (``StatusValue`` / ``None``) is exactly the server's
+    default behaviour, so no filter is sent unless the operator changes one.
     """
 
     publishing_interval_ms: float = DEFAULT_PUBLISHING_INTERVAL_MS
     sampling_interval_ms: float = DEFAULT_SAMPLING_INTERVAL_MS
     #: Server-side queue size per monitored item; ``0`` uses the server default.
     queue_size: int = 0
+    trigger: str = "StatusValue"
+    deadband_type: str = "None"
+    deadband_value: float = 0.0
 
     def normalised(self) -> MonitorConfig:
+        trigger = self.trigger if self.trigger in DATA_CHANGE_TRIGGERS else "StatusValue"
+        deadband_type = self.deadband_type if self.deadband_type in DEADBAND_TYPES else "None"
+        deadband_value = max(0.0, float(self.deadband_value))
+        if deadband_type == "Percent":
+            deadband_value = min(100.0, deadband_value)
         return MonitorConfig(
             publishing_interval_ms=min(60_000.0, max(50.0, float(self.publishing_interval_ms))),
             sampling_interval_ms=min(60_000.0, max(0.0, float(self.sampling_interval_ms))),
             queue_size=min(1000, max(0, int(self.queue_size))),
+            trigger=trigger,
+            deadband_type=deadband_type,
+            deadband_value=deadband_value,
         )
+
+    @property
+    def needs_filter(self) -> bool:
+        """True when the requested trigger/deadband differs from the UA default."""
+        config = self.normalised()
+        return config.trigger != "StatusValue" or config.deadband_type != "None"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "publishing_interval_ms": self.publishing_interval_ms,
             "sampling_interval_ms": self.sampling_interval_ms,
             "queue_size": self.queue_size,
+            "trigger": self.trigger,
+            "deadband_type": self.deadband_type,
+            "deadband_value": self.deadband_value,
         }
 
 
@@ -799,6 +925,187 @@ class MonitorStart:
             f"requested publishing interval {self.requested_publishing_interval_ms:.0f} ms, "
             f"sampling interval {self.sampling_interval_ms:.0f} ms."
         )
+
+
+# ---------------------------------------------------------------------------
+# Event subscriptions. Condition events additionally carry the identity needed
+# for one guarded Acknowledge call; this data alone never writes anything.
+# ---------------------------------------------------------------------------
+
+#: One event field longer than this is shortened before it reaches the GUI or a
+#: log; event payloads are server-defined and may contain large structures.
+EVENT_FIELD_CHAR_LIMIT = 2000
+
+
+@dataclass(slots=True)
+class EventConfig:
+    """Timing and scope of one event subscription.
+
+    ``event_type_node_id`` selects the event type whose fields are requested.
+    Empty means the standard ``BaseEventType``: every event the source emits,
+    with the standard fields.
+    """
+
+    publishing_interval_ms: float = DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
+    #: Server-side queue size per monitored item; ``0`` uses the server default.
+    queue_size: int = 0
+    event_type_node_id: str = ""
+
+    def normalised(self) -> EventConfig:
+        return EventConfig(
+            publishing_interval_ms=min(60_000.0, max(100.0, float(self.publishing_interval_ms))),
+            queue_size=min(1000, max(0, int(self.queue_size))),
+            event_type_node_id=str(self.event_type_node_id or "").strip(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "publishing_interval_ms": self.publishing_interval_ms,
+            "queue_size": self.queue_size,
+            "event_type_node_id": self.event_type_node_id,
+        }
+
+
+@dataclass(slots=True)
+class EventSourceInfo:
+    """One node whose events were requested, and what the server made of it."""
+
+    node_id: str
+    status: str = "pending"
+    ok: bool = True
+    client_handle: int | None = None
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "status": self.status,
+            "ok": self.ok,
+            "client_handle": self.client_handle,
+            "detail": self.detail,
+        }
+
+
+@dataclass(slots=True)
+class EventNotification:
+    """One event notification, already reduced to display-safe text.
+
+    ``fields`` keeps every field the subscription selected, keyed by the name
+    the server's event type gave it, so custom event types stay inspectable.
+    """
+
+    sequence: int
+    event_type: str = ""
+    event_type_id: str = ""
+    source_node: str = ""
+    source_name: str = ""
+    severity: int | None = None
+    message: str = ""
+    time: str | None = None
+    receive_time: str | None = None
+    event_id: str = ""
+    #: The condition node when the subscription selected condition fields; empty otherwise.
+    condition_node_id: str = ""
+    fields: dict[str, str] = field(default_factory=dict)
+    received_at: datetime = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sequence": self.sequence,
+            "event_type": self.event_type,
+            "event_type_id": self.event_type_id,
+            "source_node": self.source_node,
+            "source_name": self.source_name,
+            "severity": self.severity,
+            "message": self.message,
+            "time": self.time,
+            "receive_time": self.receive_time,
+            "event_id": self.event_id,
+            "condition_node_id": self.condition_node_id,
+            "fields": dict(self.fields),
+            "received_at_utc": iso_utc(self.received_at),
+        }
+
+
+@dataclass(slots=True)
+class EventStart:
+    """Result of creating an event subscription."""
+
+    subscription_id: int | None
+    requested_publishing_interval_ms: float
+    sources: list[EventSourceInfo] = field(default_factory=list)
+    started_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        accepted = sum(1 for source in self.sources if source.ok)
+        return (
+            f"Subscription {self.subscription_id}: {accepted} of {len(self.sources)} event source(s) active; "
+            f"requested publishing interval {self.requested_publishing_interval_ms:.0f} ms."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Server status and diagnostics (read-only snapshot)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class ServerStatusSnapshot:
+    """One read-only look at ServerStatus, ServerDiagnostics and this session.
+
+    Optional standard variables that a server reports as Good-but-null are in
+    ``not_provided``; values with a Bad StatusCode are in ``unavailable``. The
+    monitored items are the client's own view of its live-monitor subscription
+    (``GetMonitoredItems`` is not called).
+    """
+
+    state: str = "Unknown"
+    current_time: str | None = None
+    start_time: str | None = None
+    uptime_seconds: float | None = None
+    seconds_till_shutdown: int | None = None
+    shutdown_reason: str | None = None
+    diagnostics_enabled: bool | None = None
+    counters: dict[str, int] = field(default_factory=dict)
+    limits: dict[str, int | float] = field(default_factory=dict)
+    not_provided: list[str] = field(default_factory=list)
+    unavailable: dict[str, str] = field(default_factory=dict)
+    monitor_subscription_id: int | None = None
+    monitored_items: list[MonitoredItemInfo] = field(default_factory=list)
+    received_at: datetime = field(default_factory=utc_now)
+
+    @property
+    def has_monitor(self) -> bool:
+        return self.monitor_subscription_id is not None
+
+    def summary_text(self) -> str:
+        parts = [f"Server {self.state}"]
+        if self.uptime_seconds is not None:
+            parts.append(f"uptime {self.uptime_seconds:.0f} s")
+        parts.append(f"{len(self.counters)} diagnostic value(s)")
+        if self.not_provided:
+            parts.append(f"{len(self.not_provided)} not provided")
+        if self.unavailable:
+            parts.append(f"{len(self.unavailable)} unavailable")
+        return "; ".join(parts) + "."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "current_time": self.current_time,
+            "start_time": self.start_time,
+            "uptime_seconds": self.uptime_seconds,
+            "seconds_till_shutdown": self.seconds_till_shutdown,
+            "shutdown_reason": self.shutdown_reason,
+            "diagnostics_enabled": self.diagnostics_enabled,
+            "counters": dict(self.counters),
+            "limits": dict(self.limits),
+            "not_provided": list(self.not_provided),
+            "unavailable": dict(self.unavailable),
+            "monitor_subscription_id": self.monitor_subscription_id,
+            "monitored_items": [item.to_dict() for item in self.monitored_items],
+            "received_at_utc": iso_utc(self.received_at),
+        }
 
 
 # ---------------------------------------------------------------------------------------
@@ -979,6 +1286,8 @@ class SequenceStepResult:
     previous_value: str = ""
     new_value: str = ""
     status_code: str = ""
+    #: Only set for a step that sent a write or a call: the authority it was sent under.
+    authorization: str = ""
     started_at: datetime = field(default_factory=utc_now)
     duration_ms: float = 0.0
 
@@ -993,6 +1302,7 @@ class SequenceStepResult:
             "previous_value": self.previous_value,
             "new_value": self.new_value,
             "status_code": self.status_code,
+            "authorization": self.authorization,
             "started_at": iso_utc(self.started_at),
             "duration_ms": self.duration_ms,
         }

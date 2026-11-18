@@ -1,17 +1,22 @@
-"""One place that performs a single variable write or a single method call.
+"""One place that performs a single variable write, a single method call or a single restore.
 
 The guarded test checks and the universal sequence runner share these primitives so that a
-write is always: server DataType -> parse -> **one** write -> read-back compare, and a call is
-always: ``InputArguments`` -> parse -> ``Executable`` -> **one** call.
+write is always: server DataType -> parse -> **one** write -> read-back compare, a call is
+always: ``InputArguments`` -> parse -> ``Executable`` -> **one** call, and a restore is one more
+write of the value that was read before, verified the same way.
 
-Nothing here discovers targets, scans, batches, retries or restores. A cancelled write or call
-reports whether it had already been sent, so a caller can never present an unknown effect as a
-plain failure.
+Every send states its authority (``models.WriteAuthority``): a caller cannot send without saying
+whether an operator dialog or an operator-written sequence document asked for it.
+
+Nothing here discovers targets, scans, batches, retries or restores on its own. A cancelled
+write or call reports whether it had already been sent, so a caller can never present an unknown
+effect as a plain failure.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +28,7 @@ from ..models import (
     STATUS_OUTCOME_UNKNOWN,
     STATUS_PASSED,
     STATUS_SKIPPED,
+    WriteAuthority,
 )
 from . import type_support
 from .check_support import preview_value
@@ -81,6 +87,22 @@ class WriteOutcome:
     write_status_code: str = ""
     sent: bool = False
     duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
+
+
+@dataclass(slots=True)
+class RestoreOutcome:
+    """Result of one restore write: the value that was written back and its read-back."""
+
+    node_id: str
+    status: str = STATUS_FAILED
+    detail: str = ""
+    written_value: str = ""
+    read_back_value: str = ""
+    read_back_status_code: str = ""
+    sent: bool = False
+    duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
 
 
 @dataclass(slots=True)
@@ -107,9 +129,12 @@ class CallOutcome:
     detail: str = ""
     arguments: list[str] = field(default_factory=list)
     output: str = ""
+    #: Raw output values (asyncua returns a list of Variants).
+    output_values: list[Any] = field(default_factory=list)
     status_code: str = ""
     sent: bool = False
     duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
 
 
 @dataclass(slots=True)
@@ -191,10 +216,15 @@ async def _read_previous(node: Any, outcome: WriteOutcome) -> Any:
     return None
 
 
-async def send_prepared_write(prepared: PreparedWrite, *, verify: bool = True) -> WriteOutcome:
+async def send_prepared_write(
+    prepared: PreparedWrite,
+    *,
+    authorization: WriteAuthority,
+    verify: bool = True,
+) -> WriteOutcome:
     """Send exactly one prepared write, then read it back unless ``verify`` is false."""
     node_id = prepared.node_id
-    outcome = WriteOutcome(node_id=node_id)
+    outcome = WriteOutcome(node_id=node_id, authorization=authorization)
     started = time.perf_counter()
     outcome.new_value = preview_value(prepared.parsed)
     await _read_previous(prepared.node, outcome)
@@ -255,13 +285,83 @@ async def send_prepared_write(prepared: PreparedWrite, *, verify: bool = True) -
     return outcome
 
 
-async def write_variable(client: Any, node_id: str, value_text: str, *, verify: bool = True) -> WriteOutcome:
+async def write_variable(
+    client: Any,
+    node_id: str,
+    value_text: str,
+    *,
+    authorization: WriteAuthority,
+    verify: bool = True,
+) -> WriteOutcome:
     """Prepare and send one write to one variable; the only write path in the application."""
     try:
         prepared = await prepare_write(client, node_id, value_text)
     except PrepareError as exc:
-        return WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc))
-    return await send_prepared_write(prepared, verify=verify)
+        return WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc), authorization=authorization)
+    return await send_prepared_write(prepared, authorization=authorization, verify=verify)
+
+
+async def restore_value(
+    prepared: PreparedWrite,
+    previous: Any,
+    *,
+    authorization: WriteAuthority,
+) -> RestoreOutcome:
+    """Write back one previously read value: exactly one write, then a read-back compare.
+
+    This is the only restore path; it exists so an optional "restore the previous value" is the
+    same single, typed and verified write as any other, never a second implementation.
+    """
+    outcome = RestoreOutcome(node_id=prepared.node_id, authorization=authorization)
+    outcome.written_value = preview_value(previous)
+    started = time.perf_counter()
+    try:
+        await prepared.node.write_value(ua.DataValue(ua.Variant(previous, prepared.variant_type)))
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        outcome.sent = True
+        outcome.detail = f"Restoring {prepared.node_id} returned {status_name(exc.code)}."
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = f"Restoring {prepared.node_id} failed: {type(exc).__name__}: {exc}"
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    outcome.sent = True
+
+    try:
+        read_back = await prepared.node.read_data_value()
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except Exception as exc:
+        outcome.status = STATUS_OUTCOME_UNKNOWN
+        outcome.detail = (
+            f"The value was written back but could not be read back: {type(exc).__name__}: {exc}. "
+            "The effect on the server is unknown."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+
+    outcome.read_back_status_code = status_name(read_back.StatusCode)
+    outcome.read_back_value = (
+        preview_value(read_back.Value.Value) if read_back.StatusCode.is_good() else "unreadable"
+    )
+    if not read_back.StatusCode.is_good():
+        outcome.status = STATUS_FAILED
+        outcome.detail = f"Restore of {prepared.node_id} was written but reading it back returned {outcome.read_back_status_code}."
+    elif outcome.read_back_value != outcome.written_value:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"Restore of {prepared.node_id} read back {outcome.read_back_value}, "
+            f"which differs from {outcome.written_value}."
+        )
+    else:
+        outcome.status = STATUS_PASSED
+        outcome.detail = f"Restored {prepared.node_id} to {outcome.written_value} and read it back."
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
 
 
 async def resolve_method_node_id(client: Any, object_node_id: str, method_node_id: str, method_name: str) -> str:
@@ -373,9 +473,13 @@ async def inspect_call(
     )
 
 
-async def send_prepared_call(prepared: PreparedCall) -> CallOutcome:
+async def send_prepared_call(prepared: PreparedCall, *, authorization: WriteAuthority) -> CallOutcome:
     """Send exactly one prepared method call."""
-    outcome = CallOutcome(object_node_id=prepared.object_node_id, method_node_id=prepared.method_node_id)
+    outcome = CallOutcome(
+        object_node_id=prepared.object_node_id,
+        method_node_id=prepared.method_node_id,
+        authorization=authorization,
+    )
     outcome.arguments = list(prepared.previews)
     started = time.perf_counter()
     try:
@@ -397,6 +501,13 @@ async def send_prepared_call(prepared: PreparedCall) -> CallOutcome:
         return outcome
     outcome.sent = True
     outcome.status = STATUS_PASSED
+    # asyncua unwraps a single output argument; multi-output methods return a list.
+    if result is None:
+        outcome.output_values = []
+    elif isinstance(result, (list, tuple)):
+        outcome.output_values = list(result)
+    else:
+        outcome.output_values = [result]
     outcome.output = preview_value(result) if result is not None else "no output arguments"
     rendered = ", ".join(prepared.previews) if prepared.previews else "no arguments"
     outcome.detail = (
@@ -412,13 +523,102 @@ async def call_method(
     object_node_id: str,
     method_node_id: str,
     argument_texts: list[str],
+    *,
+    authorization: WriteAuthority,
 ) -> CallOutcome:
     """Prepare and send one method call on one object node; exactly once."""
     try:
         prepared = await prepare_call(client, object_node_id, method_node_id, argument_texts)
     except PrepareError as exc:
-        return CallOutcome(object_node_id=object_node_id, method_node_id=method_node_id, status=STATUS_SKIPPED, detail=str(exc))
-    return await send_prepared_call(prepared)
+        return CallOutcome(
+            object_node_id=object_node_id,
+            method_node_id=method_node_id,
+            status=STATUS_SKIPPED,
+            detail=str(exc),
+            authorization=authorization,
+        )
+    return await send_prepared_call(prepared, authorization=authorization)
+
+
+#: Browse name of the A&C method this module calls; nothing else is ever invoked.
+ACKNOWLEDGE_METHOD_NAME = "Acknowledge"
+
+
+async def acknowledge_condition(
+    client: Any,
+    condition_node_id: str,
+    event_id: bytes,
+    comment: str,
+    *,
+    authorization: WriteAuthority,
+) -> CallOutcome:
+    """Acknowledge one condition event: one ``Acknowledge`` call, exactly once.
+
+    The method is resolved below the condition node by browse name and its
+    ``InputArguments`` must be ``ByteString`` (EventId) and ``LocalizedText``
+    (Comment) - the A&C definition. When either does not hold, nothing is sent.
+    No retry, no ``Confirm``, no comment synthesis.
+    """
+    outcome = CallOutcome(
+        object_node_id=condition_node_id, method_node_id="", authorization=authorization
+    )
+    if not event_id:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = "The event has no EventId; nothing was called."
+        return outcome
+
+    try:
+        method_node_id = await resolve_method_node_id(
+            client, condition_node_id, "", ACKNOWLEDGE_METHOD_NAME
+        )
+    except PrepareError as exc:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = str(exc)
+        return outcome
+    outcome.method_node_id = method_node_id
+
+    try:
+        prepared = await prepare_call(
+            client,
+            condition_node_id,
+            method_node_id,
+            [base64.b64encode(event_id).decode("ascii"), comment],
+        )
+    except PrepareError as exc:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = str(exc)
+        return outcome
+
+    expected = [
+        ua.NodeId(ua.ObjectIds.ByteString).to_string(),
+        ua.NodeId(ua.ObjectIds.LocalizedText).to_string(),
+    ]
+    actual = [str(entry.get("data_type") or "") for entry in prepared.signature]
+    if actual != expected:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = (
+            f"{condition_node_id} exposes {method_node_id} but its arguments are {actual or 'none'}; "
+            "an Acknowledge method takes EventId (ByteString) and Comment (LocalizedText). "
+            "The method was not called."
+        )
+        return outcome
+
+    outcome = await send_prepared_call(prepared, authorization=authorization)
+    # Acknowledge reports its own result as an output StatusCode: a Good service
+    # result does not mean the acknowledgement was accepted.
+    if outcome.status == STATUS_PASSED and outcome.output_values:
+        code = outcome.output_values[0]
+        if isinstance(code, ua.Variant):
+            code = code.Value
+        if isinstance(code, ua.StatusCode) and not code.is_good():
+            name = status_name(code)
+            outcome.status = STATUS_FAILED
+            outcome.status_code = name
+            outcome.detail = (
+                f"The server returned {name} from Acknowledge on {condition_node_id}; "
+                "the acknowledgement was not accepted."
+            )
+    return outcome
 
 
 __all__ = [
@@ -428,14 +628,17 @@ __all__ = [
     "PrepareError",
     "PreparedCall",
     "PreparedWrite",
+    "RestoreOutcome",
     "WriteCancelled",
     "WriteOutcome",
+    "acknowledge_condition",
     "call_method",
     "inspect_call",
     "inspect_write",
     "prepare_call",
     "prepare_write",
     "resolve_method_node_id",
+    "restore_value",
     "send_prepared_call",
     "send_prepared_write",
     "write_variable",

@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 from asyncua import ua
 
-from opcua_explorer.errors import MonitorNotActiveError
+from opcua_explorer.errors import MonitorNotActiveError, OpcUaExplorerError
 from opcua_explorer.models import MonitorConfig
-from opcua_explorer.opcua.monitor_service import LiveMonitor
+from opcua_explorer.opcua.monitor_service import LiveMonitor, build_data_change_filter
 
 REJECTED_NODE = "ns=2;s=Rejected"
 
@@ -33,8 +33,20 @@ class _FakeSubscription:
     def __init__(self) -> None:
         self.subscription_id = 42
         self.subscribed: list[tuple[str, dict[str, Any]]] = []
+        self.created: list[ua.MonitoredItemCreateRequest] = []
         self.unsubscribed: list[int] = []
         self.deleted = False
+        self.modes: list[ua.MonitoringMode] = []
+        self.mode_statuses: list[ua.StatusCode] | None = None
+        self.modified: list[tuple[int, float, int]] = []
+        self.modify_status = ua.StatusCode(ua.StatusCodes.Good)
+        self.updated: ua.ModifySubscriptionParameters | None = None
+        self.parameters = SimpleNamespace(
+            RequestedLifetimeCount=10_000,
+            RequestedMaxKeepAliveCount=20,
+            MaxNotificationsPerPublish=100,
+            Priority=0,
+        )
 
     async def subscribe_data_change(self, nodes: list[_FakeNode], **kwargs: Any) -> list[Any]:
         results: list[Any] = []
@@ -47,6 +59,33 @@ class _FakeSubscription:
             self.subscribed.append((node_id, kwargs))
             results.append(handle)
         return results
+
+    async def create_monitored_items(
+        self, requests: list[ua.MonitoredItemCreateRequest]
+    ) -> list[int | ua.StatusCode]:
+        results: list[int | ua.StatusCode] = []
+        for request in requests:
+            self.created.append(request)
+            node_id = request.ItemToMonitor.NodeId.to_string()
+            if node_id == REJECTED_NODE:
+                results.append(ua.StatusCode(ua.StatusCodes.BadNodeIdUnknown))
+                continue
+            results.append(300 + len(self.created))
+        return results
+
+    async def set_monitoring_mode(self, mode: ua.MonitoringMode) -> list[ua.StatusCode]:
+        self.modes.append(mode)
+        return self.mode_statuses or [ua.StatusCode(ua.StatusCodes.Good)]
+
+    async def modify_monitored_item(
+        self, handle: int, new_samp_time: ua.Duration, new_queuesize: int = 0, mod_filter_val: int = -1
+    ) -> list[Any]:
+        self.modified.append((handle, new_samp_time, new_queuesize))
+        return [SimpleNamespace(StatusCode=self.modify_status, RevisedSamplingInterval=new_samp_time)]
+
+    async def update(self, params: ua.ModifySubscriptionParameters) -> Any:
+        self.updated = params
+        return SimpleNamespace(RevisedPublishingInterval=150.0)
 
     async def unsubscribe(self, handles: list[int]) -> None:
         self.unsubscribed.extend(handles)
@@ -172,7 +211,128 @@ async def test_operations_require_a_running_subscription() -> None:
         await monitor.add(["ns=2;s=A"])
     with pytest.raises(MonitorNotActiveError):
         await monitor.remove([1])
+    with pytest.raises(MonitorNotActiveError):
+        await monitor.set_monitoring_mode("Disabled")
+    with pytest.raises(MonitorNotActiveError):
+        await monitor.set_publishing_interval(300)
+    with pytest.raises(MonitorNotActiveError):
+        await monitor.set_sampling_interval(300)
 
     # Stopping twice is harmless.
     await monitor.stop()
     await monitor.stop()
+
+
+def test_filter_config_is_normalised() -> None:
+    default = MonitorConfig()
+    assert default.needs_filter is False
+    assert MonitorConfig(trigger="Status").needs_filter is True
+    assert MonitorConfig(deadband_type="Absolute", deadband_value=0.5).needs_filter is True
+
+    fixed = MonitorConfig(trigger="Nope", deadband_type="Nope", deadband_value=-5).normalised()
+    assert fixed.trigger == "StatusValue"
+    assert fixed.deadband_type == "None"
+    assert fixed.deadband_value == 0.0
+
+    percent = MonitorConfig(deadband_type="Percent", deadband_value=150).normalised()
+    assert percent.deadband_value == 100.0
+
+
+def test_data_change_filter_is_built_from_the_config() -> None:
+    assert build_data_change_filter(MonitorConfig()) is None
+
+    absolute = build_data_change_filter(
+        MonitorConfig(deadband_type="Absolute", deadband_value=0.5)
+    )
+    assert absolute is not None
+    assert absolute.Trigger == ua.DataChangeTrigger.StatusValue
+    assert absolute.DeadbandType == ua.DeadbandType.Absolute
+    assert absolute.DeadbandValue == 0.5
+
+    triggered = build_data_change_filter(
+        MonitorConfig(trigger="StatusValueTimestamp", deadband_type="Percent", deadband_value=5)
+    )
+    assert triggered is not None
+    assert triggered.Trigger == ua.DataChangeTrigger.StatusValueTimestamp
+    assert triggered.DeadbandType == ua.DeadbandType.Percent
+    assert triggered.DeadbandValue == 5.0
+
+    status_only = build_data_change_filter(MonitorConfig(trigger="Status"))
+    assert status_only is not None
+    assert status_only.Trigger == ua.DataChangeTrigger.Status
+    assert status_only.DeadbandType == ua.DeadbandType.None_
+
+
+async def test_a_filtered_subscription_creates_monitored_items_directly() -> None:
+    client = _FakeClient()
+    monitor = LiveMonitor(client, lambda _event: None)
+
+    start = await monitor.start(
+        ["ns=2;s=Temperature", REJECTED_NODE],
+        MonitorConfig(
+            sampling_interval_ms=250,
+            queue_size=7,
+            deadband_type="Absolute",
+            deadband_value=1.0,
+        ),
+    )
+
+    # subscribe_data_change cannot carry a filter, so nothing went through it.
+    assert client.subscription.subscribed == []
+    requests = client.subscription.created
+    assert len(requests) == 2
+    first, second = requests
+    assert first.ItemToMonitor.AttributeId == ua.AttributeIds.Value
+    assert first.MonitoringMode == ua.MonitoringMode.Reporting
+    assert first.RequestedParameters.Filter.DeadbandType == ua.DeadbandType.Absolute
+    assert first.RequestedParameters.Filter.DeadbandValue == 1.0
+    assert first.RequestedParameters.SamplingInterval == 250
+    assert first.RequestedParameters.QueueSize == 7
+    assert first.RequestedParameters.DiscardOldest is True
+    assert first.RequestedParameters.ClientHandle != second.RequestedParameters.ClientHandle
+
+    assert start.items[0].ok is True and start.items[0].client_handle == 301
+    assert start.items[1].ok is False and start.items[1].status == "BadNodeIdUnknown"
+
+
+async def test_monitoring_mode_is_applied_and_refusals_are_reported() -> None:
+    client = _FakeClient()
+    monitor = LiveMonitor(client, lambda _event: None)
+    await monitor.start(["ns=2;s=A"], MonitorConfig())
+    assert monitor.monitoring_mode == "Reporting"
+
+    assert await monitor.set_monitoring_mode("Disabled") == "Disabled"
+    assert client.subscription.modes[-1] == ua.MonitoringMode.Disabled
+    assert monitor.monitoring_mode == "Disabled"
+
+    client.subscription.mode_statuses = [ua.StatusCode(ua.StatusCodes.BadServiceUnsupported)]
+    with pytest.raises(OpcUaExplorerError):
+        await monitor.set_monitoring_mode("Reporting")
+    assert monitor.monitoring_mode == "Disabled"  # unchanged after a refusal
+
+    with pytest.raises(OpcUaExplorerError):
+        await monitor.set_monitoring_mode("NotAMode")
+
+    await monitor.stop()
+    assert monitor.monitoring_mode == "Reporting"
+
+
+async def test_intervals_can_be_modified_while_running() -> None:
+    client = _FakeClient()
+    monitor = LiveMonitor(client, lambda _event: None)
+    await monitor.start(["ns=2;s=A", "ns=2;s=B"], MonitorConfig(publishing_interval_ms=200, sampling_interval_ms=100))
+
+    revised = await monitor.set_publishing_interval(300)
+    assert revised == 150.0  # what the fake server revised to
+    assert client.subscription.updated is not None
+    assert client.subscription.updated.SubscriptionId == 42
+    assert client.subscription.updated.RequestedPublishingInterval == 300
+    assert client.subscription.updated.RequestedLifetimeCount == 10_000
+
+    assert await monitor.set_sampling_interval(250) == []
+    assert client.subscription.modified == [(100, 250.0, 0), (101, 250.0, 0)]
+
+    client.subscription.modify_status = ua.StatusCode(ua.StatusCodes.BadMonitoredItemIdInvalid)
+    failures = await monitor.set_sampling_interval(400)
+    assert len(failures) == 2
+    assert all("BadMonitoredItemIdInvalid" in failure for failure in failures)

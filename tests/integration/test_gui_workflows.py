@@ -54,6 +54,11 @@ def test_connect_browse_and_download_through_the_tabs(qapp, tmp_path) -> None:
         assert 0 < len(snapshot.nodes) <= 120
         assert "max_nodes" in snapshot.limits_hit
         assert window.export_tab.summary_view.toPlainText().strip() != ""
+        coverage = window.export_tab.coverage_view.toPlainText()
+        assert "Never in a snapshot (details panel only)" in coverage
+        assert "NOT included:   variable values" in coverage
+        assert "max_nodes" in coverage
+        assert "NodeSet2" in coverage
     finally:
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)
@@ -182,6 +187,11 @@ def test_nodeset_config_reflects_the_widgets(qapp, tmp_path, include_values) -> 
         assert config.include_dependencies is False
         assert config.max_dependency_nodes == 17
         assert config.schema_path is None
+
+        # Description control is a download (snapshot) option, default on.
+        assert tab._collect_config().include_description is True
+        tab.include_description_check.setChecked(False)
+        assert tab._collect_config().include_description is False
     finally:
         window.shutdown()
         runner.stop()

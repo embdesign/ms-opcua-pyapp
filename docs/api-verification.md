@@ -62,6 +62,16 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   `QualifiedName(name, namespace_index)` works).
 * Attribute ids: NodeId 1, NodeClass 2, BrowseName 3, DisplayName 4, Description 5, Value 13, DataType 14,
   ValueRank 15, ArrayDimensions 16, AccessLevel 17, UserAccessLevel 18.
+* Attribute ids used by the details panel (verified 2026-11-16): WriteMask 6, UserWriteMask 7, IsAbstract 8,
+  Symmetric 9, InverseName 10, ContainsNoLoops 11, EventNotifier 12, MinimumSamplingInterval 19, Historizing 20,
+  DataTypeDefinition 23, RolePermissions 24, UserRolePermissions 25, AccessRestrictions 26. `NodeVersion` does
+  not exist in asyncua 2.1.0's `AttributeIds`.
+* Bit fields are modelled two different ways and must not be decoded with the same helper:
+  `ua.AccessLevel` and `ua.EventNotifier` carry bit **positions** (`EventNotifier.SubscribeToEvents == 0`) and
+  decode with `Enum.parse_bitfield(value)`; `ua.AttributeWriteMask`, `ua.AccessRestrictionType` and
+  `ua.PermissionType` carry bit **masks** (`AttributeWriteMask.AccessLevel == 1`,
+  `AttributeWriteMask.EventNotifier == 128`) and decode by testing `value & int(member)`.
+  `ua.RolePermissionType` has `RoleId` (NodeId) and `Permissions` (PermissionType mask).
 * ObjectIds used: References 31, HierarchicalReferences 33, HasChild 34, Organizes 35, HasTypeDefinition 40,
   HasSubtype 45, HasProperty 46, HasComponent 47.
 
@@ -99,9 +109,10 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
 * `await client.create_subscription(period: float | ua.CreateSubscriptionParameters, handler, publishing=True,
   queue_maxsize=1000, overflow=OverflowPolicy.DROP_OLDEST)` returns a `Subscription`; internally it creates the
   subscription, applies the server's revised parameters and registers the subscription on the client.
-* `Subscription.parameters` holds the **effective** parameters after the server's revision
-  (`Subscription.update()` copies the revised values into it), so `parameters.RequestedPublishingInterval` is
-  what the server actually uses.
+* `Subscription.parameters` holds the **effective** parameters after the server's revision: `create_subscription`
+  applies the revised values through `update(new_params)`, so `parameters.RequestedPublishingInterval` is what the
+  server actually uses. A later explicit `update(requested)` copies the **requested** values into it; the revised
+  value is in the returned `ModifySubscriptionResult` (`RevisedPublishingInterval`).
 * `Subscription.subscribe_data_change(nodes, attr=AttributeIds.Value, queuesize=0,
   monitoring=MonitoringMode.Reporting, sampling_interval=50.0)` returns **an int for a single node**, or a list
   of `int | StatusCode` for several nodes — handle both shapes.
@@ -115,6 +126,74 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   transport that is already gone and only cleans up locally.
 * `ua.CreateSubscriptionParameters: RequestedPublishingInterval, RequestedLifetimeCount,
   RequestedMaxKeepAliveCount, MaxNotificationsPerPublish, PublishingEnabled, Priority`.
+* **`subscribe_data_change()` has no filter parameter** (`nodes, attr, queuesize, monitoring, sampling_interval`).
+  A `DataChangeFilter` therefore requires the public low-level path: build
+  `ua.MonitoredItemCreateRequest` (`ItemToMonitor` = `ReadValueId(NodeId, AttributeIds.Value)`,
+  `MonitoringMode`, `RequestedParameters` = `ua.MonitoringParameters` with a unique `ClientHandle`,
+  `SamplingInterval`, `QueueSize`, `DiscardOldest` and `Filter`) and call
+  `await subscription.create_monitored_items([...])`. It returns one `int` server handle or a `StatusCode` per
+  request; those handles are what `unsubscribe()` and `modify_monitored_item()` expect.
+* `ua.DataChangeFilter: Trigger (ua.DataChangeTrigger), DeadbandType (ua.DeadbandType), DeadbandValue`;
+  `DeadbandType.None_ = 0`, `Absolute = 1`, `Percent = 2` (percent needs an `EURange` property).
+* Runtime changes: `await subscription.set_monitoring_mode(ua.MonitoringMode.Reporting | Sampling | Disabled)`
+  applies to **all** items of the subscription and returns a StatusCode list;
+  `await subscription.modify_monitored_item(handle, new_samp_time, new_queuesize, mod_filter_val=-1)` returns
+  `MonitoredItemModifyResult` objects (`-1` keeps the existing filter);
+  `await subscription.update(ua.ModifySubscriptionParameters(...))` sends `ModifySubscription` and copies the
+  requested values into `subscription.parameters` (the response carries `RevisedPublishingInterval`).
+  `Subscription.set_publishing_mode(bool)` only pauses publishing and does not change the monitoring mode.
+
+## Event subscriptions (`opcua/event_service.py`, verified 2026-11-16)
+
+* `await subscription.subscribe_events(sourcenode=ObjectIds.Server, evtypes=ObjectIds.BaseEventType,
+  evfilter=None, queuesize=0, where_clause_generation=True)` returns **one int handle** per call (the
+  `MonitoredItemId`), the same value `unsubscribe()` expects. It subscribes the source's
+  `AttributeIds.EventNotifier`, not `Value`.
+* With `evfilter=None` asyncua builds the filter **from the server's event type** by browsing its aggregate
+  children, so a custom type contributes its own properties. `WhereClause` generation is skipped automatically
+  for `BaseEventType` (long where clauses break some servers); for other types the clause restricts the
+  subscription to that type and its subtypes.
+* The async handler implements `event_notification(event: Event)` (coroutine, awaited by asyncua); status
+  changes still arrive at `status_change_notification(status)`.
+* `asyncua.common.subscription.Event` exposes each selected field as an attribute named after the clause
+  (`EventId`, `EventType`, `SourceNode`, `SourceName`, `Time`, `ReceiveTime`, `LocalTime`, `Message`,
+  `Severity`, …); `event.data_types` lists the selected names and their `VariantType`. Direct-value clauses use
+  the attribute name, browse-path clauses use the joined QualifiedName path (`Parent/Child`).
+* `EventId` is a `ByteString` (bytes), `Message` a `LocalizedText`, `LocalTime` a `TimeZoneDataType`; the
+  fields are raw values, not `Variant`s. `ua.ObjectIdNames` maps a namespace-0 numeric identifier to its
+  standard name (for example `2041 -> "BaseEventType"`).
+* Subscribing one source at a time is deliberate: the single-node path raises `UaStatusCodeError` on a bad
+  StatusCode instead of returning it, so per-source isolation needs one call per source.
+* Server side (demo/tests only): `await server.get_event_generator(etype, emitting_node)` returns an
+  `EventGenerator`; `await generator.trigger(message="…")` publishes one event. The generator sets the
+  source's `EventNotifier` and adds a `GeneratesEvent` reference. **The asyncua server (2.1.0) supports event
+  monitored items only on the Server object** — any other source is answered with `BadServiceUnsupported`,
+  which the client reports as a rejected source rather than as a failure of the subscription.
+* Condition fields (verified 2026-11-17): subscribing to `ConditionType` (`i=2782`) or a subtype selects
+  `AckedState`, `ConfirmedState`, `EnabledState`, `Retain`, `ConditionName`, `BranchId`, and appends a select
+  clause with `AttributeId.NodeId` and `TypeDefinitionId = ConditionType` whose field name is `NodeId`.
+  Condition events carry the condition node there; `SourceNode` is the emitting node.
+* `Acknowledge` is an instance method with BrowseName `Acknowledge` in **namespace 0**;
+  `Node.get_child(["Acknowledge"])` resolves it (a same-named method in another namespace is not matched).
+  Its `InputArguments` are `ByteString` (EventId) and `LocalizedText` (Comment), and the call returns a list of
+  output `Variant`s. asyncua's server has no built-in condition object; tests create one at runtime with
+  `add_object` + `add_method(..., [VariantType.ByteString, VariantType.LocalizedText], [])`.
+
+## Server status and diagnostics (verified 2026-11-17)
+
+* Standard namespace-0 variables read by the Server tab: State 2259, CurrentTime 2258, StartTime 2257,
+  SecondsTillShutdown 2992, ShutdownReason 2993, ServerDiagnostics/EnabledFlag 2294,
+  ServerDiagnosticsSummary 2275 with counters 2276–2288/3705, ServerCapabilities limits
+  MaxNodesPerRead 11705, MaxNodesPerBrowse 11710, MaxMonitoredItemsPerCall 11714,
+  MaxBrowseContinuationPoints 2735, MaxSessions 24095, MaxSubscriptions 24096, MinSupportedSampleRate 2272.
+* `State` is a `ServerState` enum; asyncua decodes it to a number (`0` = Running). Times are `DateTime` values;
+  uptime is computed client-side from CurrentTime − StartTime.
+* **asyncua 2.1.0's demo server returns Good StatusCodes with null values** for `SecondsTillShutdown`,
+  `ShutdownReason`, `EnabledFlag`, every summary counter and several capability limits. Treat Good-null as
+  "not provided", never as zero; only Bad StatusCodes are errors.
+* The `ServerDiagnosticsSummary` object exists, so the reads succeed; the values are simply empty in this server.
+  A client that needs `GetMonitoredItems` must call a method, which this project intentionally does not add
+  (one guarded method-call path only).
 
 ## Connection recovery (used by the opt-in check and the Resilience toggle)
 

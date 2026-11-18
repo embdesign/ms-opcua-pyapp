@@ -239,6 +239,7 @@ class NodeSetDependencyCollector:
         self._hierarchical: frozenset[str] = frozenset()
         self._dependency_budget_exhausted = False
         self._added_nodes: set[str] = set()
+        self._skipped_views: list[str] = []
 
         for record in snapshot.nodes.values():
             self._add_meta(
@@ -441,6 +442,9 @@ class NodeSetDependencyCollector:
                 self._standard.setdefault(node_id, None)
                 continue
             if meta.node_class == "View":
+                # asyncua's XML exporter has no View writer; record the node so the
+                # result can report it instead of dropping it silently.
+                self._skipped_views.append(node_id)
                 continue
             selected.append(node_id)
         return sorted(selected)
@@ -528,6 +532,11 @@ class NodeSetDependencyCollector:
     def dependency_nodes_added(self) -> int:
         return len(self._added_nodes)
 
+    @property
+    def skipped_views(self) -> list[str]:
+        """View nodes the XML exporter cannot write (reported, never silent)."""
+        return list(self._skipped_views)
+
 
 @dataclass(frozen=True, slots=True)
 class _Edge:
@@ -549,6 +558,37 @@ def _qualified_name(value: Any) -> str:
     if isinstance(value, ua.QualifiedName):
         return value.Name or ""
     return str(value or "")
+
+
+def _exporter_limitations(written_classes: set[str], skipped_views: list[str]) -> list[str]:
+    """Name what the underlying XML exporter cannot write, so nothing is lost silently.
+
+    ``asyncua.common.xmlexporter`` has no writer for ``WriteMask``/``UserWriteMask``
+    (an upstream FIXME), for the access/role attributes, for ``Symmetric`` and
+    ``IsAbstract`` on a custom ``ReferenceType`` or ``IsAbstract`` on a custom
+    ``DataType``, and for the ``View`` node class.
+    """
+    notes = [
+        "WriteMask and UserWriteMask are not written for any node: the XML exporter does not export them, "
+        "so importers apply their own defaults.",
+        "AccessRestrictions, RolePermissions and UserRolePermissions are not written for any node: the XML "
+        "exporter does not export them.",
+    ]
+    if "ReferenceType" in written_classes:
+        notes.append(
+            "Symmetric and IsAbstract are not written for custom ReferenceType nodes: the XML exporter writes "
+            "only the inverse name, so a symmetric or abstract reference type loses that flag on import."
+        )
+    if "DataType" in written_classes:
+        notes.append(
+            "IsAbstract is not written for custom DataType nodes: the XML exporter writes only the definition."
+        )
+    if skipped_views:
+        notes.append(
+            f"{len(skipped_views)} View node(s) were not written: the XML exporter has no View node writer. "
+            "A child exported below a View keeps a ParentNodeId that is not part of the file."
+        )
+    return notes
 
 
 # ---------------------------------------------------------------------------
@@ -711,6 +751,10 @@ async def export_nodeset2(
         "Validation checks XML well-formedness and structure. XSD validation against the official NodeSet2 "
         "schema only runs when a schema file and lxml are available.",
     ]
+    written_classes = {
+        meta.node_class for node_id in emit_ids if (meta := collector.meta.get(node_id)) is not None
+    }
+    limitations.extend(_exporter_limitations(written_classes, collector.skipped_views))
     if dangling:
         limitations.append(
             f"{len(dangling)} reference(s) point to nodes that are not part of the file (for example nodes "
