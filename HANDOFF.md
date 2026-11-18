@@ -101,6 +101,14 @@ confirms the exact object/method/arguments (`operator_text.method_call_confirmat
 once and reports `output_values`. `CallOutcome.status_code` is `Good` on success. The tab is the tenth session
 page; `ask_confirmation` is a module function so GUI tests stub the dialog.
 
+**Metadata attribute writes — delivered.** `write_service.prepare_attribute_write` / `send_prepared_attribute_write`
+are the only non-Value path and write just `DisplayName` and `Description` (LocalizedText, case-insensitive name,
+empty text refused locally). The **Write & call** page exposes them via `OpcUaService.attribute_write_preview` /
+`write_attribute_value` with the confirmation from `operator_text.attribute_write_confirmation`; one
+`write_attribute`, then a read-back compare. asyncua's server allows non-Value writes for `UserRole.Admin` only,
+so the demo server answers `BadUserAccessDenied` (reported, never retried) and the positive integration test starts
+its own server with an admin user manager.
+
 **Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
 `models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
 `SequenceStepResult`, step kinds/statuses), `opcua/method_support.py` (shared DataType/ValueRank,

@@ -101,13 +101,15 @@ from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .ua_names import node_class_name
 from .value_read import read_value_with_options as read_value_with_options_impl
-from .write_service import CallOutcome, Inspection, WriteResult
+from .write_service import AttributeWriteOutcome, CallOutcome, Inspection, PrepareError, WriteResult
 from .write_service import acknowledge_condition as acknowledge_condition_impl
 from .write_service import call_method as invoke_method_impl
 from .write_service import inspect_call as call_preview_impl
 from .write_service import inspect_write as write_preview_impl
+from .write_service import prepare_attribute_write as attribute_write_prepare_impl
 from .write_service import read_method_signature as read_method_signature_impl
 from .write_service import write_and_restore as write_node_value_impl
+from .write_service import write_attribute_value as write_attribute_impl
 
 CLIENT_NAME = "OPC UA Explorer"
 CLIENT_APPLICATION_NAME = "OPC UA Explorer"
@@ -1022,6 +1024,42 @@ class OpcUaService:
             value_text,
             authorization=authorization,
             restore_previous=restore_previous,
+        )
+
+    async def attribute_write_preview(self, node_id: Any, attribute_name: str, text: str) -> Inspection:
+        """Validate one DisplayName/Description write without sending it."""
+        client = self._require_client()
+        target = _normalise_node_id(node_id)
+        try:
+            prepared = await attribute_write_prepare_impl(client, target, attribute_name, text)
+        except PrepareError as exc:
+            return Inspection(ok=False, detail=str(exc))
+        return Inspection(
+            ok=True,
+            detail=(
+                f"would write {prepared.attribute_name} {prepared.text!r} to {target} "
+                f"(currently {prepared.previous_text!r}) and read it back"
+            ),
+            preview=prepared.text,
+        )
+
+    async def write_attribute_value(
+        self,
+        node_id: Any,
+        attribute_name: str,
+        text: str,
+        *,
+        reference: str = "",
+    ) -> AttributeWriteOutcome:
+        """One operator-requested DisplayName/Description write, read back and compared."""
+        client = self._require_client()
+        self._require_session()
+        target = _normalise_node_id(node_id)
+        authorization = WriteAuthority(
+            AUTHORITY_OPERATOR_DIALOG, reference or f"write {attribute_name} of {target}"
+        )
+        return await write_attribute_impl(
+            client, target, attribute_name, text, authorization=authorization
         )
 
     async def invoke_method(

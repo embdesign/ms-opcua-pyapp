@@ -15,6 +15,7 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -30,11 +31,15 @@ from PySide6.QtWidgets import (
 
 from ...errors import InvalidNodeIdError
 from ...formatting import flatten_for_csv
-from ...models import NodeDetails, ValueSnapshot
+from ...models import WRITABLE_TEXT_ATTRIBUTES, NodeDetails, ValueSnapshot
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
-from ...opcua.write_service import CallOutcome, Inspection, WriteResult
-from ...operator_text import method_call_confirmation, write_value_confirmation
+from ...opcua.write_service import AttributeWriteOutcome, CallOutcome, Inspection, WriteResult
+from ...operator_text import (
+    attribute_write_confirmation,
+    method_call_confirmation,
+    write_value_confirmation,
+)
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
 
@@ -72,6 +77,7 @@ class WriteCallTab(QWidget):
         self._closed = False
         self._current_node: str = ""
         self._current_value_text: str = ""
+        self._current_attribute_text: dict[str, str] = {}
 
         self._build_ui()
         self.set_connected(False)
@@ -142,6 +148,39 @@ class WriteCallTab(QWidget):
         self.write_status_label.setWordWrap(True)
         write_layout.addWidget(self.write_status_label)
         layout.addWidget(write_box)
+
+        # Attribute write ---------------------------------------------------
+        attribute_box = QGroupBox("Write metadata attribute")
+        attribute_layout = QVBoxLayout(attribute_box)
+        attribute_row = QHBoxLayout()
+        self.attribute_combo = QComboBox()
+        self.attribute_combo.addItems(list(WRITABLE_TEXT_ATTRIBUTES))
+        self.attribute_edit = QLineEdit()
+        self.attribute_edit.setPlaceholderText("new text for the selected attribute")
+        self.load_attribute_btn = QPushButton("Use current text")
+        self.load_attribute_btn.clicked.connect(self._on_load_attribute)
+        attribute_row.addWidget(QLabel("Attribute:"))
+        attribute_row.addWidget(self.attribute_combo)
+        attribute_row.addWidget(self.attribute_edit, 1)
+        attribute_row.addWidget(self.load_attribute_btn)
+        attribute_layout.addLayout(attribute_row)
+        attribute_action = QHBoxLayout()
+        note = QLabel(
+            "Only DisplayName and Description are written; servers usually allow that for privileged users "
+            "only, and a refusal is reported with its StatusCode."
+        )
+        note.setObjectName("hintLabel")
+        note.setWordWrap(True)
+        self.attribute_write_btn = QPushButton("Write attribute…")
+        self.attribute_write_btn.clicked.connect(self._on_attribute_write)
+        attribute_action.addWidget(note, 1)
+        attribute_action.addWidget(self.attribute_write_btn)
+        attribute_layout.addLayout(attribute_action)
+        self.attribute_status_label = QLabel("Nothing written.")
+        self.attribute_status_label.setObjectName("hintLabel")
+        self.attribute_status_label.setWordWrap(True)
+        attribute_layout.addWidget(self.attribute_status_label)
+        layout.addWidget(attribute_box)
 
         # Method call -------------------------------------------------------
         call_box = QGroupBox("Call method")
@@ -262,6 +301,10 @@ class WriteCallTab(QWidget):
             lines.append(f"Type definition: {record.type_definition_name}")
         lines.append(f"Value: {flatten_for_csv(value.value)}  [{value.status}]")
         self._current_value_text = "" if value.value is None else flatten_for_csv(value.value)
+        self._current_attribute_text = {
+            "DisplayName": record.display_name or "",
+            "Description": record.description or "",
+        }
         self.info_label.setText("\n".join(lines))
         self._finish(f"Read {node_id}. Write a value or call a method below.")
 
@@ -342,6 +385,91 @@ class WriteCallTab(QWidget):
         self._finish("Write completed.")
         if self._current_node and self._current_node == outcome.node_id:
             self._current_value_text = outcome.read_back_value if passed else self._current_value_text
+
+    # -- attribute write ---------------------------------------------------
+    def _on_load_attribute(self) -> None:
+        name = self.attribute_combo.currentText()
+        text = self._current_attribute_text.get(name, "")
+        if not text:
+            self._set_status("Read the node first; there is no current text to copy.", error=True)
+            return
+        self.attribute_edit.setText(text)
+        self._set_status(f"The current {name} was put in the text field; edit it before writing.")
+
+    def _on_attribute_write(self) -> None:
+        if self._busy or not self._service.is_connected:
+            return
+        canonical = self._canonical(self.node_edit.text(), "the node field")
+        if canonical is None:
+            return
+        name = self.attribute_combo.currentText()
+        text = self.attribute_edit.text().strip()
+        if not text:
+            self._set_status("Enter the new attribute text.", error=True)
+            return
+        self._start(f"Checking {name} of {canonical}…")
+        self._runner.submit(
+            lambda: self._service.attribute_write_preview(canonical, name, text),
+            on_done=lambda inspection: self._confirm_attribute_write(canonical, name, text, inspection),
+            on_error=lambda message: self._failed("Checking the attribute write", message),
+        )
+
+    def _confirm_attribute_write(
+        self, node_id: str, name: str, text: str, inspection: Inspection
+    ) -> None:
+        if not inspection.ok:
+            self._attribute_status(False, f"Nothing was written: {inspection.detail}")
+            self._finish("The attribute write was refused before sending.")
+            return
+        previous = self._current_attribute_text.get(name, "") if self._current_node == node_id else ""
+        confirmation = attribute_write_confirmation(
+            endpoint_url=self._service.endpoint_url,
+            node_id=node_id,
+            attribute_name=name,
+            text=text,
+            previous_text=previous,
+        )
+        if not ask_confirmation(self, "Confirm attribute write", confirmation):
+            self._attribute_status(False, "Attribute write cancelled; nothing was sent.")
+            self._finish("Cancelled.")
+            return
+        self._start(f"Writing {name} of {node_id}…")
+        self._runner.submit(
+            lambda: self._service.write_attribute_value(
+                node_id, name, text, reference=f"write {name} of {node_id}"
+            ),
+            on_done=self._show_attribute_write,
+            on_error=lambda message: self._failed("The attribute write", message),
+        )
+
+    def _show_attribute_write(self, outcome: AttributeWriteOutcome) -> None:
+        passed = outcome.status == "passed"
+        self._attribute_status(passed, outcome.detail or outcome.status)
+        self._set_result(
+            [
+                f"attribute: {outcome.attribute_name}",
+                f"write: {outcome.write_status_code or outcome.status}",
+                f"written: {outcome.text!r}",
+                f"read back: {outcome.read_back_text!r} [{outcome.read_back_status_code or '-'}]",
+                f"previous: {outcome.previous_text!r}",
+                f"sent: {'yes' if outcome.sent else 'no'}",
+                f"duration: {outcome.duration_ms:.0f} ms",
+                f"authority: {outcome.authorization.describe() if outcome.authorization else '-'}",
+            ]
+        )
+        _logger.info(
+            "Attribute write %s of %s: %s", outcome.attribute_name, outcome.node_id, outcome.detail
+        )
+        self._finish("Attribute write completed.")
+        if passed and self._current_node == outcome.node_id:
+            self._current_attribute_text[outcome.attribute_name] = outcome.read_back_text
+
+    def _attribute_status(self, passed: bool, message: str) -> None:
+        self.attribute_status_label.setText(("" if passed else "⚠ ") + message)
+        self.attribute_status_label.setObjectName("hintLabel" if passed else "errorLabel")
+        self._restyle(self.attribute_status_label)
+        if not passed:
+            self.attribute_status_label.setStyleSheet(f"color: {ERROR};")
 
     # -- method call -------------------------------------------------------
     def _on_read_signature(self) -> None:
@@ -509,5 +637,9 @@ class WriteCallTab(QWidget):
             self.signature_btn,
             self.args_table,
             self.call_btn,
+            self.attribute_combo,
+            self.attribute_edit,
+            self.load_attribute_btn,
+            self.attribute_write_btn,
         ):
             widget.setEnabled(enabled)

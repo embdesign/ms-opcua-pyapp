@@ -86,15 +86,18 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   in asyncua 2.1.0), releases continuation points, and never sends `HistoryUpdate`. Do not add processed,
   aggregate, at-time or event-history paths without a verified asyncua API.
 - There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
-  (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`). The
+  (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`, and the only
+  non-Value path `prepare_attribute_write` → `send_prepared_attribute_write` for `DisplayName`/`Description`). The
   guarded checks, the sequence runner and the **Write & call** tab (`gui/tabs/write_tab.py`) all use it; do not
   add another path that parses and sends a value.
   Every sending function requires a keyword-only `authorization: WriteAuthority` (no default), so a write can
   never be sent without naming the operator dialog or the sequence document that asked for it.
 - `gui/tabs/write_tab.py` is a thin surface over `OpcUaService.write_preview` / `write_node_value` /
-  `method_signature` / `call_preview` / `invoke_method`. Its confirmation text lives in `operator_text
-  .write_value_confirmation` / `method_call_confirmation`, and `ask_confirmation` stays a module-level function
-  so tests can stub the dialog. Never bypass the preview: a refused value must not reach a confirmation dialog.
+  `method_signature` / `call_preview` / `invoke_method` / `attribute_write_preview` / `write_attribute_value`. Its
+  confirmation text lives in `operator_text
+  .write_value_confirmation` / `method_call_confirmation` / `attribute_write_confirmation`, and `ask_confirmation`
+  stays a module-level function so tests can stub the dialog. Never bypass the preview: a refused value must not
+  reach a confirmation dialog.
   `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
   `write_service.py` (the demo server excepted), and no default for `authorization`.
 - Condition acknowledgement is the **only** action of the Events tab: one `Acknowledge` method call through

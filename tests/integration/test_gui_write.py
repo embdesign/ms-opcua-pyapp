@@ -98,3 +98,57 @@ def test_write_and_call_tab_writes_reads_back_and_calls(qapp, tmp_path, monkeypa
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_attribute_write_group_reports_the_server_refusal(qapp, tmp_path, monkeypatch) -> None:
+    port = free_port()
+    server = start_demo_server(port, "--no-updates")
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    asked: list[str] = []
+    answer = {"yes": True}
+
+    def fake_confirm(parent, title, text):  # noqa: ANN001 - test double
+        asked.append(title)
+        return answer["yes"]
+
+    monkeypatch.setattr(write_tab_module, "ask_confirmation", fake_confirm)
+    window.show()
+    try:
+        connect_window(window, port, qapp)
+        tab = window.write_tab
+        window.show_tab(tab)
+        tab.node_edit.setText("ns=2;s=Temperature")
+        _run(qapp, tab, tab.inspect_btn, lambda: "Double" in tab.info_label.text())
+
+        # The current text can be copied into the field.
+        tab.attribute_combo.setCurrentText("Description")
+        tab.load_attribute_btn.click()
+        assert tab.attribute_edit.text() == "Temperature"
+
+        # Declining the confirmation sends nothing.
+        answer["yes"] = False
+        tab.attribute_edit.setText("Boiler outlet")
+        _run(qapp, tab, tab.attribute_write_btn, lambda: "cancelled" in tab.attribute_status_label.text())
+        assert asked == ["Confirm attribute write"]
+
+        # The demo server allows non-Value writes for administrators only.
+        answer["yes"] = True
+        _run(qapp, tab, tab.attribute_write_btn, lambda: "BadUserAccessDenied" in tab.attribute_status_label.text())
+        assert "write: BadUserAccessDenied" in tab.result_view.text()
+        assert "sent: yes" in tab.result_view.text()
+        assert asked[-1] == "Confirm attribute write"
+
+        # Empty text never reaches the confirmation dialog.
+        count = len(asked)
+        tab.attribute_edit.setText("   ")
+        tab.attribute_write_btn.click()
+        assert _pump(qapp, lambda: "Enter the new attribute text" in tab.status_label.text())
+        assert len(asked) == count
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)

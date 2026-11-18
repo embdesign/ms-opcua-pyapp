@@ -269,6 +269,20 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
+## Metadata attribute writes (verified 2026-11-18)
+
+* `Node.write_attribute(attr, ua.DataValue(ua.Variant(ua.LocalizedText(Text=..., Locale=...),
+  ua.VariantType.LocalizedText)))` sends one `WriteRequest`; a Bad result raises `ua.UaStatusCodeError`.
+* `Node.read_attribute(attr, indexrange=None, raise_on_bad_status=False)` is the read-back path: with
+  `raise_on_bad_status=False` the StatusCode is returned instead of raised.
+* **asyncua's server permits non-Value attribute writes for `UserRole.Admin` only**
+  (`asyncua/server/address_space.py::AttributeService.write`: any other role gets `BadUserAccessDenied` for
+  `AttributeId != Value`). The demo server's users are `UserRole.User`, so metadata writes are refused there by
+  design; a test that wants the positive path must start its own server with an Admin user manager.
+* `ua.LocalizedText(Text, Locale)` — text first; passing `None` as the first argument sets `Text = None`.
+* Writing `BrowseName`/`DisplayName` also renames the server-side reference descriptions — a client should not
+  assume the old name survives anywhere in the address space.
+
 ## Value read options (verified 2026-11-18)
 
 * `ua.ReadParameters` fields: `MaxAge`, `TimestampsToReturn`, `NodesToRead`. `ua.ReadValueId` fields:

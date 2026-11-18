@@ -129,6 +129,192 @@ class WriteResult:
         return " ".join(part for part in parts if part)
 
 
+#: The only non-Value attributes this module writes (text metadata, not process data).
+TEXT_ATTRIBUTES: dict[str, ua.AttributeIds] = {
+    "DisplayName": ua.AttributeIds.DisplayName,
+    "Description": ua.AttributeIds.Description,
+}
+
+#: Case-insensitive lookup, keeping the canonical OPC UA attribute name.
+_TEXT_ATTRIBUTES_BY_LOWER = {name.lower(): (name, attribute_id) for name, attribute_id in TEXT_ATTRIBUTES.items()}
+
+
+@dataclass(slots=True)
+class PreparedAttributeWrite:
+    """A validated DisplayName/Description write for one node."""
+
+    node: Any
+    node_id: str
+    attribute_name: str
+    attribute_id: ua.AttributeIds
+    text: str
+    locale: str | None = None
+    previous_text: str = ""
+
+
+@dataclass(slots=True)
+class AttributeWriteOutcome:
+    """Result of one attribute write, including the read-back that proves it."""
+
+    node_id: str
+    attribute_name: str
+    status: str = STATUS_FAILED
+    detail: str = ""
+    text: str = ""
+    previous_text: str = ""
+    write_status_code: str = ""
+    read_back_text: str = ""
+    read_back_status_code: str = ""
+    sent: bool = False
+    duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
+
+
+def _localized_text(data_value: ua.DataValue) -> str:
+    """Plain text of a LocalizedText DataValue (empty when it carries none)."""
+    variant = data_value.Value
+    raw = variant.Value if isinstance(variant, ua.Variant) else variant
+    if isinstance(raw, ua.LocalizedText):
+        return raw.Text or ""
+    return "" if raw is None else str(raw)
+
+
+async def prepare_attribute_write(
+    client: Any, node_id: str, attribute_name: str, text: str
+) -> PreparedAttributeWrite:
+    """Validate one DisplayName/Description write without sending it."""
+    name = (attribute_name or "").strip()
+    entry = _TEXT_ATTRIBUTES_BY_LOWER.get(name.lower())
+    if entry is None:
+        allowed = ", ".join(TEXT_ATTRIBUTES)
+        raise PrepareError(f"{attribute_name!r} is not a writable text attribute here ({allowed}).")
+    canonical_name, attribute_id = entry
+    if not (text or "").strip():
+        raise PrepareError("The attribute text is empty; nothing was written.")
+    node = client.get_node(node_id)
+    try:
+        await node.read_node_class()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        raise PrepareError(f"{node_id} could not be read: {type(exc).__name__}: {exc}") from exc
+    previous_text = "unreadable"
+    try:
+        previous = await node.read_attribute(attribute_id, raise_on_bad_status=False)
+        if previous.StatusCode is None or previous.StatusCode.is_good():
+            previous_text = _localized_text(previous)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        previous_text = "unreadable"
+    return PreparedAttributeWrite(
+        node=node,
+        node_id=node_id,
+        attribute_name=canonical_name,
+        attribute_id=attribute_id,
+        text=text.strip(),
+        previous_text=previous_text,
+    )
+
+
+async def send_prepared_attribute_write(
+    prepared: PreparedAttributeWrite, *, authorization: WriteAuthority
+) -> AttributeWriteOutcome:
+    """Send exactly one attribute write, then read the attribute back."""
+    outcome = AttributeWriteOutcome(
+        node_id=prepared.node_id,
+        attribute_name=prepared.attribute_name,
+        text=prepared.text,
+        previous_text=prepared.previous_text,
+        authorization=authorization,
+    )
+    started = time.perf_counter()
+    localized = ua.LocalizedText(Text=prepared.text, Locale=prepared.locale)
+    data_value = ua.DataValue(ua.Variant(localized, ua.VariantType.LocalizedText))
+    try:
+        await prepared.node.write_attribute(prepared.attribute_id, data_value)
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        outcome.sent = True
+        outcome.write_status_code = status_name(exc.code)
+        outcome.detail = (
+            f"Writing {prepared.attribute_name} of {prepared.node_id} returned "
+            f"{outcome.write_status_code}."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = (
+            f"Writing {prepared.attribute_name} of {prepared.node_id} failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    outcome.sent = True
+    outcome.write_status_code = "Good"
+
+    try:
+        read_back = await prepared.node.read_attribute(prepared.attribute_id, raise_on_bad_status=False)
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except Exception as exc:
+        outcome.status = STATUS_OUTCOME_UNKNOWN
+        outcome.detail = (
+            f"The {prepared.attribute_name} was written but could not be read back: "
+            f"{type(exc).__name__}: {exc}. The effect on the server is unknown."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+
+    good = read_back.StatusCode is None or read_back.StatusCode.is_good()
+    outcome.read_back_status_code = status_name(read_back.StatusCode) if read_back.StatusCode else "Good"
+    outcome.read_back_text = _localized_text(read_back) if good else "unreadable"
+    if not good:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"{prepared.attribute_name} was written but reading it back returned "
+            f"{outcome.read_back_status_code}."
+        )
+    elif outcome.read_back_text != prepared.text:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"Read-back {outcome.read_back_text!r} differs from the written "
+            f"{prepared.attribute_name} {prepared.text!r}."
+        )
+    else:
+        outcome.status = STATUS_PASSED
+        outcome.detail = (
+            f"Wrote {prepared.attribute_name} {prepared.text!r} to {prepared.node_id} and read it back."
+        )
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
+
+
+async def write_attribute_value(
+    client: Any,
+    node_id: str,
+    attribute_name: str,
+    text: str,
+    *,
+    authorization: WriteAuthority,
+) -> AttributeWriteOutcome:
+    """Prepare and send one DisplayName/Description write; exactly once."""
+    try:
+        prepared = await prepare_attribute_write(client, node_id, attribute_name, text)
+    except PrepareError as exc:
+        return AttributeWriteOutcome(
+            node_id=node_id,
+            attribute_name=attribute_name,
+            status=STATUS_SKIPPED,
+            detail=str(exc),
+            authorization=authorization,
+        )
+    return await send_prepared_attribute_write(prepared, authorization=authorization)
+
+
+
 @dataclass(slots=True)
 class PreparedCall:
     """A validated method call, including the signature read from ``InputArguments``."""

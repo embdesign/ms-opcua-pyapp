@@ -78,8 +78,7 @@ def write_value_confirmation(
     return "\n".join(lines)
 
 
-def method_call_confirmation(
-    *,
+def method_call_confirmation(    *,
     endpoint_url: str,
     object_node_id: str,
     method_node_id: str,
@@ -102,6 +101,37 @@ def method_call_confirmation(
             "",
             "The arguments were parsed with the server's InputArguments. The call is never retried, and its "
             "output arguments are reported as the server returned them.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def attribute_write_confirmation(
+    *,
+    endpoint_url: str,
+    node_id: str,
+    attribute_name: str,
+    text: str,
+    previous_text: str = "",
+) -> str:
+    """Confirmation body for one DisplayName/Description write from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one attribute write will be sent, then read back and compared:",
+        f"  WRITE  {attribute_name} of {node_id}",
+        f"  new text: {text!r}",
+    ]
+    if previous_text:
+        lines.append(f"  current text: {previous_text!r}")
+    lines.extend(
+        [
+            "",
+            "This changes the node's metadata (its name or description), not its process value. Servers "
+            "usually allow only privileged users to write non-Value attributes, so a refusal is reported "
+            "with its StatusCode. Nothing is retried.",
             "",
             EQUIPMENT_WARNING,
         ]

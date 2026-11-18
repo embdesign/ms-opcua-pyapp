@@ -80,6 +80,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the decoded value; whether the server honours a slice or the timestamp choice is stated as the server's
   decision, never assumed. The demo server accepts both and returns the whole value with both timestamps, which
   the client reports instead of pretending it sliced.
+- **Write & call: metadata attribute writes** — the page can now change one node's `DisplayName` or
+  `Description` (**Write attribute…**): the request is previewed, confirmed with the text and the current value
+  (`operator_text.attribute_write_confirmation`), sent exactly once through
+  `write_service.prepare_attribute_write` → `send_prepared_attribute_write` with
+  `WriteAuthority("operator-dialog", …)`, then read back and compared. Only those two attributes are writable and
+  the name is matched case-insensitively; an empty text or any other attribute is refused locally. Servers usually
+  allow non-Value writes for administrators only, so asyncua's demo server answers `BadUserAccessDenied` —
+  reported, never retried. `OpcUaService.attribute_write_preview` / `write_attribute_value` expose the path.
 - **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
   in-memory historian, so the History tab can be exercised locally and in tests.
 - **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one

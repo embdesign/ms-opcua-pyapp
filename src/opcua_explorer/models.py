@@ -260,6 +260,10 @@ class ValueSnapshot:
 #: fewer timestamps than asked for.
 TIMESTAMPS_TO_RETURN = ("Source", "Server", "Both", "Neither")
 
+#: The only non-Value attributes this client writes: their text is metadata, not
+#: process data, and the server still decides whether the write is allowed.
+WRITABLE_TEXT_ATTRIBUTES = ("DisplayName", "Description")
+
 
 @dataclass(slots=True)
 class ValueReadOptions:

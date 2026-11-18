@@ -44,7 +44,7 @@ session's client.
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
 | **Server** | Read-only **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **History** | Read-only raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
-| **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write) and call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
+| **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared) and call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
@@ -190,6 +190,8 @@ uv run opcua-explorer
    The same operations are available interactively in the **Write & call** page: **Read node** shows the type and
    current value, **Write value…** confirms the exact target and reads the value back, and **Read signature** +
    **Call method…** does the same for one method (object `ns=2;s=Motor`, method `ns=2;s=Start`, argument `900`).
+   The same page can also change a node's `DisplayName` or `Description` (**Write attribute…**, with the same
+   confirmation and read-back); most servers return `BadUserAccessDenied` for that unless you are an administrator.
 8. **Compare** (two sessions): open a second session with **File → New connection** and connect it to the other
    device, then switch to the shared **Compare** tab, choose *Reference* and *Candidate* and press **Compare**.
    Both address spaces are downloaded again with one scope; the table lists every difference (missing / extra /
@@ -692,7 +694,8 @@ uv run pytest tests/unit -q   # fast, no network
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
   and the opt-in recovery check), server status/diagnostics, raw history of a historized and a
   non-historized node, an interactive write (with and without restore, refused value, non-variable target),
-  one method call (signature, wrong argument count, output), value reads with and without read options
+  one method call (signature, wrong argument count, output), value reads with and without read options,
+  metadata writes (refused by the demo server, accepted by an admin-role server)
   and report files. Sequence documents are exercised against the demo server
   (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
   downloads end to end. The headless `opcua-export` command is exercised end to end
@@ -705,8 +708,8 @@ uv run pytest tests/unit -q   # fast, no network
   save/load; live-monitor markers in the address-space tree; Compare tab runs against two sessions and a saved
   JSON export; Sequences tab load, dry run and run; History tab reads a historized node and reports a
   non-historized one; the Find servers dialog lists the demo server and fills the endpoint field; the Write & call
-  page declines and accepts a write, restores the previous value and calls a method; the value panel reads with
-  IndexRange, MaxAge and a timestamp choice).
+  page declines and accepts a write, restores the previous value, calls a method and reports a refused attribute
+  write; the value panel reads with IndexRange, MaxAge and a timestamp choice).
 
 ## 10. Limitations
 
@@ -793,6 +796,11 @@ The implemented scope is complete; the following are **not** claimed:
   asked for. asyncua's demo server accepts `IndexRange` and `TimestampsToReturn` and returns the whole value with
   both timestamps, which is exactly why the client reports the request instead of pretending it sliced. `MaxAge`
   is a cache hint, not a force-read. There is no locale option: the OPC UA `Read` service has no locale field.
+* **Metadata writes are limited to `DisplayName` and `Description`.** Those are the only non-Value attributes the
+  client writes, each with a confirmation and a read-back compare. Servers normally allow non-Value writes for
+  administrators only — asyncua's demo server answers `BadUserAccessDenied` for its `demo` user — so a refusal is
+  the expected answer, not a defect. There is no write of `WriteMask`, `AccessLevel`, `DataType`, `Historizing`
+  or any other structural attribute, and no node creation or deletion.
 * **Data-change filters are evaluated by the server.** The Live monitor sends the requested trigger/deadband
   unchanged; whether it is honoured depends on the server and on the variable (a percent deadband needs an
   `EURange` property, and non-numeric values cannot use a deadband). The demo server accepts the filter but does

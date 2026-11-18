@@ -460,8 +460,8 @@ and the status pills use contrast-checked colours.
 There are three operator-facing surfaces for a write or a call — the guarded checks in the **Tests** tab, the
 interactive **Write & call** page (`gui/tabs/write_tab.py`) and a sequence document step — and all three call the
 same `opcua/write_service.py` primitives. The interactive page adds one wrinkle: it previews (`write_preview` /
-`call_preview`), confirms, then sends, and reports the write, its read-back and the optional restore as one
-`WriteResult`.
+`call_preview` / `attribute_write_preview`), confirms, then sends, and reports the write, its read-back and the
+optional restore as one `WriteResult`.
 
 Both operations live in `opcua/guarded_operations.py` (the runner schedules them through the same plan as the
 read-only checks) and share three rules:
@@ -477,6 +477,19 @@ read-only checks) and share three rules:
    **ValueRank** (`opcua/value_parsing.py`); method arguments are parsed with the server's `InputArguments`
    (`ua.Argument.DataType` / `ValueRank`). Nothing is sent when parsing fails — the check is *skipped* with the
    reason. A write is verified by reading the value back; a mismatch is a **failure**, not a pass.
+
+### Metadata attribute writes
+
+`prepare_attribute_write` / `send_prepared_attribute_write` are the **only** non-Value write path, reachable from
+the **Write & call** page (`OpcUaService.attribute_write_preview` / `write_attribute_value`):
+
+* Only `DisplayName` and `Description` are writable (`TEXT_ATTRIBUTES`), matched case-insensitively; the value is a
+  `LocalizedText`, and the request is refused locally when the text is empty.
+* One `write_attribute` call, then a read-back through `read_attribute(..., raise_on_bad_status=False)` and a text
+  comparison — a differing read-back is a failure, an unreadable one `outcome_unknown`.
+* Servers restrict non-Value writes: asyncua's attribute service answers `BadUserAccessDenied` for every non-Admin
+  user, which is why the demo server refuses and an admin-role test server accepts. Structural attributes
+  (`WriteMask`, `AccessLevel`, `DataType`, …) and node management stay out of scope.
 
 Condition acknowledgement is the only guarded operation outside a run: the Events tab builds its confirmation
 text from `operator_text.acknowledge_condition_confirmation()` and sends one `Acknowledge` call through
