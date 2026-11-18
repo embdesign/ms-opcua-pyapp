@@ -14,6 +14,10 @@ DEFAULT_MAX_DEPENDENCIES = 2_000
 DEFAULT_MONITOR_KEEP_ROWS = 2_000
 DEFAULT_EVENT_KEEP_ROWS = 2_000
 
+#: Default and hard upper bound for one raw-history read.
+DEFAULT_HISTORY_MAX_VALUES = 1_000
+MAX_HISTORY_MAX_VALUES = 10_000
+
 DEFAULT_PUBLISHING_INTERVAL_MS = 500.0
 DEFAULT_SAMPLING_INTERVAL_MS = 250.0
 #: Event subscriptions publish whole event fields, so a slower default than a

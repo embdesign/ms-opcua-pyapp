@@ -7,6 +7,7 @@ __all__ = [
     "browse",
     "client_service",
     "event_service",
+    "history_service",
     "monitor_service",
     "nodeset2",
     "security",

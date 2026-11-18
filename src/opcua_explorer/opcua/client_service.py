@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +44,13 @@ from ..models import (
     AddressSpace,
     ChildEntry,
     ConnectionInfo,
+    DiscoveredServer,
     DiscoveryResult,
     EventConfig,
     EventSourceInfo,
     EventStart,
+    HistoryConfig,
+    HistoryResult,
     MonitorConfig,
     MonitoredItemInfo,
     MonitorStart,
@@ -55,6 +59,7 @@ from ..models import (
     ReferenceInfo,
     Sequence,
     SequenceRun,
+    ServerDiscoveryResult,
     ServerStatusSnapshot,
     TestConfig,
     TestProgress,
@@ -75,6 +80,7 @@ from .browse import (
     resolve_browse_names,
 )
 from .event_service import LiveEvents, event_id_bytes
+from .history_service import read_history as read_history_impl
 from .monitor_service import LiveMonitor
 from .nodeset2 import NodeSet2Config, NodeSet2Result, export_nodeset2
 from .path_support import PathRequest, PathResolution, resolve_paths
@@ -270,6 +276,92 @@ class OpcUaService:
             discovery.server_application.get("application_name") or "unknown server",
         )
         return discovery
+
+    async def discover_servers(
+        self,
+        discovery_url: str,
+        *,
+        server_uris: Iterable[str] = (),
+        request_timeout: float = 10.0,
+        connect_timeout: float | None = None,
+    ) -> ServerDiscoveryResult:
+        """Ask a discovery endpoint which servers it knows about (FindServers).
+
+        FindServers is a channel-level service: it needs no session, no identity
+        and no trust decision, so a temporary SecurityPolicyNone channel is used
+        and closed again. ``server_uris`` filters on the application-URI prefix,
+        as the service defines; an empty filter returns every known application.
+        """
+        url = _normalise_url(discovery_url)
+        wanted = [str(uri).strip() for uri in server_uris if str(uri).strip()]
+        client = Client(url, timeout=float(request_timeout))
+        client.name = CLIENT_NAME
+        client.application_uri = self._application_uri
+        timeout = float(connect_timeout if connect_timeout is not None else max(request_timeout, 5.0))
+        started = time.monotonic()
+
+        try:
+            descriptions = await asyncio.wait_for(self._fetch_find_servers(client, wanted), timeout=timeout)
+        except TimeoutError as exc:
+            raise ConnectionFailedError(
+                f"The server directory at {url} did not answer FindServers within {timeout:.1f} s. "
+                "Check the URL, the network and that the discovery server is running."
+            ) from exc
+        except Exception as exc:
+            raise ConnectionFailedError(
+                f"Could not read the server directory at {url}: {exc}. "
+                "A server that is not a discovery server may refuse FindServers; "
+                "you can still connect to it directly."
+            ) from exc
+
+        servers = [self._describe_discovered_server(description) for description in descriptions]
+        servers.sort(key=lambda item: (item.application_name.lower(), item.application_uri))
+        result = ServerDiscoveryResult(
+            discovery_url=url,
+            server_uris=wanted,
+            servers=servers,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+        )
+        _logger.info("FindServers at %s reported %d application(s)", url, len(servers))
+        return result
+
+    async def _fetch_find_servers(
+        self, client: Client, server_uris: list[str]
+    ) -> list[ua.ApplicationDescription]:
+        await client.connect_socket()
+        try:
+            await client.send_hello()
+            await client.open_secure_channel()
+            try:
+                return await client.find_servers(server_uris)
+            finally:
+                try:
+                    await client.close_secure_channel()
+                except Exception as exc:  # pragma: no cover - channel teardown best effort
+                    _logger.debug("Closing the directory secure channel failed: %s", exc)
+        finally:
+            try:
+                client.disconnect_socket()
+            except Exception:  # pragma: no cover - socket teardown best effort
+                _logger.debug("Closing the directory socket failed", exc_info=True)
+
+    @staticmethod
+    def _describe_discovered_server(application: ua.ApplicationDescription) -> DiscoveredServer:
+        name = application.ApplicationName
+        display = name.Text if isinstance(name, ua.LocalizedText) else str(name or "")
+        try:
+            application_type = ua.ApplicationType(int(application.ApplicationType)).name
+        except Exception:  # pragma: no cover - defensive
+            application_type = str(application.ApplicationType)
+        return DiscoveredServer(
+            application_uri=application.ApplicationUri or "",
+            application_name=display or "",
+            application_type=application_type,
+            product_uri=application.ProductUri,
+            gateway_server_uri=application.GatewayServerUri,
+            discovery_profile_uri=application.DiscoveryProfileUri,
+            discovery_urls=[url for url in (application.DiscoveryUrls or []) if url],
+        )
 
     async def _fetch_endpoints(self, client: Client) -> list[ua.EndpointDescription]:
         await client.connect_socket()
@@ -545,6 +637,12 @@ class OpcUaService:
         """
         session = self._require_session()
         return await read_server_status(session, monitor=self._monitor)
+
+    # -- raw history -------------------------------------------------------
+    async def read_history(self, node_id: Any, config: HistoryConfig) -> HistoryResult:
+        """Read raw history of one variable; no HistoryUpdate and no retry."""
+        session = self._require_session()
+        return await read_history_impl(session, node_id, config)
 
     # -- browsing ----------------------------------------------------------
     async def browse_children(self, node_id: Any, *, follow_subtypes: bool = True) -> list[ChildEntry]:

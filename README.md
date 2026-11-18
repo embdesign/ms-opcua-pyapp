@@ -6,16 +6,17 @@ deliberate, explicit security handling.
 Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.11.3 · managed with `uv` · native
 Windows and Linux, no Docker.
 
-> **Status — complete and maintained (2026-11-17)**
-> Implemented and tested: connection & security with automatic reconnect, multi-session window, address-space
+> **Status — complete and maintained (2026-11-18)**
+> Implemented and tested: connection & security with automatic reconnect, multi-session window, a FindServers
+> directory lookup, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
-> detail view, read-only server status & diagnostics, functional tests (read-only by default)
+> detail view, read-only server status & diagnostics and raw history reads, functional tests (read-only by default)
 > with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation,
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 489 tests. See
+> suite has 517 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -34,12 +35,13 @@ session's client.
 
 | Page | Capability |
 |---|---|
-| **Connection** | Enter an endpoint URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
+| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
 | **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
 | **Server** | Read-only **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
+| **History** | Read-only raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
 | **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
@@ -128,6 +130,9 @@ uv run opcua-explorer
 
 1. **Connection** tab: endpoint `opc.tcp://127.0.0.1:4840` → **Discover endpoints**. The table lists what the
    server actually advertises (security policy, mode, identity tokens, certificate fingerprint).
+   **Find servers…** asks a discovery endpoint which applications it knows (the demo server lists itself); select
+   an entry and **Use selected URL** to put its advertised endpoint into the URL field. It is a read-only
+   FindServers call on a temporary unencrypted channel — no session and no certificate decision.
 2. Press **Connect**. For an unencrypted local demo no certificate review is needed; for secure endpoints a
    certificate dialog appears first.
    *Need a second device?* **File → New connection** opens another session tab with its own client and pages; the
@@ -157,6 +162,12 @@ uv run opcua-explorer
    The **Server** tab reads `ServerStatus`, the `ServerDiagnostics` summary and the ServerCapabilities limits with
    one batched Read when the session connects or **Refresh** is pressed; it also lists this session's live-monitor
    items. Optional values the server returns as null are shown as *not provided*, never as zero.
+   The **History** tab reads a variable's stored values: start the demo server with `uv run opcua-demo-server
+   --history`, put `ns=2;s=Temperature` in *NodeId* (or use **Use browser selection**) and press **Read history**.
+   Leave *From*/*To* unchecked for the whole stored range, or tick them to bound it; *Max values* caps the result.
+   The server decides which values it keeps and in which order it returns them; the table is sorted oldest-first.
+   A variable the server does not historize returns no rows and the StatusCode/`Historizing` hint in the status
+   line — that is a fact about the server, not a client error.
 5. **Export** tab: keep *whole address space*, set *Maximum nodes* to e.g. 500, press **Download**. Progress,
    counters and cancellation are available. The *Export content* group decides whether variable values and node
    descriptions become part of the snapshot (values are off by default), and *Export coverage* lists exactly
@@ -293,14 +304,15 @@ src/opcua_explorer/
 │   ├── path_support.py   TranslateBrowsePathsToNodeIds (complete, unambiguous matches only)
 │   ├── sequence_runner.py  universal sequence engine (gates, keepalive, dry run)
 │   ├── monitor_service.py  live data-change subscription: monitored items, JSON-safe notifications
+│   ├── history_service.py  raw HistoryRead: request shape, continuation points, decoding
 │   └── client_service.py the only owner of an asyncua Client
 ├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
-│   ├── session_workspace.py  one session: its service and eight pages
+│   ├── session_workspace.py  one session: its service and nine pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
-│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, tests, sequences, logs, unified monitor, compare
+│   └── tabs/             connection (+ connection_dialogs), browser, export, monitor, events, server, history, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
 examples/                 generated sample exports and sample reports
@@ -655,16 +667,19 @@ uv run pytest tests/unit -q   # fast, no network
   trust store + settings (no secrets on disk), log redaction, JSON/CSV document shape, NodeId parsing,
   reference classification, report documents and HTML escaping, NodeSet2 structural/schema validation,
   guarded-write value parsing (built-in scalars, arrays, ISO dates; enumerations and structures are typed from
-  the server; matrices, unions and optional-field structures are refused) and the export CLI's argument
+  the server; matrices, unions and optional-field structures are refused), the raw-history request shape and
+  its continuation-point handling (against a fake session) and the export CLI's argument
   mapping and certificate-approval decisions (no network).
-* **Integration**: against the in-process demo server — discovery, anonymous and username authentication,
+* **Integration**: against the in-process demo server — discovery (endpoints and the FindServers
+  directory, including the URI filter and a refusing endpoint), anonymous and username authentication,
   browsing, attribute/reference details, bounded and depth-limited traversal on a cyclic graph, shared
   children, namespace filter, value encoding, cancellation, JSON/CSV files, NodeSet2 export with a round-trip
   import into a fresh `asyncua` server, guarded writes (success, read-back, refused value, non-writable node,
   restore only on request) and method calls (validated arguments, wrong argument count), secure connection with
   mutual certificates, certificate-change
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
-  and the opt-in recovery check) and report files. Sequence documents are exercised against the demo server
+  and the opt-in recovery check), server status/diagnostics, raw history of a historized and a
+  non-historized node and report files. Sequence documents are exercised against the demo server
   (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
   downloads end to end. The headless `opcua-export` command is exercised end to end
   (Objects scope, start-node scope with parent closure, namespace scope, manifest, unsupported custom DataType,
@@ -674,7 +689,8 @@ uv run pytest tests/unit -q   # fast, no network
   export; connect → run tests; connect → live monitor and merged monitor view; connect → guarded write with
   confirmation accepted/declined; connection loss and automatic reconnect; two independent sessions; project
   save/load; live-monitor markers in the address-space tree; Compare tab runs against two sessions and a saved
-  JSON export; Sequences tab load, dry run and run).
+  JSON export; Sequences tab load, dry run and run; History tab reads a historized node and reports a
+  non-historized one; the Find servers dialog lists the demo server and fills the endpoint field).
 
 ## 10. Limitations
 
@@ -699,7 +715,11 @@ The implemented scope is complete; the following are **not** claimed:
   default. This is separate from the session-level **Keep reconnecting when the link drops** toggle (Connection
   tab → *Resilience*, on by default), which retries a dropped link in the background without operator action.
 * **The suite covers one session, one browse root and one variable** — not every node or DataType.
-* **Values are a point-in-time read**, not history; no HistoryRead support.
+* **Values are a point-in-time read; history is raw only.** The **History** tab reads stored values with
+  `HistoryRead` (raw modified details) — there is no processed/aggregate read, no read-at-time, no event history
+  and no `HistoryUpdate`. Whether values exist, which ones and their accuracy is entirely the server's historian;
+  the client only bounds the range and the count (1000 by default, 10 000 at most) and follows continuation
+  points up to a fixed cap.
 * **Values in NodeSet2 XML are limited** — asyncua's exporter describes value export as limited, so with
   *Include values* on, some fields (for example the `Name` of a method argument) can be lost on re-import. The
   method argument properties themselves are always written, which is what a consumer needs to call the method.
@@ -738,8 +758,18 @@ The implemented scope is complete; the following are **not** claimed:
   `ServerDiagnostics` and `ServerCapabilities` variables; optional values reported as Good-but-null are shown as
   *not provided*, and a Bad StatusCode is shown with that StatusCode. The monitored-item list is this client's own
   view of its subscription — `GetMonitoredItems` is deliberately not called, because the client has exactly one
-  guarded method-call path. There is no history, no aggregate statistics and no sampling/subscription diagnostics
-  array; nothing on this tab is written.
+  guarded method-call path. There are no aggregate statistics and no diagnostics-array detail; history lives on
+  the separate **History** tab.
+* **History is server data, not client state.** The demo server's historian is in memory (it disappears on
+  restart, applies the cap to the newest values and never returns a continuation point); a real server may page,
+  sort and trim differently. The client follows continuation points up to 50 pages and releases them, but it
+  never writes or deletes history and does not cache results beyond the table.
+* **A server directory only lists what it was told.** **Find servers…** sends one `FindServers` request to the
+  discovery endpoint you type (an LDS, a GDS, or any server — most servers list themselves) with an optional
+  application-URI prefix filter. The entries are `ApplicationDescription` values exactly as the directory
+  published them: this client does not verify them, does not discover applications by multicast and sends no
+  `RegisterServer`/`FindServersOnNetwork`. An application that publishes no discovery URL is listed but cannot be
+  adopted, and a server that is not a discovery server may refuse the service — that is reported, never retried.
 * **Data-change filters are evaluated by the server.** The Live monitor sends the requested trigger/deadband
   unchanged; whether it is honoured depends on the server and on the variable (a percent deadband needs an
   `EURange` property, and non-numeric values cannot use a deadband). The demo server accepts the filter but does

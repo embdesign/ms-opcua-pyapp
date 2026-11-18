@@ -7,6 +7,7 @@ from .compare_tab import CompareTab
 from .connection_tab import ConnectionTab
 from .events_tab import EventsTab
 from .export_tab import ExportTab
+from .history_tab import HistoryTab
 from .logs_tab import LogsTab
 from .monitor_tab import MonitorTab
 from .sequences_tab import SequencesTab
@@ -20,6 +21,7 @@ __all__ = [
     "ConnectionTab",
     "EventsTab",
     "ExportTab",
+    "HistoryTab",
     "LogsTab",
     "MonitorTab",
     "SequencesTab",

@@ -20,8 +20,8 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 489 passed (≈4–14 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 369 passed, ~3 s
+uv run pytest -q                           # full suite, 517 passed (≈4–14 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 388 passed, ~3 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -42,8 +42,9 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 
 - Integration tests start in-process demo servers on free loopback ports; they need no Docker and no sudo.
 - GUI tests run headless (`QT_QPA_PLATFORM=offscreen`) and are split by concern (`test_gui_smoke`,
-  `test_gui_workflows`, `test_gui_monitor`, `test_gui_connection_states`, `test_gui_project`,
-  `test_gui_compare`, `test_gui_sequences`; `test_pyside_stability` guards the Qt pin). Shared helpers live in
+  `test_gui_workflows`, `test_gui_monitor`, `test_gui_events`, `test_gui_server`, `test_gui_history`,
+  `test_gui_connection_states`, `test_gui_project`, `test_gui_compare`, `test_gui_sequences`;
+  `test_pyside_stability` guards the Qt pin). Shared helpers live in
   `tests/integration/gui_support.py`; the module-scoped `qapp` fixture lives in
   `tests/integration/conftest.py` and closes/deletes top-level widgets after each module. Do not remove that
   cleanup.
@@ -58,7 +59,10 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt.
   `exporters/` uses `formatting.py`, never `opcua/`.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
-- Only `opcua/client_service.py` constructs an `asyncua.Client`; one instance per session.
+- Only `opcua/client_service.py` constructs an `asyncua.Client`; one instance per session. The two
+  session-less services (GetEndpoints discovery and the FindServers directory) use a short-lived client on a
+  temporary `SecurityPolicyNone` channel **inside that module** and close it again — no other module may create
+  a client.
 - Only `gui/async_runner.py` bridges asyncio and Qt. Widgets never `await`; all OPC UA work runs on the single
   worker loop and results are plain dataclasses delivered through queued signals.
 - `gui/main_window.py` is a shell (session tabs, menus, status bar, shared tabs). A session's state and Qt
@@ -73,6 +77,10 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.
+- History is read-only and raw only: `opcua/history_service.py` is the single `HistoryRead` implementation
+  (`build_history_request` → `read_history`). It uses `session.history_read` (there is no `Client.history_read`
+  in asyncua 2.1.0), releases continuation points, and never sends `HistoryUpdate`. Do not add processed,
+  aggregate, at-time or event-history paths without a verified asyncua API.
 - There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
   (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`). The
   guarded checks and the sequence runner both use it; do not add another path that parses and sends a value.

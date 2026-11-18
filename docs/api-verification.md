@@ -195,6 +195,49 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   A client that needs `GetMonitoredItems` must call a method, which this project intentionally does not add
   (one guarded method-call path only).
 
+## Raw history (verified 2026-11-18)
+
+* `Session.history_read(params)` (`UaClient.history_read`, also on `AbstractSession`) takes
+  `ua.HistoryReadParameters` and returns one `ua.HistoryReadResult` per `NodesToRead` entry. There is **no
+  `Client.history_read`** in 2.1.0 — the call goes through the session the client owns.
+* `ua.HistoryReadParameters` carries `HistoryReadDetails`, `TimestampsToReturn`, `ReleaseContinuationPoints`
+  and `NodesToRead` (one `ua.HistoryReadValueId` with `NodeId`, `IndexRange`, `DataEncoding`,
+  `ContinuationPoint`).
+* `ua.ReadRawModifiedDetails` uses `IsReadModified` (bool), `StartTime`, `EndTime`, `NumValuesPerNode` and
+  `ReturnBounds`. An open range is `ua.get_win_epoch()` for both ends (the asyncua helper exists and is used).
+* Results arrive as `ua.HistoryReadResult` with `StatusCode`, `ContinuationPoint` (bytes, empty when there is no
+  more data) and `HistoryData.DataValues`. asyncua's server returns **newest-first** for `NumValuesPerNode`
+  caps; the client sorts ascending by source timestamp, then server timestamp.
+* **asyncua 2.1.0 has no client helper for processed, aggregate or at-time history**: `read_processed_history`,
+  `read_at_time` and `read_events` do not exist on `Client`/`Session`. `read_raw_history(node, start, end, num)` is
+  a convenience wrapper only (it builds the same raw request); the project calls `history_read` directly because
+  it needs continuation points and `ReleaseContinuationPoints`.
+* A node that is not historized yields a **Good StatusCode with zero values**; the server logs an error
+  internally. That is a server fact, so the client reports it together with the `Historizing` attribute
+  (`AttributeIds.Historizing` = 20, Boolean) instead of raising.
+* `asyncua.server.history.HistoryManager`/`HistoryDict` is the demo server's in-memory historian;
+  `Server.historize_node_data_change(node, period, count, ...)` (and `historize_node_event`) register a node.
+  The demo server uses `historize_node_data_change(..., count=2000)` behind `--history`.
+* The demo server never returns a continuation point: a capped read simply returns the newest N values. The
+  client's continuation loop is therefore exercised with a fake session in the unit tests.
+
+## Server directory / FindServers (verified 2026-11-18)
+
+* `Client.find_servers(uris=None)` builds `ua.FindServersParameters` (`EndpointUrl` = the client's server URL,
+  `ServerUris` = the given list) and calls `uaclient.find_servers(params)`; it returns
+  `list[ua.ApplicationDescription]`. There is no session involvement.
+* `ua.ApplicationDescription` fields: `ApplicationUri`, `ProductUri`, `ApplicationName` (LocalizedText),
+  `ApplicationType` (enum `ua.ApplicationType`), `GatewayServerUri`, `DiscoveryProfileUri`, `DiscoveryUrls`.
+  **`ua.LocalizedText(Text, Locale)` — text first**; `LocalizedText(None, "x")` sets Text=None.
+* `ServerUris` is a **prefix match on the application URI split by `:`** in asyncua's server implementation, so an
+  entry like `urn:vendor` matches `urn:vendor:product:instance`.
+* FindServers works on a plain `SecurityPolicyNone` secure channel: no session, no identity, no certificate
+  approval. The project reuses its endpoint-discovery channel pattern for it.
+* asyncua's demo server implements FindServers (`InternalServer.find_servers`) and returns itself
+  (`urn:opcua-explorer:demo:server`, type `ClientAndServer`, one discovery URL).
+* `Client.find_servers_on_network()` exists (signature `(self)`), but the asyncua server answers
+  `BadUserAccessDenied`; there is no verified multicast/LDS client path here, so the feature is not offered.
+
 ## Connection recovery (used by the opt-in check and the Resilience toggle)
 
 * `await client.close_secure_channel()` closes the channel. With `auto_reconnect=False`, the next request

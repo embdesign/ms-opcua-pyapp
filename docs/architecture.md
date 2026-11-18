@@ -33,7 +33,8 @@ Derived design rules:
 │ gui/  (PySide6)                                                      │
 │  app.py · main_window.py · session_workspace.py                      │
 │  tabs/{connection,connection_dialogs,browser,export,monitor,events,  │
-│        tests,sequences,logs,unified_monitor,compare}                 │
+│        history,server,tests,sequences,logs,unified_monitor,compare,   │
+│        server_directory_dialog}                                     │
 │  async_runner.py  ← only place Qt meets asyncio                      │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
@@ -48,9 +49,9 @@ Derived design rules:
 │  security.py  browse.py  attributes.py  traversal.py  serialize.py   │
 │  ua_names.py  value_parsing.py  monitor_service.py  nodeset2.py      │
 │  event_service.py  nodeset2_validation.py  check_support.py          │
-│  server_diagnostics.py  test_runner.py  guarded_operations.py        │
-│  write_service.py  type_support.py  path_support.py                  │
-│  sequence_runner.py  method_support.py                               │
+│  server_diagnostics.py  history_service.py  test_runner.py           │
+│  guarded_operations.py  write_service.py  type_support.py            │
+│  path_support.py  sequence_runner.py  method_support.py              │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ AddressSpace snapshot / TestRun (plain dataclasses)
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -67,7 +68,7 @@ Rules that keep the layers honest:
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
 * Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
-* `gui/session_workspace.py` owns one service and its eight pages and injects that session's browser
+* `gui/session_workspace.py` owns one service and its nine pages and injects that session's browser
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
@@ -155,13 +156,48 @@ namespace-0 variables and never writes:
   `LiveMonitor.items_snapshot()` instead, labelled as the client's own view.
 * The tab refreshes when the session connects and on **Refresh**; it owns no subscription and no timer.
 
+### History (read-only)
+
+The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one raw `HistoryRead` of
+the selected variable; it never calls `HistoryUpdate` and never retries:
+
+* `build_history_request()` produces `HistoryReadParameters` with `ReadRawModifiedDetails`, an open range
+  (`ua.get_win_epoch()` on both ends) unless the operator sets From/To, `NumValuesPerNode` from the value cap,
+  `ReturnBounds = False` and `TimestampsToReturn.Both` for exactly one node.
+* `read_history()` validates the range, follows continuation points up to `_MAX_PAGES = 50`, decodes each
+  `DataValue` through the shared `decode_data_value()`, releases the continuation point when the cap or the page
+  limit ends the read, and makes a best-effort release in `finally` so no server-side cursor is left behind.
+* Results are sorted by source (then server) timestamp and trimmed to the requested cap. The server decides
+  which values it keeps and which ones a page contains; the client only orders what it received.
+* A Good StatusCode with no values is normal: the result records the node's `Historizing` attribute and the
+  status line says whether the node reports `Historizing = false` or simply has no values in the range. A Bad
+  StatusCode is reported with that StatusCode, never as an exception or as row loss.
+
 ## 4. Sessions, connection and trust flow
+
+### Server directory (FindServers)
+
+`OpcUaService.discover_servers()` in `opcua/client_service.py` sends one `FindServers` request and returns plain
+`DiscoveredServer`/`ServerDiscoveryResult` objects; the GUI dialog is
+`gui/tabs/server_directory_dialog.py`, opened from the Connection tab.
+
+* FindServers is a **channel-level** service: it needs no session, no identity and no trust decision. The call
+therefore uses the same temporary pattern as endpoint discovery (socket → Hello → OpenSecureChannel → service →
+close), so it works while the session is disconnected and leaves nothing behind.
+* The request carries the discovery URL the operator typed and the optional application-URI prefixes
+(`client.find_servers(uris)`); an empty list means "every application this directory knows".
+* The answer is mapped field by field into `DiscoveredServer` (name, application URI, type, product/gateway/profile
+URIs, discovery URLs). Entries are sorted by name for display; blank URLs are dropped. Nothing is verified,
+cached in project state or connected to automatically — adoption only fills the endpoint field.
+* A refusing endpoint, a protocol error and a timeout all become `ConnectionFailedError` with the URL in the text;
+there is no retry. `FindServersOnNetwork` (multicast/GDS discovery) is not offered: asyncua's server answers it with
+`BadUserAccessDenied` and the client has no verified multicast path.
 
 `MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
 bar and three shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors), `CompareTab`
 (read-only structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
-`OpcUaService` and the eight pages
-(Connection, Address space, Export, Live monitor, Events, Server, Tests, Sequences). Sessions are fully independent — separate client,
+`OpcUaService` and the nine pages
+(Connection, Address space, Export, Live monitor, Events, History, Server, Tests, Sequences). Sessions are fully independent — separate client,
 discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
 two sessions to the same endpoint are allowed. `File → New connection` (`Ctrl+N`) creates a new service on the
 same asyncio runner and the same trust store; closing a session tab releases only that client. All sessions share
@@ -359,10 +395,10 @@ document is reported as partial rather than as "nodes missing on the other side"
 
 ## 9. Delivered scope and test-suite policy
 
-Connection/security, read-only event subscriptions with the one guarded condition acknowledgement, the
-read-only functional checks with reports, NodeSet2 export and the guarded write and method call are delivered,
-together with address-space comparison and operator sequences; `PLAN.md` §1 is the authoritative capability
-list.
+Connection/security, read-only event subscriptions with the one guarded condition acknowledgement, server status
+and diagnostics, raw history reads, the read-only functional checks with reports, NodeSet2 export and the guarded
+write and method call are delivered, together with address-space comparison and operator sequences; `PLAN.md` §1
+is the authoritative capability list.
 
 Test-suite policy: read-only by default, a subscription that is created but reports no value change is not a
 failure, no unrestricted stress testing, no automatic production-network scanning; results are described as
@@ -483,7 +519,8 @@ opening a project never loads or runs a sequence.
 
 ## 12. Deliberate limitations
 
-* No history reads; values are point-in-time.
+* History is raw only: no processed/aggregate read, no read-at-time, no event history and no `HistoryUpdate`;
+  a point-in-time read remains the value path everywhere else.
 * Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
   opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.
 * The test suite covers one session, one browse root and one variable.

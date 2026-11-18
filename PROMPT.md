@@ -191,5 +191,5 @@ explicitly:
 - **Delivered test and report assets.** 226 automated tests (unit, demo-server integration and headless GUI),
   a local demo server with a graph-shaped model, example JSON/CSV/NodeSet2 files and sample JSON/HTML reports.
 
-Deliberate non-goals remain as documented in `README.md` (no history reads, no batch/scan/stress writes, no
+Deliberate non-goals remain as documented in `README.md` (no batch/scan/stress writes, no
 unattended production scanning, single-target guarded operations only).

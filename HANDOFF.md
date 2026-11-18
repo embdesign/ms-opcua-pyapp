@@ -26,7 +26,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-489 tests pass (369 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+517 tests pass (388 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -65,6 +65,23 @@ ServerDiagnosticsSummary and ServerCapabilities variables in one batched Read an
 tab. Good-but-null values are `not_provided` (asyncua's demo returns nulls for every counter), Bad values are
 kept per name, and the monitored-item list is `LiveMonitor.items_snapshot()` — `GetMonitoredItems` is not called
 because the project keeps exactly one guarded method-call path.
+
+**Raw history — delivered.** `opcua/history_service.py` builds one `HistoryReadParameters`
+(`ReadRawModifiedDetails`, `TimestampsToReturn.Both`, optional From/To, a value cap) and drives
+`session.history_read` for one node. It follows continuation points up to 50 pages, releases them (also in
+`finally`), decodes each `DataValue` with the shared `decode_data_value()`, sorts ascending and trims to the cap.
+A Good-but-empty result is normal and is reported with the node's `Historizing` attribute. The **History** tab
+(`gui/tabs/history_tab.py`) exposes it read-only; `opcua-demo-server --history` historizes Temperature and Speed
+in asyncua's in-memory historian. There is **no** `Client.history_read` in asyncua 2.1.0 and no processed,
+aggregate, at-time or event-history helper — see `docs/api-verification.md`.
+
+**Server directory (FindServers) — delivered.** `OpcUaService.discover_servers()` sends one `FindServers` request
+on a temporary `SecurityPolicyNone` channel (the same channel-level pattern as GetEndpoints, inside
+`client_service.py` only) and maps the answer into `DiscoveredServer`/`ServerDiscoveryResult`. The Connection tab
+opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters by application-URI prefix, lists
+name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
+deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
+lists itself as `urn:opcua-explorer:demo:server`.
 
 **Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
 `models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
@@ -125,7 +142,7 @@ bundles are built now (GUI, export, compare).
   `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
   into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
 - UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors”, “Compare” and
-  “Logs & reports”). One session = `gui/session_workspace.py` + its eight pages under `gui/tabs/`.
+  “Logs & reports”). One session = `gui/session_workspace.py` + its nine pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
   `asyncua.Client`.
 - Pure layers (no asyncua, no Qt): `models.py`, `config.py`, `defaults.py`, `project.py`,
@@ -146,12 +163,12 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **369 passed** |
-| Full suite | `uv run pytest -q` | **489 passed** (≈6–10 min on this host; up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **388 passed** |
+| Full suite | `uv run pytest -q` | **517 passed** (≈6–10 min on this host; up to ~14 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
-| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 97 — deliberate boundaries, see *Known issues* |
+| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 111 — deliberate boundaries, see *Known issues* |
 
 The optional `lxml` extra (`uv sync --extra validation`) was not exercised separately (`lxml` is already
 installed through the dev group); `examples/` matches the current formats and is regenerated whenever a format
@@ -161,10 +178,10 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 489 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 517 tests
   pass; the variance is scheduling/IO contention, not failures.
-- **97 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `type_support.py` 8,
-  `test_runner.py` 7, `nodeset2.py` 7, `write_service.py` 6, `sequence_runner.py` 6, `attributes.py` 6, …).
+- **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
+  `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).
   Most are deliberate boundaries (best-effort
   teardown, diagnostics for arbitrary server values); do not remove them wholesale without checking the failure
   semantics.

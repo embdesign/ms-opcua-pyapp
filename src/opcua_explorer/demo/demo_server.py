@@ -328,11 +328,14 @@ async def start_demo_server(
     private_key: str | None = None,
     update_values: bool = True,
     event_interval: float | None = None,
+    history: bool = False,
 ) -> DemoModel:
     """Start a demo server and return its model (``model.endpoint`` is usable).
 
     ``event_interval`` (seconds) publishes a demo event on the Server object at
     that rate; it is off by default so ordinary runs stay deterministic.
+    ``history`` historizes Temperature and Speed in the server's in-memory
+    history store so raw HistoryRead can be exercised.
     """
     chosen_port = find_free_port(host) if port in (None, 0) else int(port)
     endpoint = f"opc.tcp://{host}:{chosen_port}"
@@ -343,6 +346,10 @@ async def start_demo_server(
         private_key=private_key,
     )
     await model.server.start()
+    if history:
+        await model.server.historize_node_data_change(
+            [model.temperature, model.speed], count=2_000
+        )
     if update_values:
         task = asyncio.create_task(_update_values(model))
         model.server._demo_update_task = task
@@ -390,6 +397,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="publish one demo event on the Server object at this rate (0 = off, the default)",
     )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="historize Temperature and Speed in memory so raw HistoryRead can be exercised",
+    )
     parser.add_argument("--cert", help="server certificate (.der or .pem) to enable Basic256Sha256/SignAndEncrypt")
     parser.add_argument("--key", help="server private key (.pem)")
     parser.add_argument("--verbose", "-v", action="store_true", help="debug logging")
@@ -416,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             private_key=args.key,
             update_values=not args.no_updates,
             event_interval=args.event_interval or None,
+            history=args.history,
         )
         print(f"Demo server running at {model.endpoint}")
         print(f"  namespaces: {DEMO_NAMESPACE} (index {model.namespace_index}), {DEMO_EXTRA_NAMESPACE}")
@@ -424,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  start node: Objects folder (i=85) or ns={model.namespace_index};s=Plant")
         if model.event_generator is not None:
             print(f"  events:     one demo event every {args.event_interval:g} s on the Server object (i=2253)")
+        if args.history:
+            print("  history:    Temperature and Speed are historized (raw HistoryRead only)")
         print("Press Ctrl+C to stop.")
         try:
             while True:

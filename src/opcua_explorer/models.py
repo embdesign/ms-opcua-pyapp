@@ -15,11 +15,13 @@ from .defaults import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CONCURRENCY,
     DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_HISTORY_MAX_VALUES,
     DEFAULT_LATENCY_SAMPLES,
     DEFAULT_MAX_NODES,
     DEFAULT_NOTIFICATION_WAIT_SECONDS,
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_HISTORY_MAX_VALUES,
 )
 
 
@@ -111,6 +113,69 @@ class DiscoveryResult:
 
     def advertised_combinations(self) -> list[str]:
         return [f"{endpoint.label()}" for endpoint in self.endpoints]
+
+
+@dataclass(slots=True)
+class DiscoveredServer:
+    """One `ApplicationDescription` returned by a FindServers directory call.
+
+    The fields are exactly what the directory published; this client never
+    invents an application name, URI or endpoint. ``discovery_urls`` are the
+    server's own advertised URLs and may be empty (some servers only fill them
+    when asked over the same host name).
+    """
+
+    application_uri: str
+    application_name: str = ""
+    application_type: str = "Unknown"
+    product_uri: str | None = None
+    gateway_server_uri: str | None = None
+    discovery_profile_uri: str | None = None
+    discovery_urls: list[str] = field(default_factory=list)
+
+    def label(self) -> str:
+        return self.application_name or self.application_uri or "(unnamed application)"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "application_uri": self.application_uri,
+            "application_name": self.application_name,
+            "application_type": self.application_type,
+            "product_uri": self.product_uri,
+            "gateway_server_uri": self.gateway_server_uri,
+            "discovery_profile_uri": self.discovery_profile_uri,
+            "discovery_urls": list(self.discovery_urls),
+        }
+
+
+@dataclass(slots=True)
+class ServerDiscoveryResult:
+    """Answer to one directory (FindServers) request on a discovery endpoint."""
+
+    discovery_url: str
+    server_uris: list[str] = field(default_factory=list)
+    servers: list[DiscoveredServer] = field(default_factory=list)
+    duration_ms: float = 0.0
+    received_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        if not self.servers:
+            if self.server_uris:
+                return (
+                    f"The server at {self.discovery_url} knows no application matching "
+                    f"{', '.join(self.server_uris)}."
+                )
+            return f"The server at {self.discovery_url} returned an empty server list."
+        return f"{len(self.servers)} server(s) reported by {self.discovery_url}."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "discovery_url": self.discovery_url,
+            "server_uris": list(self.server_uris),
+            "servers": [server.to_dict() for server in self.servers],
+            "duration_ms": round(self.duration_ms, 3),
+            "received_at": iso_utc(self.received_at),
+        }
 
 
 @dataclass(slots=True)
@@ -1047,6 +1112,104 @@ class EventStart:
 # ---------------------------------------------------------------------------
 # Server status and diagnostics (read-only snapshot)
 # ---------------------------------------------------------------------------
+
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "current_time": self.current_time,
+            "start_time": self.start_time,
+            "uptime_seconds": self.uptime_seconds,
+            "seconds_till_shutdown": self.seconds_till_shutdown,
+            "shutdown_reason": self.shutdown_reason,
+            "diagnostics_enabled": self.diagnostics_enabled,
+            "counters": dict(self.counters),
+            "limits": dict(self.limits),
+            "not_provided": list(self.not_provided),
+            "unavailable": dict(self.unavailable),
+            "monitor_subscription_id": self.monitor_subscription_id,
+            "monitored_items": [item.to_dict() for item in self.monitored_items],
+            "received_at_utc": iso_utc(self.received_at),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Raw history reads
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class HistoryConfig:
+    """Bounds for one raw ``HistoryRead`` call.
+
+    ``start``/``end`` of ``None`` mean an open range; ``max_values`` is a hard
+    client-side cap that also becomes ``NumValuesPerNode``.
+    """
+
+    start: datetime | None = None
+    end: datetime | None = None
+    max_values: int = DEFAULT_HISTORY_MAX_VALUES
+
+    def normalised(self) -> HistoryConfig:
+        return HistoryConfig(
+            start=self.start,
+            end=self.end,
+            max_values=min(MAX_HISTORY_MAX_VALUES, max(1, int(self.max_values))),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start": iso_utc(self.start),
+            "end": iso_utc(self.end),
+            "max_values": self.max_values,
+        }
+
+
+@dataclass(slots=True)
+class HistoryResult:
+    """Raw history of one variable, oldest value first.
+
+    ``status`` is the HistoryRead StatusCode; ``historizing`` is the node's
+    Historizing attribute when it could be read. A Good StatusCode with no
+    values is not an error - many servers simply have no data in the range.
+    """
+
+    node_id: str
+    values: list[ValueSnapshot] = field(default_factory=list)
+    status: str = "Good"
+    historizing: bool | None = None
+    truncated: bool = False
+    requested_max_values: int = 0
+    pages: int = 0
+    detail: str = ""
+    duration_ms: float = 0.0
+    received_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        parts = [f"History for {self.node_id}: {len(self.values)} value(s)"]
+        if self.status != "Good":
+            parts.append(f"HistoryRead {self.status}")
+        if self.historizing is False:
+            parts.append("Historizing = false")
+        if self.truncated:
+            parts.append("truncated at the requested maximum")
+        if self.detail:
+            parts.append(self.detail)
+        return "; ".join(parts) + "."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "status": self.status,
+            "historizing": self.historizing,
+            "truncated": self.truncated,
+            "requested_max_values": self.requested_max_values,
+            "pages": self.pages,
+            "detail": self.detail,
+            "duration_ms": self.duration_ms,
+            "values": [snapshot.to_dict() for snapshot in self.values],
+            "received_at_utc": iso_utc(self.received_at),
+        }
 
 
 @dataclass(slots=True)

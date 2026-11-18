@@ -50,6 +50,7 @@ from ...operator_text import connection_diagnostics_text
 from ..async_runner import AsyncRunner, TaskHandle
 from ..theme import mono_font, set_chip_state
 from .connection_dialogs import CertificateReviewDialog, TrustStoreDialog
+from .server_directory_dialog import ServerDirectoryDialog
 
 _logger = logging.getLogger(__name__)
 
@@ -147,9 +148,15 @@ class ConnectionTab(QWidget):
         row = QHBoxLayout()
         self.discover_btn = QPushButton("Discover endpoints")
         self.discover_btn.clicked.connect(self._on_discover)
+        self.find_servers_btn = QPushButton("Find servers…")
+        self.find_servers_btn.setToolTip(
+            "Ask a discovery endpoint (LDS/GDS or any server) which applications it knows (FindServers)."
+        )
+        self.find_servers_btn.clicked.connect(self._on_find_servers)
         self.trust_btn = QPushButton("Trusted certificates…")
         self.trust_btn.clicked.connect(self._on_manage_trust)
         row.addWidget(self.discover_btn)
+        row.addWidget(self.find_servers_btn)
         row.addWidget(self.trust_btn)
         row.addStretch(1)
         endpoint_layout.addLayout(row)
@@ -502,6 +509,7 @@ class ConnectionTab(QWidget):
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self.connect_btn.setEnabled(not busy)
         self.discover_btn.setEnabled(not busy)
+        self.find_servers_btn.setEnabled(not busy)
         self.disconnect_btn.setEnabled(not busy and self._service.is_connected)
         self.cancel_btn.setEnabled(busy)
         if busy:
@@ -530,6 +538,7 @@ class ConnectionTab(QWidget):
     def _set_busy_controls_idle(self) -> None:
         self.connect_btn.setEnabled(not self._service.is_connected)
         self.discover_btn.setEnabled(True)
+        self.find_servers_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(self._service.is_connected)
         self.cancel_btn.setEnabled(False)
 
@@ -815,6 +824,24 @@ class ConnectionTab(QWidget):
     # -- trust store -------------------------------------------------------
     def _on_manage_trust(self) -> None:
         TrustStoreDialog(self, self._service).exec()
+
+    def _on_find_servers(self) -> None:
+        """Browse a discovery endpoint's server list; fill the URL on accept."""
+        dialog = ServerDirectoryDialog(
+            self,
+            self._runner,
+            self._service,
+            discovery_url=self.url_edit.text().strip(),
+        )
+        try:
+            accepted = dialog.exec() == int(ServerDirectoryDialog.DialogCode.Accepted)
+        finally:
+            dialog.shutdown()
+        if accepted and dialog.selected_url:
+            self.url_edit.setText(dialog.selected_url)
+            self.status_chip.setText("Endpoint taken from the server directory")
+            if self._discovery is not None:
+                self._render_diagnostics(discovery=self._discovery)
 
     # -- profiles ----------------------------------------------------------
     def _reload_profiles(self) -> None:

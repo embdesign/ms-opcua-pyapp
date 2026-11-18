@@ -55,6 +55,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   session's live-monitor subscription and items as the client sees them. Optional values a server returns as
   Good-but-null are shown as *not provided*; bad StatusCodes are shown with their code. Nothing is written and
   no method is called — `GetMonitoredItems` is deliberately not invoked.
+- **History tab / raw `HistoryRead`** (`opcua/history_service.py`) — reads the stored values of one variable
+  through `HistoryRead` with `ReadRawModifiedDetails`: an optional From/To range (open range = `ua.get_win_epoch()`
+  on both ends), a value cap (default 1000, maximum 10 000) and `TimestampsToReturn.Both`. Continuation points
+  are followed up to 50 pages and released (also in `finally`), every `DataValue` is decoded through the shared
+  `decode_data_value()`, and results are sorted oldest-first. A Good-but-empty answer is not an error: the
+  result records the node's `Historizing` attribute and says whether the node does not historize or the range
+  holds no values. Nothing is written and no `HistoryUpdate` is sent.
+- **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
+  in-memory historian, so the History tab can be exercised locally and in tests.
+- **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one
+  `FindServers` request to a discovery endpoint (an LDS, a GDS, or any server) on a temporary
+  SecurityPolicyNone channel, so no session, identity or certificate decision is involved. The dialog lists each
+  `ApplicationDescription` (name, application URI, type, first discovery URL, full tooltip), supports an optional
+  application-URI prefix filter, and **Use selected URL** puts the chosen discovery URL into the endpoint field.
+  An application without a discovery URL is listed but cannot be adopted; a refusing or silent endpoint becomes
+  an actionable connection error. Nothing is registered, nothing is retried, and no application is connected to
+  automatically.
 
 ### Changed
 

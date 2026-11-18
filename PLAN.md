@@ -8,7 +8,7 @@ covered by tests, including the device-independent sequence runner for operator-
 
 | Area | Delivered |
 |---|---|
-| Connection & security | Endpoint discovery, policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
+| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
 | Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
@@ -17,6 +17,7 @@ covered by tests, including the device-independent sequence runner for operator-
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
 | Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event (no `Confirm`/`Enable`, never retried) |
 | Server status | One read-only batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
+| History | Read-only raw `HistoryRead` of one variable with an optional From/To range and a value cap; continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, and a non-historizing node is reported as such instead of as an error |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), read-only by default |
 | Guarded operations | Single-target write and method call, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
@@ -58,8 +59,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 489 passed, ~6–10 min
-uv run pytest tests/unit -q       # 369 passed, ~3 s
+uv run pytest -q                  # 517 passed, ~6–10 min
+uv run pytest tests/unit -q       # 388 passed, ~3 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -70,7 +71,12 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 ## 4. Deliberate limitations
 
-- Values are point-in-time; there are no history reads.
+- The server directory is read-only: one `FindServers` call per request on a temporary unencrypted channel.
+  Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
+  no `RegisterServer` and no automatic connection to a found application.
+- Values are point-in-time reads; history is raw only (no processed/aggregate read, no read-at-time, no event
+  history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
+  returned.
 - Events are notifications, not alarm management: sources are subscribed read-only and the only action is one
   operator-confirmed `Acknowledge` method call for a selected condition event (`ConditionType` subscription,
   no `Confirm`/`Enable`/`AddComment`, no retry, no automatic acknowledgement, no `ConditionRefresh`, no event
@@ -79,7 +85,7 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
   JSON/CSV snapshot format is unchanged and the tree does not mark event sources.
 - Server status/diagnostics cover the standard status, summary and capability variables that the server
   provides. `GetMonitoredItems` is not called (the tab shows the client's own monitor view); there is no
-  history, no diagnostics-array detail and no aggregate computation.
+  diagnostics-array detail and no aggregate computation.
 - Data-change filters and intervals are requests: the server decides whether a deadband is honoured and which
   interval it uses. Filters are fixed for the lifetime of a subscription; intervals and the monitoring mode can
   be changed while it runs. The demo server accepts filters but does not implement deadband suppression.
@@ -190,6 +196,6 @@ Step kinds are fixed (`SEQUENCE_STEP_KINDS`); anything else is refused before th
 
 - Sequences are declarative; there is no embedded scripting language and no arbitrary code execution.
 - A keepalive failure aborts between steps, not inside a running `delay`.
-- Values remain point-in-time; there is still no history read, no batch write and no automatic retry.
+- Values remain point-in-time elsewhere; there is still no batch write and no automatic retry.
 - Whether a device honours a gate is device behaviour; the tool reports StatusCodes and read-backs, it
   cannot prove mutual exclusion.
