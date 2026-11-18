@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -29,8 +30,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...defaults import DEFAULT_READ_MAX_AGE_MS, MAX_READ_MAX_AGE_MS
 from ...errors import InvalidNodeIdError
-from ...models import AddressSpace, AttributeResult, NodeDetails, ValueSnapshot
+from ...models import (
+    TIMESTAMPS_TO_RETURN,
+    AddressSpace,
+    AttributeResult,
+    NodeDetails,
+    ValueReadOptions,
+    ValueReadResult,
+    ValueSnapshot,
+)
 from ...opcua.attributes import format_attribute_value
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
@@ -88,6 +98,8 @@ class BrowserTab(QWidget):
         self._matches: list[str] = []
         self._match_index = 0
         self._current_node_id: str | None = None
+        #: Suffix of the last explicit value read (duration + options).
+        self._value_read_note: str = ""
         #: NodeIds in this session's live-monitor list, marked with ●/○ in the tree.
         self._monitored: set[str] = set()
         self._monitor_active = False
@@ -218,6 +230,35 @@ class BrowserTab(QWidget):
         row.addWidget(self.read_value_btn)
         row.addWidget(self.value_meta, 1)
         value_layout.addLayout(row)
+
+        options_row = QHBoxLayout()
+        self.index_range_edit = QLineEdit()
+        self.index_range_edit.setPlaceholderText("IndexRange, e.g. 1:3 or 0,2 (empty = whole value)")
+        self.index_range_edit.setToolTip(
+            "NumericRange applied to the Value attribute. Only arrays and strings can be sliced; "
+            "the server refuses a range it cannot apply."
+        )
+        self.max_age_spin = QSpinBox()
+        # QSpinBox is int32; the protocol allows uint32, so the client accepts more than the UI offers.
+        self.max_age_spin.setRange(0, min(MAX_READ_MAX_AGE_MS, 2_147_483_647))
+        self.max_age_spin.setValue(DEFAULT_READ_MAX_AGE_MS)
+        self.max_age_spin.setSuffix(" ms")
+        self.max_age_spin.setToolTip(
+            "MaxAge: 0 lets the server answer from a cache, a large value asks for a fresh device read."
+        )
+        self.timestamps_combo = QComboBox()
+        self.timestamps_combo.addItems(list(TIMESTAMPS_TO_RETURN))
+        self.timestamps_combo.setCurrentText("Both")
+        self.timestamps_combo.setToolTip("TimestampsToReturn of the read request.")
+        options_row.addWidget(QLabel("IndexRange:"))
+        options_row.addWidget(self.index_range_edit, 1)
+        options_row.addSpacing(8)
+        options_row.addWidget(QLabel("MaxAge:"))
+        options_row.addWidget(self.max_age_spin)
+        options_row.addSpacing(8)
+        options_row.addWidget(QLabel("Timestamps:"))
+        options_row.addWidget(self.timestamps_combo)
+        value_layout.addLayout(options_row)
 
         self.value_warning = QLabel()
         self.value_warning.setObjectName("warningLabel")
@@ -499,6 +540,7 @@ class BrowserTab(QWidget):
         self.value_view.clear()
         self.value_meta.setText("No value read.")
         self.value_warning.hide()
+        self._value_read_note = ""
 
     def _fill_attributes(self, attributes: list[AttributeResult]) -> None:
         table = self.attributes_table
@@ -544,16 +586,31 @@ class BrowserTab(QWidget):
             self.load_node(str(node_id))
 
     # -- value -------------------------------------------------------------
+    def _read_options(self) -> ValueReadOptions:
+        return ValueReadOptions(
+            index_range=self.index_range_edit.text(),
+            max_age_ms=int(self.max_age_spin.value()),
+            timestamps=self.timestamps_combo.currentText(),
+        ).normalised()
+
     def _on_read_value(self) -> None:
         if not self._current_node_id or not self._service.is_connected:
             return
         node_id = self._current_node_id
-        self.value_meta.setText(f"Reading {node_id}…")
+        options = self._read_options()
+        self.value_meta.setText(f"Reading {node_id} ({options.label()})…")
         self._submit(
-            lambda: self._service.read_value(node_id),
-            on_done=self._render_value,
+            lambda: self._service.read_value_with_options(node_id, options),
+            on_done=self._render_value_result,
             on_error=lambda message: self._set_status(f"Reading the value failed: {message}", error=True),
         )
+
+    def _render_value_result(self, result: ValueReadResult) -> None:
+        self._value_read_note = f"{result.duration_ms:.0f} ms · {result.options.label()}"
+        self._render_value(result.snapshot)
+        if result.snapshot.status != "Good" or result.options.index_range:
+            self.value_warning.setText(result.detail)
+            self.value_warning.show()
 
     def _render_value(self, snapshot: ValueSnapshot | None) -> None:
         self.value_warning.hide()
@@ -566,6 +623,8 @@ class BrowserTab(QWidget):
         if snapshot.variant_type:
             parts.append(f"Type: {snapshot.variant_type}")
         parts.append(f"Encoding: {snapshot.encoding}")
+        if self._value_read_note:
+            parts.append(self._value_read_note)
         self.value_meta.setText(" · ".join(parts))
 
         if snapshot.encoding == "unavailable":

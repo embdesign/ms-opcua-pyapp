@@ -26,7 +26,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-537 tests pass (399 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+571 tests pass (427 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -82,6 +82,13 @@ opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters
 name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
 deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
 lists itself as `urn:opcua-explorer:demo:server`.
+
+**Value read options — delivered.** `opcua/value_read.py` builds one `Read` request for the Value attribute with
+`IndexRange`, `MaxAge` and `TimestampsToReturn` (`ValueReadOptions`/`ValueReadResult` in `models.py`,
+`DEFAULT_READ_MAX_AGE_MS`/`MAX_READ_MAX_AGE_MS` in `defaults.py`); the Address space *Value* panel exposes the
+three controls and shows the request next to the decoded value. A malformed NumericRange is refused locally.
+asyncua's demo server ignores `IndexRange` and `TimestampsToReturn`, so tests assert the request/report, never a
+slice. Keep the panel on `OpcUaService.read_value_with_options` (no `ReadParameters` in widgets).
 
 **Interactive write & call — delivered.** `gui/tabs/write_tab.py` is the third surface over
 `opcua/write_service.py` (after the guarded checks and the sequence runner): `OpcUaService.write_preview` /
@@ -174,8 +181,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **399 passed** |
-| Full suite | `uv run pytest -q` | **537 passed** (≈7–10 min on this host; up to ~14 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **427 passed** |
+| Full suite | `uv run pytest -q` | **571 passed** (≈8 min on this host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -189,7 +196,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~14 min on a loaded machine. All 537 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 571 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

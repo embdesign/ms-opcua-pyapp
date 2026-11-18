@@ -66,6 +66,8 @@ from ..models import (
     TestRun,
     TraversalConfig,
     TraversalProgress,
+    ValueReadOptions,
+    ValueReadResult,
     ValueSnapshot,
     WriteAuthority,
     utc_now,
@@ -98,6 +100,7 @@ from .server_diagnostics import read_server_status
 from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .ua_names import node_class_name
+from .value_read import read_value_with_options as read_value_with_options_impl
 from .write_service import CallOutcome, Inspection, WriteResult
 from .write_service import acknowledge_condition as acknowledge_condition_impl
 from .write_service import call_method as invoke_method_impl
@@ -787,6 +790,16 @@ class OpcUaService:
         if snapshot is None:  # pragma: no cover - read_values_bulk always returns an entry
             return ValueSnapshot(value=None, status="BadNoResult", encoding="unavailable")
         return snapshot
+
+    async def read_value_with_options(
+        self, node_id: Any, options: ValueReadOptions | None = None
+    ) -> ValueReadResult:
+        """Read the Value attribute once with IndexRange, MaxAge and TimestampsToReturn."""
+        session = self._require_session()
+        target = _normalise_node_id(node_id)
+        return await read_value_with_options_impl(
+            session, target, (options or ValueReadOptions()).normalised()
+        )
 
     # -- live monitoring ---------------------------------------------------
     @property

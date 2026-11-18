@@ -29,6 +29,11 @@ DEFAULT_LATENCY_SAMPLES = 10
 DEFAULT_CONCURRENCY = 4
 DEFAULT_BATCH_SIZE = 50
 
+#: MaxAge of an explicit Value read in milliseconds. ``0`` lets the server answer
+#: from a cache; the protocol maximum (uint32) means "come from the device".
+DEFAULT_READ_MAX_AGE_MS = 0
+MAX_READ_MAX_AGE_MS = 4_294_967_295
+
 #: Rows kept per difference bucket by the address-space comparison; the counts
 #: stay complete, only the listed rows stop.
 DEFAULT_MAX_COMPARISON_DIFFERENCES = 2_000

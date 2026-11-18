@@ -173,6 +173,20 @@ the selected variable; it never calls `HistoryUpdate` and never retries:
   status line says whether the node reports `Historizing = false` or simply has no values in the range. A Bad
   StatusCode is reported with that StatusCode, never as an exception or as row loss.
 
+### Value read options (read-only)
+
+The Address space *Value* panel reads one attribute with explicit options through
+`opcua/value_read.py` (`build_read_parameters` → `read_value_with_options`):
+
+* One `Read` request for the **Value** attribute: `ua.ReadValueId.IndexRange` (NumericRange), `MaxAge` and
+  `TimestampsToReturn` on `ua.ReadParameters`. The options are normalised in `models.ValueReadOptions`
+  (clamped MaxAge, known timestamp name, trimmed range).
+* The NumericRange is validated against the `n`/`n:m` grammar **before** the request, so a typo is a local
+  error, not a server StatusCode.
+* The answer is decoded with the shared `decode_data_value()` and wrapped in `ValueReadResult`, which carries the
+  options, the duration and a detail line naming what was requested. A server may ignore the slice or return
+  fewer timestamps; the panel therefore shows the request next to the value instead of claiming an effect.
+
 ## 4. Sessions, connection and trust flow
 
 ### Server directory (FindServers)

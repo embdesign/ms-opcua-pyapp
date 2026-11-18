@@ -10,7 +10,7 @@ covered by tests, including the device-independent sequence runner for operator-
 |---|---|
 | Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
-| Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
+| Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
@@ -59,8 +59,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 537 passed, ~7–10 min
-uv run pytest tests/unit -q       # 399 passed, ~3 s
+uv run pytest -q                  # 571 passed, ~8 min
+uv run pytest tests/unit -q       # 427 passed, ~4 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -71,6 +71,8 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 ## 4. Deliberate limitations
 
+- A value read's `IndexRange`, `MaxAge` and `TimestampsToReturn` are requests: the NumericRange is validated
+  locally, but the server decides whether it slices, caches or returns the timestamps it was asked for.
 - The server directory is read-only: one `FindServers` call per request on a temporary unencrypted channel.
   Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
   no `RegisterServer` and no automatic connection to a found application.

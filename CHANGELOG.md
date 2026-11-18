@@ -72,6 +72,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `Executable`, sends exactly one call and reports the output arguments. Nothing is retried and a refused value
   never reaches the confirmation dialog. `WriteResult` reports the write and the optional restore, and
   `CallOutcome.status_code` is now `Good` on a successful call.
+- **Value read options: `IndexRange` / `MaxAge` / `TimestampsToReturn`** — the Address space *Value* panel now
+  reads with options: a NumericRange slice (`1:3`, `0,2:4`; validated locally so a malformed range never reaches
+  the server), a `MaxAge` in milliseconds (`0` lets the server answer from a cache) and a `TimestampsToReturn`
+  choice (`Source`/`Server`/`Both`/`Neither`). `OpcUaService.read_value_with_options()` and
+  `opcua/value_read.py` build one `Read` request for the Value attribute and report what was asked for next to
+  the decoded value; whether the server honours a slice or the timestamp choice is stated as the server's
+  decision, never assumed. The demo server accepts both and returns the whole value with both timestamps, which
+  the client reports instead of pretending it sliced.
 - **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
   in-memory historian, so the History tab can be exercised locally and in tests.
 - **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one

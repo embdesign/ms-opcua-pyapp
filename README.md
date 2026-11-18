@@ -18,7 +18,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 537 tests. See
+> suite has 571 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -38,7 +38,7 @@ session's client.
 | Page | Capability |
 |---|---|
 | **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
-| **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
+| **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
@@ -142,7 +142,9 @@ uv run opcua-explorer
    status bar then shows how many sessions are open and how many are not connected.
 3. **Address space** tab opens on the Objects folder. Expand `Plant → Line1`. Select a node to see its
    attributes (NodeId, namespace URI, DataType with resolved name, ValueRank, AccessLevel, …), its references
-   with direction, and — on the *Value* sub-tab — an explicit **Read value**. Rows of nodes in the live monitor
+   with direction, and — on the *Value* sub-tab — an explicit **Read value** with optional **IndexRange** (e.g.
+   `1:3`), **MaxAge** (`0` lets the server answer from a cache) and **TimestampsToReturn**
+   (`Source`/`Server`/`Both`/`Neither`). Rows of nodes in the live monitor
    are shown bold and prefixed with **●** while the subscription runs, or **○** when they are added but not yet
    subscribed (per session); the marker disappears when the node is removed from the monitor list.
 4. **Live monitor** tab: add `ns=2;s=Temperature` (or press **Monitor node** in the Address space tab), set a
@@ -677,7 +679,8 @@ uv run pytest tests/unit -q   # fast, no network
   guarded-write value parsing (built-in scalars, arrays, ISO dates; enumerations and structures are typed from
   the server; matrices, unions and optional-field structures are refused), the raw-history request shape and
   its continuation-point handling (against a fake session), the interactive write result semantics (a failed
-  write is never hidden by a restore) and method-signature rows, and the export CLI's argument
+  write is never hidden by a restore) and method-signature rows, the NumericRange validation and
+  `IndexRange`/`MaxAge`/`TimestampsToReturn` request shape, and the export CLI's argument
   mapping and certificate-approval decisions (no network).
 * **Integration**: against the in-process demo server — discovery (endpoints and the FindServers
   directory, including the URI filter and a refusing endpoint), anonymous and username authentication,
@@ -689,7 +692,8 @@ uv run pytest tests/unit -q   # fast, no network
   rejection, not-advertised security rejection, the functional check suite (including the constant-value case
   and the opt-in recovery check), server status/diagnostics, raw history of a historized and a
   non-historized node, an interactive write (with and without restore, refused value, non-variable target),
-  one method call (signature, wrong argument count, output) and report files. Sequence documents are exercised against the demo server
+  one method call (signature, wrong argument count, output), value reads with and without read options
+  and report files. Sequence documents are exercised against the demo server
   (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
   downloads end to end. The headless `opcua-export` command is exercised end to end
   (Objects scope, start-node scope with parent closure, namespace scope, manifest, unsupported custom DataType,
@@ -701,7 +705,8 @@ uv run pytest tests/unit -q   # fast, no network
   save/load; live-monitor markers in the address-space tree; Compare tab runs against two sessions and a saved
   JSON export; Sequences tab load, dry run and run; History tab reads a historized node and reports a
   non-historized one; the Find servers dialog lists the demo server and fills the endpoint field; the Write & call
-  page declines and accepts a write, restores the previous value and calls a method).
+  page declines and accepts a write, restores the previous value and calls a method; the value panel reads with
+  IndexRange, MaxAge and a timestamp choice).
 
 ## 10. Limitations
 
@@ -782,6 +787,12 @@ The implemented scope is complete; the following are **not** claimed:
   published them: this client does not verify them, does not discover applications by multicast and sends no
   `RegisterServer`/`FindServersOnNetwork`. An application that publishes no discovery URL is listed but cannot be
   adopted, and a server that is not a discovery server may refuse the service — that is reported, never retried.
+* **A value read carries options the server may ignore.** *IndexRange* is checked locally (a malformed
+  NumericRange never reaches the server) and *MaxAge*/*TimestampsToReturn* are sent as requested, but whether a
+  slice, a cache age or a timestamp choice is honoured is the server's decision — the panel states what was
+  asked for. asyncua's demo server accepts `IndexRange` and `TimestampsToReturn` and returns the whole value with
+  both timestamps, which is exactly why the client reports the request instead of pretending it sliced. `MaxAge`
+  is a cache hint, not a force-read. There is no locale option: the OPC UA `Read` service has no locale field.
 * **Data-change filters are evaluated by the server.** The Live monitor sends the requested trigger/deadband
   unchanged; whether it is honoured depends on the server and on the variable (a percent deadband needs an
   `EURange` property, and non-numeric values cannot use a deadband). The demo server accepts the filter but does

@@ -269,6 +269,23 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
+## Value read options (verified 2026-11-18)
+
+* `ua.ReadParameters` fields: `MaxAge`, `TimestampsToReturn`, `NodesToRead`. `ua.ReadValueId` fields:
+  `NodeId`, `AttributeId`, `IndexRange`, `DataEncoding`.
+* `Node.read_attribute(attr, indexrange=None, raise_on_bad_status=True)` shows the pattern: it sets
+  `ReadValueId.IndexRange` and calls `self.session.read(params)`. It does **not** set `MaxAge` or
+  `TimestampsToReturn`, so a plain asyncua read leaves both at their defaults (`MaxAge = 0`,
+  `TimestampsToReturn = 0` = `Source`).
+* `ua.TimestampsToReturn` members: `Source`, `Server`, `Both`, `Neither`, `Invalid`.
+* `session.read(params)` returns one `ua.DataValue` per `NodesToRead` entry and does **not** raise on a Bad
+  StatusCode — the caller must inspect `DataValue.StatusCode` (the project decodes it into a status name).
+* **asyncua's demo server accepts `IndexRange` and `TimestampsToReturn` and ignores them**: asking for `1:3` on
+  `ns=2;s=Samples` returns the full array, and `Neither` still returns both timestamps. That is why the client
+  reports the requested options and lets the server be authoritative.
+* `MaxAge` is `uint32` (0 = server cache allowed, max = come from the device); a `QSpinBox` is int32, so the GUI
+  offers up to 2 147 483 647 while the model accepts the full protocol range.
+
 ## Interactive write and method call (verified 2026-11-18)
 
 * `Node.write_value(ua.DataValue(ua.Variant(value, variant_type)))` sends one `WriteRequest`; a Bad result raises
