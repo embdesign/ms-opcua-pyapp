@@ -56,6 +56,9 @@ from ..models import (
     MonitoredItemInfo,
     MonitorStart,
     NamespaceEntry,
+    NodeCreateOutcome,
+    NodeCreateRequest,
+    NodeDeleteOutcome,
     NodeDetails,
     ReferenceInfo,
     Sequence,
@@ -85,6 +88,9 @@ from .browse import (
 from .event_service import LiveEvents, event_id_bytes
 from .history_service import read_history as read_history_impl
 from .monitor_service import LiveMonitor
+from .node_management import build_add_node_item as build_add_node_item_impl
+from .node_management import create_node as create_node_impl
+from .node_management import delete_node as delete_node_impl
 from .nodeset2 import NodeSet2Config, NodeSet2Result, export_nodeset2
 from .path_support import PathRequest, PathResolution, resolve_paths
 from .security import (
@@ -1050,6 +1056,43 @@ class OpcUaService:
             ),
             preview=prepared.text,
         )
+
+    # -- node management ---------------------------------------------------
+    async def node_create_preview(self, request: NodeCreateRequest) -> Inspection:
+        """Validate one AddNodes request without sending it."""
+        client = self._require_client()
+        try:
+            item = await build_add_node_item_impl(client, request.normalised())
+        except OpcUaExplorerError as exc:
+            return Inspection(ok=False, detail=str(exc))
+        normalised = request.normalised()
+        return Inspection(
+            ok=True,
+            detail=(
+                f"would create {normalised.label()} in namespace {item.BrowseName.NamespaceIndex} "
+                "and read the new node back"
+            ),
+            preview=normalised.browse_name,
+        )
+
+    async def create_node(self, request: NodeCreateRequest, *, reference: str = "") -> NodeCreateOutcome:
+        """One operator-requested AddNodes call; the server assigns the NodeId."""
+        client = self._require_client()
+        self._require_session()
+        normalised = request.normalised()
+        authorization = WriteAuthority(
+            AUTHORITY_OPERATOR_DIALOG,
+            reference or f"create {normalised.node_class} {normalised.browse_name}",
+        )
+        return await create_node_impl(client, normalised, authorization=authorization)
+
+    async def delete_node(self, node_id: Any, *, reference: str = "") -> NodeDeleteOutcome:
+        """One operator-requested DeleteNodes call, verified by reading the node afterwards."""
+        client = self._require_client()
+        self._require_session()
+        target = _normalise_node_id(node_id)
+        authorization = WriteAuthority(AUTHORITY_OPERATOR_DIALOG, reference or f"delete {target}")
+        return await delete_node_impl(client, target, authorization=authorization)
 
     async def write_attribute_value(
         self,

@@ -27,7 +27,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-604 tests pass (447 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+626 tests pass (463 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -83,6 +83,14 @@ opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters
 name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
 deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
 lists itself as `urn:opcua-explorer:demo:server`.
+
+**Node management — delivered.** `opcua/node_management.py` is the only module that sends `AddNodes`/`DeleteNodes`:
+`build_add_node_item` (null `RequestedNewNodeId` so the server assigns the id, `Organizes`/`HasComponent` per class,
+variable value parsed with `type_support`), `create_node` (read-back of DisplayName) and `delete_node`
+(`DeleteNodesItem` with `DeleteTargetReferences`, verified by a `BadNodeIdUnknown` read). The **Write & call** page's
+*Node management* group previews, confirms and reports. asyncua's server permits both services for `UserRole.Admin`
+only and answers a non-admin with a **ServiceFault**, so the demo server tests the refusal; the positive tests start
+their own admin server. Do not set `AddNodesItem.TypeDefinition = None` — it breaks request encoding.
 
 **Address-space browse filters — delivered.** `models.BrowseOptions` plus `browse_children(..., options=...)` carry
 reference type, direction, `IncludeSubtypes` and `NodeClassMask` into `BrowseDescription`; the Address space tab's
@@ -198,8 +206,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **447 passed** |
-| Full suite | `uv run pytest -q` | **604 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **463 passed** |
+| Full suite | `uv run pytest -q` | **626 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -213,7 +221,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 604 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 626 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_explorer.opcua import write_service
+from opcua_explorer.opcua import node_management, write_service
 
 #: Modules documented as importing neither asyncua nor Qt (``docs/architecture.md`` §2).
 _PURE_MODULES = (
@@ -51,9 +51,12 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "opcua_explorer"
 
 #: The only module that may send a write, a method call or a restore.
 _SEND_MODULE = "opcua/write_service.py"
+#: The only module that may send AddNodes/DeleteNodes.
+_STRUCTURE_MODULE = "opcua/node_management.py"
 #: The demo server writes its own local model and is never a client.
 _SEND_EXEMPT_PREFIXES = ("demo/",)
 _SEND_ATTRIBUTES = ("write_value", "call_method")
+_STRUCTURE_ATTRIBUTES = ("add_nodes", "delete_nodes")
 
 
 def _send_call_sites() -> dict[str, list[int]]:
@@ -90,6 +93,36 @@ def test_pure_module_imports_neither_asyncua_nor_qt(module: str) -> None:
 def test_only_write_service_sends_writes_and_calls() -> None:
     sites = _send_call_sites()
     assert sites == {}, f"send a write/call through opcua/write_service.py instead: {sites}"
+
+
+def _structure_call_sites() -> dict[str, list[int]]:
+    """Every ``add_nodes(...)`` / ``delete_nodes(...)`` outside the allowed module."""
+    sites: dict[str, list[int]] = {}
+    for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
+        relative = path.relative_to(_PACKAGE_ROOT).as_posix()
+        if relative == _STRUCTURE_MODULE or relative.startswith(_SEND_EXEMPT_PREFIXES):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in _STRUCTURE_ATTRIBUTES:
+                continue
+            sites.setdefault(relative, []).append(node.lineno)
+    return sites
+
+
+def test_only_node_management_sends_add_or_delete_nodes() -> None:
+    sites = _structure_call_sites()
+    assert sites == {}, f"send AddNodes/DeleteNodes through opcua/node_management.py instead: {sites}"
+
+
+def test_node_management_requires_an_authority() -> None:
+    for name in ("create_node", "delete_node"):
+        parameter = inspect.signature(getattr(node_management, name)).parameters.get("authorization")
+        assert parameter is not None, f"{name} must state the authority it sends under"
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, f"{name}: authorization must be keyword-only"
+        assert parameter.default is inspect.Parameter.empty, f"{name}: authorization must not have a default"
 
 
 def test_write_service_stays_transport_neutral() -> None:

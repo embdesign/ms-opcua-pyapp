@@ -95,6 +95,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   belongs to a replaced tree is discarded instead of touching a deleted item. `models.BrowseOptions` +
   `browse.browse_children(..., options=...)` carry the settings; the default browse (forward hierarchical
   references with subtypes) is unchanged, and an unparsable reference-type NodeId is refused locally.
+- **Node management (AddNodes / DeleteNodes)** — the **Write & call** page gains a *Node management* group: create
+  one `Object` or `Variable` below a parent (BrowseName, DisplayName, namespace, and for a variable a DataType plus
+  an initial value parsed with the server's typing) or delete the target node. `opcua/node_management.py` is the
+  only module that sends these services; every request is previewed, confirmed with
+  `operator_text.node_create_confirmation` / `node_delete_confirmation`, sent exactly once under
+  `WriteAuthority("operator-dialog", …)` and verified: a created node is read back (DisplayName) and appears in the
+  parent's children, a deleted node is confirmed gone by reading it. The client never invents a NodeId (a null
+  identifier asks the server to assign one), deletes target references with the node, checks nothing for children
+  and offers no undo. asyncua's server permits both services for `UserRole.Admin` only, so the demo server answers
+  `BadUserAccessDenied`.
 - **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
   in-memory historian, so the History tab can be exercised locally and in tests.
 - **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one

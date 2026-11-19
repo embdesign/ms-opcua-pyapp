@@ -139,6 +139,59 @@ def attribute_write_confirmation(
     return "\n".join(lines)
 
 
+def node_create_confirmation(
+    *,
+    endpoint_url: str,
+    node_class: str,
+    browse_name: str,
+    parent_node_id: str,
+    display_name: str = "",
+    data_type: str = "",
+    value_text: str = "",
+) -> str:
+    """Confirmation body for one AddNodes request from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one node will be created, with a NodeId the server assigns:",
+        f"  CREATE  {node_class} {browse_name!r} below {parent_node_id}",
+    ]
+    if display_name:
+        lines.append(f"  DisplayName: {display_name!r}")
+    if node_class == "Variable" and data_type:
+        lines.append(f"  DataType: {data_type}, initial value {value_text!r}")
+    lines.extend(
+        [
+            "",
+            "This changes the server's address space, not a process value. Servers usually allow node management "
+            "for administrators only, so a refusal is reported with its StatusCode. One node is created — no "
+            "children, no references and no batch — and it is read back afterwards. Nothing is retried.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def node_delete_confirmation(*, endpoint_url: str, node_id: str) -> str:
+    """Confirmation body for one DeleteNodes request from the Write & call tab."""
+    return "\n".join(
+        [
+            f"Endpoint: {endpoint_url}",
+            "",
+            "Exactly one node will be deleted:",
+            f"  DELETE  {node_id}",
+            "",
+            "This removes the node from the server's address space. Deleting a node that still has children or "
+            "that a running process depends on can break the server or the process; the client does not check "
+            "for children first and does not offer an undo. References to the node are deleted with it, one "
+            "request only, never retried.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+
+
 def acknowledge_condition_confirmation(
     *, endpoint_url: str, condition_node_id: str, event_id: str, comment: str
 ) -> str:

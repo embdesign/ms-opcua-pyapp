@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -31,13 +32,23 @@ from PySide6.QtWidgets import (
 
 from ...errors import InvalidNodeIdError
 from ...formatting import flatten_for_csv
-from ...models import WRITABLE_TEXT_ATTRIBUTES, NodeDetails, ValueSnapshot
+from ...models import (
+    CREATABLE_NODE_CLASSES,
+    WRITABLE_TEXT_ATTRIBUTES,
+    NodeCreateOutcome,
+    NodeCreateRequest,
+    NodeDeleteOutcome,
+    NodeDetails,
+    ValueSnapshot,
+)
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...opcua.write_service import AttributeWriteOutcome, CallOutcome, Inspection, WriteResult
 from ...operator_text import (
     attribute_write_confirmation,
     method_call_confirmation,
+    node_create_confirmation,
+    node_delete_confirmation,
     write_value_confirmation,
 )
 from ..async_runner import AsyncRunner
@@ -181,6 +192,68 @@ class WriteCallTab(QWidget):
         self.attribute_status_label.setWordWrap(True)
         attribute_layout.addWidget(self.attribute_status_label)
         layout.addWidget(attribute_box)
+
+        # Node management ---------------------------------------------------
+        node_box = QGroupBox("Node management (structure)")
+        node_layout = QVBoxLayout(node_box)
+        parent_row = QHBoxLayout()
+        self.parent_edit = QLineEdit()
+        self.parent_edit.setPlaceholderText("parent NodeId, e.g. i=85 or ns=2;s=Plant")
+        self.node_class_combo = QComboBox()
+        self.node_class_combo.addItems(list(CREATABLE_NODE_CLASSES))
+        self.browse_name_edit = QLineEdit()
+        self.browse_name_edit.setPlaceholderText("BrowseName of the new node")
+        self.display_name_edit = QLineEdit()
+        self.display_name_edit.setPlaceholderText("DisplayName (default: the BrowseName)")
+        parent_row.addWidget(QLabel("Parent:"))
+        parent_row.addWidget(self.parent_edit, 2)
+        parent_row.addWidget(QLabel("Class:"))
+        parent_row.addWidget(self.node_class_combo)
+        parent_row.addWidget(QLabel("BrowseName:"))
+        parent_row.addWidget(self.browse_name_edit, 1)
+        node_layout.addLayout(parent_row)
+
+        detail_row = QHBoxLayout()
+        self.namespace_spin = QSpinBox()
+        self.namespace_spin.setRange(-1, 255)
+        self.namespace_spin.setValue(-1)
+        self.namespace_spin.setSpecialValueText("parent namespace")
+        self.namespace_spin.setToolTip("Namespace of the BrowseName; the NodeId is always assigned by the server.")
+        self.node_data_type_edit = QLineEdit("i=11")
+        self.node_data_type_edit.setToolTip("DataType NodeId of a new Variable, e.g. i=11 (Double).")
+        self.node_value_edit = QLineEdit("0")
+        self.node_value_edit.setToolTip("Initial value of a new Variable, parsed with the server's DataType.")
+        self.create_node_btn = QPushButton("Create node…")
+        self.create_node_btn.clicked.connect(self._on_create_node)
+        self.delete_node_btn = QPushButton("Delete target node…")
+        self.delete_node_btn.setToolTip("Delete the NodeId in the target field above.")
+        self.delete_node_btn.clicked.connect(self._on_delete_node)
+        detail_row.addWidget(QLabel("DisplayName:"))
+        detail_row.addWidget(self.display_name_edit, 1)
+        detail_row.addWidget(QLabel("Namespace:"))
+        detail_row.addWidget(self.namespace_spin)
+        detail_row.addWidget(QLabel("DataType:"))
+        detail_row.addWidget(self.node_data_type_edit)
+        detail_row.addWidget(QLabel("Value:"))
+        detail_row.addWidget(self.node_value_edit)
+        node_layout.addLayout(detail_row)
+
+        node_action = QHBoxLayout()
+        node_note = QLabel(
+            "One node per request, with a NodeId the server assigns and a read-back. Servers usually allow node "
+            "management for administrators only; a deletion is neither checked for children nor undoable."
+        )
+        node_note.setObjectName("hintLabel")
+        node_note.setWordWrap(True)
+        node_action.addWidget(node_note, 1)
+        node_action.addWidget(self.create_node_btn)
+        node_action.addWidget(self.delete_node_btn)
+        node_layout.addLayout(node_action)
+        self.node_status_label = QLabel("Nothing created or deleted.")
+        self.node_status_label.setObjectName("hintLabel")
+        self.node_status_label.setWordWrap(True)
+        node_layout.addWidget(self.node_status_label)
+        layout.addWidget(node_box)
 
         # Method call -------------------------------------------------------
         call_box = QGroupBox("Call method")
@@ -471,6 +544,122 @@ class WriteCallTab(QWidget):
         if not passed:
             self.attribute_status_label.setStyleSheet(f"color: {ERROR};")
 
+    # -- node management ---------------------------------------------------
+    def _node_request(self) -> NodeCreateRequest:
+        return NodeCreateRequest(
+            parent_node_id=self.parent_edit.text(),
+            browse_name=self.browse_name_edit.text(),
+            node_class=self.node_class_combo.currentText(),
+            display_name=self.display_name_edit.text(),
+            data_type=self.node_data_type_edit.text(),
+            value_text=self.node_value_edit.text(),
+            namespace_index=int(self.namespace_spin.value()),
+        ).normalised()
+
+    def _on_create_node(self) -> None:
+        if self._busy or not self._service.is_connected:
+            return
+        request = self._node_request()
+        if not request.parent_node_id:
+            self._set_status("Enter the parent NodeId for the new node.", error=True)
+            return
+        if not request.browse_name:
+            self._set_status("Enter a BrowseName for the new node.", error=True)
+            return
+        self._start(f"Checking whether {request.browse_name!r} can be created…")
+        self._runner.submit(
+            lambda: self._service.node_create_preview(request),
+            on_done=lambda inspection: self._confirm_create_node(request, inspection),
+            on_error=lambda message: self._failed("Checking the node creation", message),
+        )
+
+    def _confirm_create_node(self, request: NodeCreateRequest, inspection: Inspection) -> None:
+        if not inspection.ok:
+            self._node_status(False, f"Nothing was created: {inspection.detail}")
+            self._finish("The node creation was refused before sending.")
+            return
+        text = node_create_confirmation(
+            endpoint_url=self._service.endpoint_url,
+            node_class=request.node_class,
+            browse_name=request.browse_name,
+            parent_node_id=request.parent_node_id,
+            display_name=request.display_name,
+            data_type=request.data_type,
+            value_text=request.value_text,
+        )
+        if not ask_confirmation(self, "Confirm node creation", text):
+            self._node_status(False, "Node creation cancelled; nothing was sent.")
+            self._finish("Cancelled.")
+            return
+        self._start(f"Creating {request.browse_name!r} below {request.parent_node_id}…")
+        self._runner.submit(
+            lambda: self._service.create_node(
+                request, reference=f"create {request.node_class} {request.browse_name}"
+            ),
+            on_done=self._show_create_node,
+            on_error=lambda message: self._failed("The node creation", message),
+        )
+
+    def _show_create_node(self, outcome: NodeCreateOutcome) -> None:
+        passed = outcome.status == "passed"
+        self._node_status(passed, outcome.summary_text())
+        self._set_result(
+            [
+                f"create: {outcome.status_code or outcome.status}",
+                f"new node: {outcome.node_id or '-'}",
+                f"read back: {outcome.read_back_name or '-'}",
+                f"verified: {outcome.verified}",
+                f"sent: {'yes' if outcome.sent else 'no'}",
+                f"duration: {outcome.duration_ms:.0f} ms",
+                f"authority: {outcome.authorization.describe() if outcome.authorization else '-'}",
+            ]
+        )
+        _logger.info("Node creation: %s", outcome.summary_text())
+        self._finish("Node creation completed.")
+        if passed and outcome.node_id:
+            self.node_edit.setText(outcome.node_id)
+
+    def _on_delete_node(self) -> None:
+        if self._busy or not self._service.is_connected:
+            return
+        canonical = self._canonical(self.node_edit.text(), "the node field")
+        if canonical is None:
+            return
+        text = node_delete_confirmation(endpoint_url=self._service.endpoint_url, node_id=canonical)
+        if not ask_confirmation(self, "Confirm node deletion", text):
+            self._node_status(False, "Node deletion cancelled; nothing was sent.")
+            self._finish("Cancelled.")
+            return
+        self._start(f"Deleting {canonical}…")
+        self._runner.submit(
+            lambda: self._service.delete_node(canonical, reference=f"delete {canonical}"),
+            on_done=self._show_delete_node,
+            on_error=lambda message: self._failed("The node deletion", message),
+        )
+
+    def _show_delete_node(self, outcome: NodeDeleteOutcome) -> None:
+        passed = outcome.status == "passed"
+        self._node_status(passed, outcome.summary_text())
+        self._set_result(
+            [
+                f"delete: {outcome.status_code or outcome.status}",
+                f"node: {outcome.node_id}",
+                f"verified gone: {outcome.verified}",
+                f"sent: {'yes' if outcome.sent else 'no'}",
+                f"duration: {outcome.duration_ms:.0f} ms",
+                f"authority: {outcome.authorization.describe() if outcome.authorization else '-'}",
+            ]
+        )
+        _logger.info("Node deletion: %s", outcome.summary_text())
+        self._finish("Node deletion completed.")
+
+    def _node_status(self, passed: bool, message: str) -> None:
+        self.node_status_label.setText(("" if passed else "⚠ ") + message)
+        self.node_status_label.setObjectName("hintLabel" if passed else "errorLabel")
+        self._restyle(self.node_status_label)
+        if not passed:
+            self.node_status_label.setStyleSheet(f"color: {ERROR};")
+
     # -- method call -------------------------------------------------------
     def _on_read_signature(self) -> None:
         if self._busy or not self._service.is_connected:
@@ -641,5 +830,14 @@ class WriteCallTab(QWidget):
             self.attribute_edit,
             self.load_attribute_btn,
             self.attribute_write_btn,
+            self.parent_edit,
+            self.node_class_combo,
+            self.browse_name_edit,
+            self.display_name_edit,
+            self.namespace_spin,
+            self.node_data_type_edit,
+            self.node_value_edit,
+            self.create_node_btn,
+            self.delete_node_btn,
         ):
             widget.setEnabled(enabled)

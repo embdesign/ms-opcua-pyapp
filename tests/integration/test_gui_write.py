@@ -152,3 +152,60 @@ def test_attribute_write_group_reports_the_server_refusal(qapp, tmp_path, monkey
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_node_management_group_reports_the_server_refusal(qapp, tmp_path, monkeypatch) -> None:
+    port = free_port()
+    server = start_demo_server(port, "--no-updates")
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    asked: list[str] = []
+    answer = {"yes": True}
+
+    def fake_confirm(parent, title, text):  # noqa: ANN001 - test double
+        asked.append(title)
+        return answer["yes"]
+
+    monkeypatch.setattr(write_tab_module, "ask_confirmation", fake_confirm)
+    window.show()
+    try:
+        connect_window(window, port, qapp)
+        tab = window.write_tab
+        window.show_tab(tab)
+
+        # A missing parent never reaches the confirmation dialog.
+        tab.parent_edit.setText("")
+        tab.browse_name_edit.setText("NotAllowed")
+        tab.create_node_btn.click()
+        assert _pump(qapp, lambda: "Enter the parent NodeId" in tab.status_label.text())
+        assert asked == []
+
+        # Declining the confirmation sends nothing.
+        answer["yes"] = False
+        tab.parent_edit.setText("ns=2;s=Plant")
+        _run(qapp, tab, tab.create_node_btn, lambda: "cancelled" in tab.node_status_label.text())
+        assert asked == ["Confirm node creation"]
+
+        # The demo server allows node management for administrators only.
+        answer["yes"] = True
+        _run(qapp, tab, tab.create_node_btn, lambda: "BadUserAccessDenied" in tab.node_status_label.text())
+        assert "create: BadUserAccessDenied" in tab.result_view.text()
+        assert "sent: yes" in tab.result_view.text()
+
+        # Deleting a node is refused by the same server.
+        tab.node_edit.setText("ns=2;s=Temperature")
+        _run(
+            qapp,
+            tab,
+            tab.delete_node_btn,
+            lambda: "delete: BadUserAccessDenied" in tab.result_view.text(),
+        )
+        assert "verified gone: None" in tab.result_view.text()
+        assert asked[-1] == "Confirm node deletion"
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)

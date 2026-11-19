@@ -9,6 +9,7 @@ __all__ = [
     "event_service",
     "history_service",
     "monitor_service",
+    "node_management",
     "nodeset2",
     "security",
     "serialize",

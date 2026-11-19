@@ -314,7 +314,6 @@ async def write_attribute_value(
     return await send_prepared_attribute_write(prepared, authorization=authorization)
 
 
-
 @dataclass(slots=True)
 class PreparedCall:
     """A validated method call, including the signature read from ``InputArguments``."""

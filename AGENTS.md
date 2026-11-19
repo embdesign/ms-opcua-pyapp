@@ -20,8 +20,8 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 604 passed (≈8–15 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 447 passed, ~4 s
+uv run pytest -q                           # full suite, 626 passed (≈8–15 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 463 passed, ~4 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -96,12 +96,16 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   add another path that parses and sends a value.
   Every sending function requires a keyword-only `authorization: WriteAuthority` (no default), so a write can
   never be sent without naming the operator dialog or the sequence document that asked for it.
+- **AddNodes/DeleteNodes live only in `opcua/node_management.py`** (`build_add_node_item` → `create_node`,
+  `delete_node`), reached through `OpcUaService.node_create_preview` / `create_node` / `delete_node`. No other
+  module may call `add_nodes`/`delete_nodes`; the boundary test enforces it and requires the same keyword-only
+  `authorization`. One node per request, a server-assigned NodeId, no child check, no batch, no undo, no retry.
 - `gui/tabs/write_tab.py` is a thin surface over `OpcUaService.write_preview` / `write_node_value` /
-  `method_signature` / `call_preview` / `invoke_method` / `attribute_write_preview` / `write_attribute_value`. Its
-  confirmation text lives in `operator_text
-  .write_value_confirmation` / `method_call_confirmation` / `attribute_write_confirmation`, and `ask_confirmation`
-  stays a module-level function so tests can stub the dialog. Never bypass the preview: a refused value must not
-  reach a confirmation dialog.
+  `method_signature` / `call_preview` / `invoke_method` / `attribute_write_preview` /
+  `write_attribute_value` / `node_create_preview` / `create_node` / `delete_node`. Its confirmation text lives in
+  `operator_text.write_value_confirmation` / `method_call_confirmation` / `attribute_write_confirmation` /
+  `node_create_confirmation` / `node_delete_confirmation`, and `ask_confirmation` stays a module-level function so
+  tests can stub the dialog. Never bypass the preview: a refused value must not reach a confirmation dialog.
   `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
   `write_service.py` (the demo server excepted), and no default for `authorization`.
 - Condition acknowledgement is the **only** action of the Events tab: one `Acknowledge` method call through

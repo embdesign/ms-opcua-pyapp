@@ -269,6 +269,24 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
+## Node management (verified 2026-11-19)
+
+* `UaClient.add_nodes(items: list[ua.AddNodesItem]) -> list[ua.AddNodesResult]` and
+  `UaClient.delete_nodes(params: ua.DeleteNodesParameters) -> list[ua.StatusCode]`. There is **no**
+  `Client.add_nodes`/`Client.delete_nodes`; the calls go through `client.uaclient`.
+* `ua.AddNodesItem` fields: `ParentNodeId`, `ReferenceTypeId`, `RequestedNewNodeId`, `BrowseName`, `NodeClass`,
+  `NodeAttributes`, `TypeDefinition`. `ua.AddNodesResult.AddedNodeId` is the NodeId the server assigned.
+* **Leave `TypeDefinition` at its default.** Assigning `None` breaks request encoding
+  (`AttributeError: 'NoneType' object has no attribute 'NodeIdType'`); an unset field serialises as a null NodeId.
+* A `RequestedNewNodeId` with a **null identifier** (`ua.NodeId(0, namespace_index)`) asks asyncua's server to
+  generate an id in that namespace — the project's only way of choosing an id.
+* `ua.DeleteNodesParameters.NodesToDelete` is a list of **`ua.DeleteNodesItem`** (`NodeId`,
+  `DeleteTargetReferences`), not of NodeIds; the `DeleteTargetReferences` flag lives on the item.
+* asyncua's server implements both services for `UserRole.Admin` **only** (`NodeManagementService`); any other role
+  is answered with a **ServiceFault** `BadUserAccessDenied`, which surfaces as a raised `ua.UaStatusCodeError`
+  rather than a per-node StatusCode.
+* After a good delete, reading the node raises `BadNodeIdUnknown` — the project uses that as the verification.
+
 ## Browse filters (verified 2026-11-18)
 
 * `ua.BrowseParameters` = `View`, `RequestedMaxReferencesPerNode`, `NodesToBrowse`; `ua.BrowseDescription` =

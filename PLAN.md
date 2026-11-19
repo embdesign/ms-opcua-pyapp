@@ -19,6 +19,7 @@ covered by tests, including the device-independent sequence runner for operator-
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
 | History | Raw `HistoryRead` of one variable with an optional From/To range and a value cap; continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, and a non-historizing node is reported as such instead of as an error |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below) |
+| Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page; admin-only on `UserRole.Admin` servers |
 | Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
 | Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict tolerance, value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
@@ -59,8 +60,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 604 passed, ~8–15 min
-uv run pytest tests/unit -q       # 447 passed, ~4 s
+uv run pytest -q                  # 626 passed, ~8–15 min
+uv run pytest tests/unit -q       # 463 passed, ~4 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -71,6 +72,8 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 ## 4. Deliberate limitations
 
+- Node management is one node per request, never a batch: no child check before a delete, no undo, no reference
+  editing, and servers usually restrict it to administrators.
 - Browse filters (reference type, direction, subtypes, `NodeClassMask`) are requests; the tree is a navigation
   aid and an export always uses the unfiltered hierarchical traversal.
 - A value read's `IndexRange`, `MaxAge` and `TimestampsToReturn` are requests: the NumericRange is validated

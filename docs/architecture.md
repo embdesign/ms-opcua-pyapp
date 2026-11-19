@@ -564,6 +564,22 @@ step asks for it and is read back. `cli_sequence.py` (`opcua-run-sequence`) is t
 same service call. The project stores the document path and inputs (project version 2; version 1 still loads);
 opening a project never loads or runs a sequence.
 
+### Node management
+
+`opcua/node_management.py` is the only module that sends **AddNodes** or **DeleteNodes** (enforced by
+`tests/unit/test_layer_boundaries.py`, like the write path):
+
+* `build_add_node_item()` turns a `models.NodeCreateRequest` into one `AddNodesItem`: parent, reference type
+  (`Organizes` for an Object, `HasComponent` for a Variable), `RequestedNewNodeId` with a **null identifier** (the
+  server assigns it), and `Object`/`VariableAttributes`. A variable's initial value is parsed with the server's
+  DataType/ValueRank through `type_support`, so a mismatch is refused before anything is sent.
+* `create_node()` sends one request, then reads the new node's DisplayName and compares it with the request;
+  `delete_node()` sends one `DeleteNodesItem` with `DeleteTargetReferences=True` and verifies the node is gone
+  (a BadNodeIdUnknown on read is the proof of success).
+* Every send requires a keyword-only `authorization: WriteAuthority`; the GUI previews, confirms and reports.
+  There is no batch, no child check, no undo and no retry; a ServiceFault (`BadUserAccessDenied` for a non-admin
+  identity) is surfaced with its StatusCode.
+
 ## 12. Deliberate limitations
 
 * History is raw only: no processed/aggregate read, no read-at-time, no event history and no `HistoryUpdate`;
