@@ -42,6 +42,7 @@ from ..logging_setup import register_secret
 from ..models import (
     AUTHORITY_OPERATOR_DIALOG,
     AddressSpace,
+    BrowseOptions,
     ChildEntry,
     ConnectionInfo,
     DiscoveredServer,
@@ -655,9 +656,16 @@ class OpcUaService:
         return await read_history_impl(session, node_id, config)
 
     # -- browsing ----------------------------------------------------------
-    async def browse_children(self, node_id: Any, *, follow_subtypes: bool = True) -> list[ChildEntry]:
+    async def browse_children(
+        self, node_id: Any, *, follow_subtypes: bool = True, options: BrowseOptions | None = None
+    ) -> list[ChildEntry]:
         session = self._require_session()
-        return await browse_children_impl(session, _normalise_node_id(node_id), follow_subtypes=follow_subtypes)
+        return await browse_children_impl(
+            session,
+            _normalise_node_id(node_id),
+            follow_subtypes=follow_subtypes,
+            options=options,
+        )
 
     async def resolve_browse_paths(self, requests: list[PathRequest]) -> list[PathResolution]:
         """Resolve browse paths with TranslateBrowsePathsToNodeIds on the current session.

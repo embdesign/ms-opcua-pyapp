@@ -235,7 +235,8 @@ class ConnectionTab(QWidget):
         layout.addWidget(identity_box)
 
         # Certificates -----------------------------------------------------
-        cert_box = QGroupBox("Client certificate & private key")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        cert_box = QGroupBox("Client certificate && private key")
         cert_layout = QGridLayout(cert_box)
         cert_layout.setColumnStretch(1, 1)
         self.cert_edit = QLineEdit()

@@ -269,6 +269,19 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
 
+## Browse filters (verified 2026-11-18)
+
+* `ua.BrowseParameters` = `View`, `RequestedMaxReferencesPerNode`, `NodesToBrowse`; `ua.BrowseDescription` =
+  `NodeId`, `BrowseDirection`, `ReferenceTypeId`, `IncludeSubtypes`, `NodeClassMask`, `ResultMask`.
+* `ua.BrowseDirection` members: `Forward`, `Inverse`, `Both`; `ua.NodeClassMask` is a bit mask built from
+  `ua.NodeClass` values (Object=1, Variable=2, Method=4, ObjectType=8, VariableType=16, ReferenceType=32,
+  DataType=64, View=128).
+* asyncua's demo server **does** honour `ReferenceTypeId`, `IncludeSubtypes`, `NodeClassMask` and
+  `BrowseDirection` (verified: `Organizes` under `Objects`, `NodeClassMask=2` under `Line1`, `Inverse` under
+  `Plant`), unlike `IndexRange`/`TimestampsToReturn`, which it ignores.
+* `ua.NodeId.from_string()` raises `ua.UaStringParsingError` for a malformed string; the project maps that to
+  `InvalidNodeIdError` so a typo never becomes an asyncua exception at the socket layer.
+
 ## Metadata attribute writes (verified 2026-11-18)
 
 * `Node.write_attribute(attr, ua.DataValue(ua.Variant(ua.LocalizedText(Text=..., Locale=...),

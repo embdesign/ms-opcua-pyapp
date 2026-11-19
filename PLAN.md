@@ -10,15 +10,15 @@ covered by tests, including the device-independent sequence runner for operator-
 |---|---|
 | Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
-| Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
+| Address space | Lazy tree from Root/Objects or any NodeId with a browse filter (reference type, direction, include subtypes, `NodeClassMask`), attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
 | Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event (no `Confirm`/`Enable`, never retried) |
-| Server status | One read-only batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
-| History | Read-only raw `HistoryRead` of one variable with an optional From/To range and a value cap; continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, and a non-historizing node is reported as such instead of as an error |
-| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), read-only by default |
+| Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
+| History | Raw `HistoryRead` of one variable with an optional From/To range and a value cap; continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, and a non-historizing node is reported as such instead of as an error |
+| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below) |
 | Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
 | Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict tolerance, value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
@@ -59,8 +59,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 571 passed, ~8 min
-uv run pytest tests/unit -q       # 427 passed, ~4 s
+uv run pytest -q                  # 604 passed, ~8–15 min
+uv run pytest tests/unit -q       # 447 passed, ~4 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -71,15 +71,17 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 ## 4. Deliberate limitations
 
+- Browse filters (reference type, direction, subtypes, `NodeClassMask`) are requests; the tree is a navigation
+  aid and an export always uses the unfiltered hierarchical traversal.
 - A value read's `IndexRange`, `MaxAge` and `TimestampsToReturn` are requests: the NumericRange is validated
   locally, but the server decides whether it slices, caches or returns the timestamps it was asked for.
-- The server directory is read-only: one `FindServers` call per request on a temporary unencrypted channel.
+- The server directory is a lookup only: one `FindServers` call per request on a temporary unencrypted channel.
   Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
   no `RegisterServer` and no automatic connection to a found application.
 - Values are point-in-time reads; history is raw only (no processed/aggregate read, no read-at-time, no event
   history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
   returned.
-- Events are notifications, not alarm management: sources are subscribed read-only and the only action is one
+- Events are notifications, not alarm management: sources are subscription-only and the only action is one
   operator-confirmed `Acknowledge` method call for a selected condition event (`ConditionType` subscription,
   no `Confirm`/`Enable`/`AddComment`, no retry, no automatic acknowledgement, no `ConditionRefresh`, no event
   history). Event sources are session state.
@@ -132,7 +134,7 @@ code enforces only mechanical rules.
 | Part | Content |
 |---|---|
 | `inputs` | Parameters substituted into step texts as `${name}`; values come from the document, the project or a CLI argument |
-| `preconditions` | Steps that run before the gate; usually read-only checks such as `assert` / `wait_until`, plus an optional `ensure` that may write a prerequisite |
+| `preconditions` | Steps that run before the gate; usually verification checks such as `assert` / `wait_until`, plus an optional `ensure` that may write a prerequisite |
 | `gate` | Operator-defined `on` steps, optional `verify` step, optional `keepalive` step with interval and failure policy, and `off` steps |
 | `steps` | The body: `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until` |
 

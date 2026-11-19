@@ -136,7 +136,8 @@ class ExportTab(QWidget):
         self.subtree_radio.toggled.connect(self._sync_scope)
         layout.addWidget(scope_box)
 
-        limits_box = QGroupBox("Limits & batching")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        limits_box = QGroupBox("Limits && batching")
         limits_layout = QFormLayout(limits_box)
         self.max_nodes_spin = QSpinBox()
         self.max_nodes_spin.setRange(0, 1_000_000)

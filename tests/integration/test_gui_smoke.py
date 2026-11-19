@@ -72,7 +72,8 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
         assert window.tabs.tabText(0).startswith("Session 1")
         assert window.tabs.tabText(1) == "All monitors"
         assert window.tabs.tabText(2) == "Compare"
-        assert window.tabs.tabText(3) == "Logs & reports"
+        # Qt needs '&&' to draw a literal '&'; tabText() returns it unprocessed.
+        assert window.tabs.tabText(3) == "Logs && reports"
         # "All sessions" + the one open session.
         assert window.unified_monitor_tab.filter_combo.count() == 2
         workspace = window.workspaces[0]
@@ -83,7 +84,7 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
             "Live monitor",
             "Events",
             "History",
-            "Write & call",
+            "Write && call",
             "Server",
             "Tests",
             "Sequences",

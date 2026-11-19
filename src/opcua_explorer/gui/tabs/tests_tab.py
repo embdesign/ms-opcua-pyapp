@@ -159,7 +159,8 @@ class TestsTab(QWidget):
         target_layout.addRow("Variable node:", variable_row)
         layout.addWidget(target_box)
 
-        timing_box = QGroupBox("Timing & sampling")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        timing_box = QGroupBox("Timing && sampling")
         timing_layout = QFormLayout(timing_box)
         self.publishing_spin = QDoubleSpinBox()
         self.publishing_spin.setRange(50.0, 60_000.0)
@@ -237,7 +238,8 @@ class TestsTab(QWidget):
 
     def _build_guarded_box(self) -> QWidget:
         """Opt-in write / method-call configuration."""
-        box = QGroupBox("Guarded write & method call (optional)")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        box = QGroupBox("Guarded write && method call (optional)")
         layout = QVBoxLayout(box)
 
         warning = QLabel(EQUIPMENT_WARNING)

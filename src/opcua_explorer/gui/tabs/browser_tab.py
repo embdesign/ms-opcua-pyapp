@@ -12,6 +12,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -33,9 +34,13 @@ from PySide6.QtWidgets import (
 from ...defaults import DEFAULT_READ_MAX_AGE_MS, MAX_READ_MAX_AGE_MS
 from ...errors import InvalidNodeIdError
 from ...models import (
+    BROWSE_DIRECTIONS,
+    BROWSE_NODE_CLASSES,
+    BROWSE_REFERENCE_TYPES,
     TIMESTAMPS_TO_RETURN,
     AddressSpace,
     AttributeResult,
+    BrowseOptions,
     NodeDetails,
     ValueReadOptions,
     ValueReadResult,
@@ -98,6 +103,10 @@ class BrowserTab(QWidget):
         self._matches: list[str] = []
         self._match_index = 0
         self._current_node_id: str | None = None
+        #: NodeId of the tree root currently displayed (reloaded by the browse filter).
+        self._root_node_id: str = ""
+        #: Bumped whenever the tree is replaced, so late browse results are ignored.
+        self._tree_generation: int = 0
         #: Suffix of the last explicit value read (duration + options).
         self._value_read_note: str = ""
         #: NodeIds in this session's live-monitor list, marked with ●/○ in the tree.
@@ -166,6 +175,31 @@ class BrowserTab(QWidget):
         self.download_btn.clicked.connect(self._on_download_requested)
         toolbar.addWidget(self.download_btn)
         layout.addLayout(toolbar)
+
+        filter_row = QHBoxLayout()
+        self.browse_type_combo = QComboBox()
+        for label, node_id in BROWSE_REFERENCE_TYPES:
+            self.browse_type_combo.addItem(label, node_id)
+        self.browse_direction_combo = QComboBox()
+        self.browse_direction_combo.addItems(list(BROWSE_DIRECTIONS))
+        self.browse_subtypes_check = QCheckBox("Include subtypes")
+        self.browse_subtypes_check.setChecked(True)
+        self.browse_class_combo = QComboBox()
+        for label, mask in BROWSE_NODE_CLASSES:
+            self.browse_class_combo.addItem(label, mask)
+        self.browse_apply_btn = QPushButton("Apply filter")
+        self.browse_apply_btn.setToolTip("Clear the loaded tree and browse the start node again with these filters.")
+        self.browse_apply_btn.clicked.connect(self._on_apply_browse_filter)
+        filter_row.addWidget(QLabel("References:"))
+        filter_row.addWidget(self.browse_type_combo)
+        filter_row.addWidget(self.browse_direction_combo)
+        filter_row.addWidget(self.browse_subtypes_check)
+        filter_row.addSpacing(8)
+        filter_row.addWidget(QLabel("Node class:"))
+        filter_row.addWidget(self.browse_class_combo)
+        filter_row.addWidget(self.browse_apply_btn)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         splitter = QSplitter(Qt.Horizontal)
 
@@ -323,6 +357,28 @@ class BrowserTab(QWidget):
         if node_id:
             self.load_node(str(node_id))
 
+    # -- browse filter -----------------------------------------------------
+    def browse_options(self) -> BrowseOptions:
+        """The filters currently selected for the tree."""
+        return BrowseOptions(
+            reference_type=str(self.browse_type_combo.currentData() or "i=33"),
+            include_subtypes=self.browse_subtypes_check.isChecked(),
+            direction=self.browse_direction_combo.currentText(),
+            node_class_mask=int(self.browse_class_combo.currentData() or 0),
+        ).normalised()
+
+    def _browse_options(self) -> BrowseOptions:
+        return self.browse_options()
+
+    def _on_apply_browse_filter(self) -> None:
+        """Reload the tree with the selected filters."""
+        if not self._service.is_connected:
+            self._set_status("Connect to a server first.", error=True)
+            return
+        options = self.browse_options()
+        self.load_node(self._root_node_id or self.start_node())
+        self._set_status(f"Browsing with {options.label()}.")
+
     def start_node(self) -> str:
         """The configured start NodeId (fixed entry or a custom one)."""
         return str(self.start_combo.currentData() or self.node_id_edit.text().strip() or "i=85")
@@ -354,6 +410,9 @@ class BrowserTab(QWidget):
         self.tree.clear()
         item = self._make_item(canonical, canonical, "")
         self.tree.addTopLevelItem(item)
+        self._root_node_id = canonical
+        self._tree_generation += 1
+        self._loading.clear()
         item.setExpanded(True)
         self.tree.setCurrentItem(item)
         self._set_status(f"Loading {canonical}…")
@@ -442,31 +501,45 @@ class BrowserTab(QWidget):
         if not self._service.is_connected:
             return
         self._loading.add(node_id)
+        generation = self._tree_generation
         self._submit(
-            lambda: self._service.browse_children(str(node_id)),
-            on_done=lambda children: self._on_children(item, str(node_id), children),
-            on_error=lambda message: self._on_children_error(item, str(node_id), message),
+            lambda: self._service.browse_children(str(node_id), options=self._browse_options()),
+            on_done=lambda children: self._on_children(item, str(node_id), children, generation=generation),
+            on_error=lambda message: self._on_children_error(item, str(node_id), message, generation=generation),
         )
 
-    def _on_children(self, item: QTreeWidgetItem, node_id: str, children: list[Any]) -> None:
+    def _is_stale(self, generation: int) -> bool:
+        """True when the tree was replaced while a browse was in flight."""
+        return generation != self._tree_generation
+
+    def _on_children(
+        self, item: QTreeWidgetItem, node_id: str, children: list[Any], *, generation: int | None = None
+    ) -> None:
         self._loading.discard(node_id)
-        if not item or item.data(0, ITEM_NODE_ID) != node_id:
+        if generation is not None and self._is_stale(generation):
             return
-        item.takeChildren()
-        item.setData(0, ITEM_LOADED, True)
-        for child in children:
-            child_item = QTreeWidgetItem(
-                [child.display_name or child.browse_name or child.node_id, child.node_class, child.node_id]
-            )
-            child_item.setData(0, ITEM_NODE_ID, child.node_id)
-            child_item.setData(0, ITEM_LOADED, False)
-            child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-            tooltip = self._child_tooltip(child)
-            child_item.setToolTip(0, tooltip)
-            self._decorate_item(child_item, child.node_id)
-            item.addChild(child_item)
-        if not children:
-            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+        try:
+            if not item or item.data(0, ITEM_NODE_ID) != node_id:
+                return
+            item.takeChildren()
+            item.setData(0, ITEM_LOADED, True)
+            for child in children:
+                child_item = QTreeWidgetItem(
+                    [child.display_name or child.browse_name or child.node_id, child.node_class, child.node_id]
+                )
+                child_item.setData(0, ITEM_NODE_ID, child.node_id)
+                child_item.setData(0, ITEM_LOADED, False)
+                child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                tooltip = self._child_tooltip(child)
+                child_item.setToolTip(0, tooltip)
+                self._decorate_item(child_item, child.node_id)
+                item.addChild(child_item)
+            if not children:
+                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+        except RuntimeError:
+            # The tree (and with it this item) was replaced while the browse was
+            # in flight - a filter change or a reload. The result is obsolete.
+            return
         self._set_status(f"{len(children)} child node(s) read from {node_id}.")
 
     @staticmethod
@@ -478,13 +551,20 @@ class BrowserTab(QWidget):
             text += "\n(merged: the server referenced this node more than once)"
         return text
 
-    def _on_children_error(self, item: QTreeWidgetItem, node_id: str, message: str) -> None:
+    def _on_children_error(
+        self, item: QTreeWidgetItem, node_id: str, message: str, *, generation: int | None = None
+    ) -> None:
         self._loading.discard(node_id)
-        if item:
-            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
-            item.setData(0, ITEM_BASE_TOOLTIP, message)
-            item.setToolTip(0, message)
-            self._decorate_item(item, node_id)
+        if generation is not None and self._is_stale(generation):
+            return
+        try:
+            if item:
+                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+                item.setData(0, ITEM_BASE_TOOLTIP, message)
+                item.setToolTip(0, message)
+                self._decorate_item(item, node_id)
+        except RuntimeError:
+            return
         _logger.warning("Browsing %s failed: %s", node_id, message)
         self._set_status(f"Browsing {node_id} failed: {message}", error=True)
 

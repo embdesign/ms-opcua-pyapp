@@ -77,7 +77,9 @@ class MainWindow(QMainWindow):
         self.add_session(service)
         self.tabs.addTab(self.unified_monitor_tab, "All monitors")
         self.tabs.addTab(self.compare_tab, "Compare")
-        self.tabs.addTab(self.logs_tab, "Logs & reports")
+        # Tab labels are drawn with Qt::TextShowMnemonic: '&&' is one literal '&',
+        # a bare '&' would be swallowed as a mnemonic marker ("Logs _reports").
+        self.tabs.addTab(self.logs_tab, "Logs && reports")
         for fixed in (self.unified_monitor_tab, self.compare_tab, self.logs_tab):
             self._disable_close_button(self.tabs.indexOf(fixed))
         self.compare_tab.message.connect(self._on_message)
@@ -350,7 +352,9 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         suffix = {"connecting": " — reconnecting", "error": " — link lost"}.get(workspace.chip_state, "")
-        self.tabs.setTabText(index, f"{self._display_title(workspace)}{suffix}")
+        # Session titles come from project files and from the server's application
+        # name, so an '&' can arrive here; '&&' keeps it visible in the tab label.
+        self.tabs.setTabText(index, f"{self._display_title(workspace)}{suffix}".replace("&", "&&"))
         self.tabs.setTabToolTip(index, workspace.describe())
 
     def _display_title(self, workspace: SessionWorkspace) -> str:

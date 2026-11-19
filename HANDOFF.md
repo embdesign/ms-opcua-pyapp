@@ -11,8 +11,9 @@ backups before bulk edits.
 a server, downloads its address space, exports it (JSON/CSV/NodeSet2) and runs functional interoperability
 checks — with verified asyncua APIs, pinned dependencies, native Windows/Linux support without Docker, a demo
 server, unit/integration tests, example exports, sample reports and troubleshooting docs. Safety rules: never
-downgrade security silently, explicit certificate approval, no credentials in profiles or logs, read-only by
-default, guarded writes/method calls only after explicit confirmation.
+downgrade security silently, explicit certificate approval, no credentials in profiles or logs, safe defaults (a
+check run performs no write unless a target is enabled), guarded writes/method calls and sequences only after
+explicit confirmation.
 
 Completion criteria:
 
@@ -26,7 +27,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-571 tests pass (427 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+604 tests pass (447 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -38,7 +39,7 @@ runs in `tests/integration/test_pyside_stability.py`; an upgrade must keep that 
 
 **Event subscriptions — delivered.** `opcua/event_service.py` owns one event subscription per session
 (`Subscription.subscribe_events`, server-driven field selection); the Events tab reports a source that cannot
-publish events per source with its StatusCode. Event monitoring is read-only; its one action is the confirmed
+publish events per source with its StatusCode. Event monitoring publishes notifications; its one action is the confirmed
 condition acknowledgement described below. `opcua-demo-server --event-interval SECONDS` emits demo events for
 local runs and the tests. Event sources are not stored in project files. The Address space panel shows
 `EventNotifier` for the selected node (details-only: it is not part of a download or JSON/CSV export).
@@ -71,7 +72,7 @@ because the project keeps exactly one guarded method-call path.
 `session.history_read` for one node. It follows continuation points up to 50 pages, releases them (also in
 `finally`), decodes each `DataValue` with the shared `decode_data_value()`, sorts ascending and trims to the cap.
 A Good-but-empty result is normal and is reported with the node's `Historizing` attribute. The **History** tab
-(`gui/tabs/history_tab.py`) exposes it read-only; `opcua-demo-server --history` historizes Temperature and Speed
+(`gui/tabs/history_tab.py`) exposes the raw read; `opcua-demo-server --history` historizes Temperature and Speed
 in asyncua's in-memory historian. There is **no** `Client.history_read` in asyncua 2.1.0 and no processed,
 aggregate, at-time or event-history helper — see `docs/api-verification.md`.
 
@@ -82,6 +83,14 @@ opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters
 name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
 deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
 lists itself as `urn:opcua-explorer:demo:server`.
+
+**Address-space browse filters — delivered.** `models.BrowseOptions` plus `browse_children(..., options=...)` carry
+reference type, direction, `IncludeSubtypes` and `NodeClassMask` into `BrowseDescription`; the Address space tab's
+filter row reloads the current root with **Apply filter** and names the selection in the status line. The default
+browse is unchanged (forward hierarchical references with subtypes), a malformed reference-type NodeId is refused
+locally, and `browse.to_node_id` now maps asyncua's `UaStringParsingError` to `InvalidNodeIdError`. The test that
+clears the tree while a browse is in flight exposed a real crash path: a cleared `QTreeWidget` deletes its items,
+so `BrowserTab` carries a `_tree_generation` guard (plus a `RuntimeError` guard) and drops stale results — keep it.
 
 **Value read options — delivered.** `opcua/value_read.py` builds one `Read` request for the Value attribute with
 `IndexRange`, `MaxAge` and `TimestampsToReturn` (`ValueReadOptions`/`ValueReadResult` in `models.py`,
@@ -146,7 +155,7 @@ bundles are built now (GUI, export, compare).
   the workspace (`selection_provider`), never fetched through `MainWindow` compatibility properties.
 - Safety invariants stay intact: `opcua/security.py:select_endpoint()` raises instead of downgrading, only
   operator-approved DER reaches `set_security()`, profiles/projects hold no secrets, logs are redacted, checks
-  are read-only by default, and guarded operations are single-target, confirmed and never retried or restored
+  perform no write unless a target is enabled, and guarded operations are single-target, confirmed and never retried or restored
   automatically.
 - Safety-relevant wording lives in `operator_text.py` so it can be tested headless; the widgets only display it.
 - `exporters/` must not import `opcua/` (uses `formatting.py`); a subprocess test enforces the boundary.
@@ -177,7 +186,7 @@ bundles are built now (GUI, export, compare).
   `opcua/value_parsing.py` / `opcua/type_support.py` (typed values), `opcua/method_support.py`,
   `opcua/write_service.py` (the one write/call implementation), `opcua/path_support.py`,
   `opcua/guarded_operations.py` (opt-in writes/method calls), `opcua/sequence_runner.py`,
-  `opcua/test_runner.py` (read-only checks and run orchestration; re-exports `CheckSkipped`,
+  `opcua/test_runner.py` (functional checks and run orchestration; re-exports `CheckSkipped`,
   `environment_info`, `FunctionalTestRunner`, `run_functional_tests`).
 - Integration contract: `OpcUaService` methods and the model dataclasses returned to the GUI. Change these
   signatures only deliberately, together with every caller and the GUI tests.
@@ -189,8 +198,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **427 passed** |
-| Full suite | `uv run pytest -q` | **571 passed** (≈8 min on this host; up to ~15 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **447 passed** |
+| Full suite | `uv run pytest -q` | **604 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -204,7 +213,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 571 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 604 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

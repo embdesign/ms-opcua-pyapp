@@ -63,12 +63,30 @@ def to_node_id(value: Any) -> ua.NodeId:
     if isinstance(value, int):
         return ua.NodeId(value)
     if isinstance(value, str):
-        return ua.NodeId.from_string(value)
+        try:
+            return ua.NodeId.from_string(value)
+        except Exception as exc:
+            raise InvalidNodeIdError(
+                f"{value!r} is not a valid NodeId. Expected forms like 'ns=2;i=42', "
+                "'ns=2;s=Temperature' or 'i=85'."
+            ) from exc
     raise InvalidNodeIdError(f"Cannot interpret {type(value).__name__} as a NodeId")
 
 
 def node_id_to_string(value: Any) -> str:
     return to_node_id(value).to_string()
+
+
+_DIRECTIONS = {
+    "Forward": ua.BrowseDirection.Forward,
+    "Inverse": ua.BrowseDirection.Inverse,
+    "Both": ua.BrowseDirection.Both,
+}
+
+
+def _direction_of(name: str) -> ua.BrowseDirection:
+    """Map a browse-direction name onto the enum (default ``Forward``)."""
+    return _DIRECTIONS.get(name, ua.BrowseDirection.Forward)
 
 
 def parse_node_id(text: str) -> ua.NodeId:
@@ -329,19 +347,35 @@ async def browse_children(
     *,
     follow_subtypes: bool = True,
     batch_size: int = 50,
+    options: Any = None,
 ) -> list[ChildEntry]:
-    """Children for the lazy GUI tree (hierarchical references, forward only).
+    """Children for the lazy GUI tree (default: hierarchical references, forward only).
+
+    ``options`` (:class:`~..models.BrowseOptions`) overrides the default
+    reference type, direction, subtype inclusion and ``NodeClassMask``; the
+    server decides how strictly it applies them.
 
     Exactly one entry per target NodeId is returned: when a server references the
     same child from this parent more than once, the extra references are merged
     (they stay visible in the node details' reference table).
     """
+    reference_type: Any = ua.ObjectIds.HierarchicalReferences
+    direction = ua.BrowseDirection.Forward
+    include_subtypes = follow_subtypes
+    node_class_mask = 0
+    if options is not None:
+        normalised = options.normalised() if hasattr(options, "normalised") else options
+        reference_type = normalised.reference_type
+        direction = _direction_of(normalised.direction)
+        include_subtypes = normalised.include_subtypes
+        node_class_mask = normalised.node_class_mask
     outcomes = await browse_many(
         session,
         [node_id],
-        reference_type=ua.ObjectIds.HierarchicalReferences,
-        direction=ua.BrowseDirection.Forward,
-        include_subtypes=follow_subtypes,
+        reference_type=reference_type,
+        direction=direction,
+        include_subtypes=include_subtypes,
+        node_class_mask=node_class_mask,
         batch_size=batch_size,
     )
     if not outcomes:

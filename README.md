@@ -1,7 +1,7 @@
 # OPC UA Explorer
 
-Desktop application for **browsing an OPC UA server, downloading its address space, and exporting it** — with
-deliberate, explicit security handling.
+Desktop **OPC UA client** for browsing, downloading, exporting, monitoring, writing values, calling methods and
+running operator sequences against an OPC UA server — with deliberate, explicit security handling.
 
 Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.11.3 · managed with `uv` · native
 Windows and Linux, no Docker.
@@ -11,14 +11,14 @@ Windows and Linux, no Docker.
 > directory lookup, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
-> detail view, read-only server status & diagnostics and raw history reads, functional tests (read-only by default)
-> with JSON/HTML reports, guarded single-target write/method-call checks with explicit confirmation, an
+> detail view, server status & diagnostics and raw history reads, functional tests with JSON/HTML reports,
+> guarded single-target write/method-call checks with explicit confirmation, an
 > interactive **Write & call** page (confirmed write with read-back and optional verified restore, confirmed method
 > call with the server's argument types),
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 571 tests. See
+> suite has 604 tests. See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -30,25 +30,25 @@ Windows and Linux, no Docker.
 
 Each session lives in its own tab (**File → New connection**, `Ctrl+N`) with its own OPC UA client, so you can
 work with several devices — or the same server twice — at the same time. A session tab contains the pages below.
-Three tabs are shared: **All monitors** (a read-only merged view of every session's monitored items
-and notification log, with a session filter), **Compare** (a read-only structural comparison of two sessions) and
+Three tabs are shared: **All monitors** (a merged view of every session's monitored items
+and notification log, with a session filter), **Compare** (a structural comparison of two sessions) and
 **Logs & reports** (operator summaries prefixed with the session name). Closing a session tab releases only that
 session's client.
 
 | Page | Capability |
 |---|---|
 | **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
-| **Address space** | Lazy tree from Root/Objects or any NodeId, attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
+| **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
-| **Server** | Read-only **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
-| **History** | Read-only raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
+| **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
+| **History** | Raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
 | **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared) and call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
-| **Tests** | Functional checks (read-only by default: discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery); optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
-| **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / read-only checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
+| **Tests** | Functional checks (discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery) plus optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
+| **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / verification checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
-| **Compare** | Read-only structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report |
+| **Compare** | Structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report |
 
 **File → Save project… / Open project…** stores and restores every session's configuration and editor state in
 one versioned JSON file — never credentials.
@@ -134,8 +134,8 @@ uv run opcua-explorer
 1. **Connection** tab: endpoint `opc.tcp://127.0.0.1:4840` → **Discover endpoints**. The table lists what the
    server actually advertises (security policy, mode, identity tokens, certificate fingerprint).
    **Find servers…** asks a discovery endpoint which applications it knows (the demo server lists itself); select
-   an entry and **Use selected URL** to put its advertised endpoint into the URL field. It is a read-only
-   FindServers call on a temporary unencrypted channel — no session and no certificate decision.
+   an entry and **Use selected URL** to put its advertised endpoint into the URL field. It is a plain FindServers
+   call on a temporary unencrypted channel — no session and no certificate decision.
 2. Press **Connect**. For an unencrypted local demo no certificate review is needed; for secure endpoints a
    certificate dialog appears first.
    *Need a second device?* **File → New connection** opens another session tab with its own client and pages; the
@@ -144,7 +144,9 @@ uv run opcua-explorer
    attributes (NodeId, namespace URI, DataType with resolved name, ValueRank, AccessLevel, …), its references
    with direction, and — on the *Value* sub-tab — an explicit **Read value** with optional **IndexRange** (e.g.
    `1:3`), **MaxAge** (`0` lets the server answer from a cache) and **TimestampsToReturn**
-   (`Source`/`Server`/`Both`/`Neither`). Rows of nodes in the live monitor
+   (`Source`/`Server`/`Both`/`Neither`). The **References** row above the tree filters a browse by reference type
+   (`Organizes`, `HasComponent`, all references), direction and `NodeClassMask`; **Apply filter** reloads the current
+   root with it. Rows of nodes in the live monitor
    are shown bold and prefixed with **●** while the subscription runs, or **○** when they are added but not yet
    subscribed (per session); the marker disappears when the node is removed from the monitor list.
 4. **Live monitor** tab: add `ns=2;s=Temperature` (or press **Monitor node** in the Address space tab), set a
@@ -157,9 +159,9 @@ uv run opcua-explorer
    subscription (`ModifySubscription`/`ModifyMonitoredItems`, the server may revise), and **Server mode** applies
    `SetMonitoringMode` (Reporting / Sampling / Disabled) to every monitored item. **Stop** deletes the
    subscription. With several sessions open, the shared **All
-   monitors** tab shows every session's items in one table (session column, filter, merged log) — read-only;
+   monitors** tab shows every session's items in one table (session column, filter, merged log);
    start/stop stays in each session's own tab.
-   The **Events** tab is the read-only counterpart for event notifications: start the demo server with
+   The **Events** tab is the corresponding page for event notifications: start the demo server with
    `uv run opcua-demo-server --event-interval 1`, add the Server object (`i=2253`) and press **Start events**;
    select a row to see every field the server published. With an event type such as `ConditionType` (`i=2782`) the
    selected condition event can be acknowledged: **Acknowledge condition…** asks for an optional comment, shows the
@@ -179,7 +181,7 @@ uv run opcua-explorer
    what was collected, which options were off and what a snapshot can never contain. Then **Export JSON…**,
    **Export CSV…** or **Export NodeSet2…**.
 6. **Tests** tab: optionally put a variable NodeId (e.g. `ns=2;s=Temperature`) in *Variable node*, press
-   **Run tests**. Eleven read-only checks run against the existing session; select a row to see StatusCodes and
+   **Run tests**. Eleven checks run against the existing session; select a row to see StatusCodes and
    measurements, then **Export JSON report…** or **Export HTML report…**. Leave the variable empty and one is
    discovered near the browse root.
 7. **Optional guarded write** (demo only): in *Guarded write & method call* enter `ns=2;s=Temperature`, a value
@@ -238,13 +240,13 @@ Start with `--no-username` to disable username authentication.
   private-key passwords live only in memory and are cleared from the form after connecting.
 * **No secrets in logs.** A logging filter redacts registered secret values, `password=…`-style patterns, PEM
   private-key blocks — including formatted exception tracebacks.
-* **Read-only unless explicitly confirmed.** Browsing, download, export, live monitoring, history and the default
-  test suite send only `Read`, `Browse`, `CreateSubscription`/`CreateMonitoredItems`, `HistoryRead`,
-  `DeleteMonitoredItems`, `DeleteSubscriptions` and `FindServers`. A write or method call is sent only for the
-  single target the operator configured and confirmed — in the **Tests** tab, the **Write & call** page or an
-  operator-written sequence document — and every one of them goes through the same
-  `opcua/write_service.py` path with `WriteAuthority`. Nothing is discovered, repeated or automated. The one
-  disruptive check (connection recovery) is opt-in and runs last.
+* **Writes only for configured targets.** Browsing, download, export, live monitoring and history send only
+  `Read`, `Browse`, `CreateSubscription`/`CreateMonitoredItems`, `HistoryRead`,
+  `DeleteMonitoredItems`, `DeleteSubscriptions` and `FindServers`, and the default test run does not write. A
+  write or method call is sent for the single target the operator configured and confirmed — in the **Tests**
+  tab, the **Write & call** page or an operator-written sequence document — and every one of them goes through
+  the same `opcua/write_service.py` path with `WriteAuthority`. Nothing is discovered, repeated or automated.
+  The one disruptive check (connection recovery) is opt-in and runs last.
 
 Trust store location: `%APPDATA%\opcua-explorer\trusted_server_certificates.json` on Windows,
 `~/.config/opcua-explorer/trusted_server_certificates.json` on Linux. It is managed in the GUI via
@@ -295,7 +297,7 @@ src/opcua_explorer/
 ├── compare.py            structural comparison of two address-space snapshots (Qt/asyncua-free)
 ├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli.py                opcua-export: headless NodeSet2 export (Qt-free, same services as the GUI)
-├── cli_compare.py        opcua-compare: headless comparison of two servers (Qt-free, read-only)
+├── cli_compare.py        opcua-compare: headless comparison of two servers (Qt-free)
 ├── cli_sequence.py       opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── opcua/
 │   ├── ua_names.py       shared NodeClass / StatusCode / VariantType names
@@ -307,7 +309,7 @@ src/opcua_explorer/
 │   ├── serialize.py      JSON-safe value encoding (ByteString, DateTime, arrays, ExtensionObject)
 │   ├── nodeset2.py       NodeSet2 XML: dependency closure, unsupported DataType report
 │   ├── nodeset2_validation.py  well-formedness, structural checks, optional XSD validation
-│   ├── test_runner.py    read-only functional checks and run orchestration
+│   ├── test_runner.py    functional checks and run orchestration
 │   ├── guarded_operations.py  opt-in single-target write / method-call checks
 │   ├── write_service.py  the one write/method-call/restore implementation (prepare → send → read back)
 │   ├── value_parsing.py  operator text → typed value (built-in scalars and arrays)
@@ -484,8 +486,8 @@ Practical guidance:
 ### Headless comparison: the `opcua-compare` command
 
 When a device is replaced, the question is whether the new one exposes the same information model. `opcua-compare`
-downloads both address spaces through the same service layer the GUI uses and compares the snapshots. It is
-read-only: nothing is written, called or subscribed.
+downloads both address spaces through the same service layer the GUI uses and compares the snapshots. It sends no
+write and no method call: nothing is written, called or subscribed.
 
 ```bash
 uv run opcua-compare --reference opc.tcp://old-device:4840 --candidate opc.tcp://new-device:4840 \
@@ -561,7 +563,7 @@ is expressed as a **sequence document** instead of application code. The tab loa
 uv run opcua-explorer            # Sequences tab: Open sequence…, Dry run, Run, Stop
 ```
 
-The document has three parts: `preconditions` (run before the gate; `assert` is read-only, an `ensure` may
+The document has three parts: `preconditions` (run before the gate; `assert` performs no write, an `ensure` may
 write a prerequisite), an optional `gate`, and the `steps`. Nothing in the
 application names a device or a lock protocol — `gate.on`, `gate.keepalive` and `gate.off` are whatever steps
 the document lists. The guarantees are mechanical:
@@ -605,7 +607,9 @@ previous/new values, `outcome_unknown`, gate state).
 
 ## 8. Functional tests and reports
 
-The **Tests** tab runs eleven bounded checks against the current session; the default suite is read-only:
+The **Tests** tab runs eleven bounded checks against the current session, plus the optional guarded write and
+method-call checks described [below](#guarded-write-and-method-call-optional-off-by-default) — the same
+operations the **Write & call** page and Sequences use:
 
 | Check | What it establishes |
 |---|---|
@@ -626,7 +630,7 @@ Semantics that matter:
   window is *skipped* with a reason — not a failure. If the initial value arrives but the value never changes,
   the check passes with an explicit "no value change within the observation window" note.
 * **Skipped is not hidden.** Opt-in checks and checks without a target explain exactly why they did not run.
-* **Read-only by default.** The default checks send only Read, Browse, CreateSubscription/CreateMonitoredItems and DeleteSubscriptions. Writes and method calls are sent only for explicitly confirmed guarded targets (below).
+* **Writes only for enabled targets.** The default checks send only Read, Browse, CreateSubscription/CreateMonitoredItems and DeleteSubscriptions. Writes and method calls are sent only for explicitly confirmed, single guarded targets (below), the **Write & call** page or a sequence step that asks for them.
 * **Not a certification.** Every report states: *functional and interoperability checks — not official OPC UA
   certification*.
 
@@ -682,7 +686,8 @@ uv run pytest tests/unit -q   # fast, no network
   the server; matrices, unions and optional-field structures are refused), the raw-history request shape and
   its continuation-point handling (against a fake session), the interactive write result semantics (a failed
   write is never hidden by a restore) and method-signature rows, the NumericRange validation and
-  `IndexRange`/`MaxAge`/`TimestampsToReturn` request shape, and the export CLI's argument
+  `IndexRange`/`MaxAge`/`TimestampsToReturn` request shape, the browse-filter request shape (reference type,
+  direction, subtypes, node class) and the export CLI's argument
   mapping and certificate-approval decisions (no network).
 * **Integration**: against the in-process demo server — discovery (endpoints and the FindServers
   directory, including the URI filter and a refusing endpoint), anonymous and username authentication,
@@ -695,7 +700,8 @@ uv run pytest tests/unit -q   # fast, no network
   and the opt-in recovery check), server status/diagnostics, raw history of a historized and a
   non-historized node, an interactive write (with and without restore, refused value, non-variable target),
   one method call (signature, wrong argument count, output), value reads with and without read options,
-  metadata writes (refused by the demo server, accepted by an admin-role server)
+  metadata writes (refused by the demo server, accepted by an admin-role server), filtered browses
+  (reference type, node class, direction)
   and report files. Sequence documents are exercised against the demo server
   (write/read-back, method calls, gate release, dry run, cancellation) and `opcua-compare` compares two
   downloads end to end. The headless `opcua-export` command is exercised end to end
@@ -709,7 +715,7 @@ uv run pytest tests/unit -q   # fast, no network
   JSON export; Sequences tab load, dry run and run; History tab reads a historized node and reports a
   non-historized one; the Find servers dialog lists the demo server and fills the endpoint field; the Write & call
   page declines and accepts a write, restores the previous value, calls a method and reports a refused attribute
-  write; the value panel reads with IndexRange, MaxAge and a timestamp choice).
+  write; the value panel reads with IndexRange, MaxAge and a timestamp choice; the browse filter narrows the tree).
 
 ## 10. Limitations
 
@@ -790,6 +796,11 @@ The implemented scope is complete; the following are **not** claimed:
   published them: this client does not verify them, does not discover applications by multicast and sends no
   `RegisterServer`/`FindServersOnNetwork`. An application that publishes no discovery URL is listed but cannot be
   adopted, and a server that is not a discovery server may refuse the service — that is reported, never retried.
+* **Browse filters are requests, and the tree is a navigation aid.** The reference-type, direction, subtype and
+  `NodeClassMask` filters are sent in `BrowseDescription`; whether the server narrows the answer is its decision.
+  The tree keeps one row per target NodeId and merges duplicate references from the same parent (the details panel
+  still lists every reference), and a download always uses the unfiltered hierarchical traversal — a filter never
+  changes what an export contains.
 * **A value read carries options the server may ignore.** *IndexRange* is checked locally (a malformed
   NumericRange never reaches the server) and *MaxAge*/*TimestampsToReturn* are sent as requested, but whether a
   slice, a cache age or a timestamp choice is honoured is the server's decision — the panel states what was

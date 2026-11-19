@@ -106,7 +106,8 @@ class SessionWorkspace(QWidget):
         self.tabs.addTab(self.monitor_tab, "Live monitor")
         self.tabs.addTab(self.events_tab, "Events")
         self.tabs.addTab(self.history_tab, "History")
-        self.tabs.addTab(self.write_tab, "Write & call")
+        # Tab labels are drawn with Qt::TextShowMnemonic: '&&' is one literal '&'.
+        self.tabs.addTab(self.write_tab, "Write && call")
         self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.tests_tab, "Tests")
         self.tabs.addTab(self.sequences_tab, "Sequences")

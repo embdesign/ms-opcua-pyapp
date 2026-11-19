@@ -1,7 +1,7 @@
 [project]
 name = "opcua-explorer"
 version = "0.1.1"
-description = "Desktop OPC UA address-space browser, exporter and functional interoperability test client"
+description = "Desktop OPC UA client: browse, download, export, monitor, write, call methods and run operator sequences"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "MIT" }
@@ -47,7 +47,7 @@ opcua-explorer = "opcua_explorer.gui.app:main"
 opcua-demo-server = "opcua_explorer.demo.demo_server:main"
 # Headless address-space export (Qt-free, same services as the GUI Export tab).
 opcua-export = "opcua_explorer.cli:main"
-# Headless comparison of two address spaces (Qt-free, read-only).
+# Headless comparison of two address spaces (Qt-free).
 opcua-compare = "opcua_explorer.cli_compare:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"

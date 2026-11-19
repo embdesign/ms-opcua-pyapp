@@ -327,6 +327,80 @@ class ValueReadResult:
         }
 
 
+#: Browse directions offered by the address-space filter.
+BROWSE_DIRECTIONS = ("Forward", "Inverse", "Both")
+
+#: Reference types offered by the address-space filter as ``(label, NodeId)``.
+BROWSE_REFERENCE_TYPES = (
+    ("Hierarchical references", "i=33"),
+    ("Organizes", "i=35"),
+    ("HasComponent", "i=47"),
+    ("HasProperty", "i=46"),
+    ("HasChild", "i=34"),
+    ("All references", "i=31"),
+)
+
+#: ``NodeClassMask`` values (OPC UA Part 4) as ``(label, mask)``.
+BROWSE_NODE_CLASSES = (
+    ("All node classes", 0),
+    ("Object", 1),
+    ("Variable", 2),
+    ("Method", 4),
+    ("ObjectType", 8),
+    ("VariableType", 16),
+    ("ReferenceType", 32),
+    ("DataType", 64),
+    ("View", 128),
+)
+
+
+@dataclass(slots=True)
+class BrowseOptions:
+    """Filters for one hierarchical browse of the address-space tree.
+
+    Defaults reproduce the tree's normal behaviour: forward references of
+    ``HierarchicalReferences`` including subtypes, every node class. The server
+    decides how strictly it applies them; the tree says what was asked for.
+    """
+
+    reference_type: str = "i=33"
+    include_subtypes: bool = True
+    direction: str = "Forward"
+    node_class_mask: int = 0
+
+    def normalised(self) -> BrowseOptions:
+        direction = self.direction if self.direction in BROWSE_DIRECTIONS else "Forward"
+        mask = int(self.node_class_mask)
+        return BrowseOptions(
+            reference_type=(self.reference_type or "i=33").strip(),
+            include_subtypes=bool(self.include_subtypes),
+            direction=direction,
+            node_class_mask=max(0, mask),
+        )
+
+    def is_default(self) -> bool:
+        return self.normalised() == BrowseOptions()
+
+    def label(self) -> str:
+        references = {node_id: name for name, node_id in BROWSE_REFERENCE_TYPES}
+        name = references.get(self.reference_type, self.reference_type)
+        parts = [name, self.direction]
+        if not self.include_subtypes:
+            parts.append("no subtypes")
+        classes = {mask: name for name, mask in BROWSE_NODE_CLASSES}
+        if self.node_class_mask:
+            parts.append(classes.get(self.node_class_mask, f"mask {self.node_class_mask}"))
+        return ", ".join(parts)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reference_type": self.reference_type,
+            "include_subtypes": self.include_subtypes,
+            "direction": self.direction,
+            "node_class_mask": self.node_class_mask,
+        }
+
+
 @dataclass(slots=True)
 class NodeRecord:
     """Canonical representation of one address-space node."""

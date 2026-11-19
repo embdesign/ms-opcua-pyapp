@@ -2,7 +2,7 @@
 
 Status: **complete and maintained** (verified 2026-11-16). Implemented and tested: connection/security with
 background reconnect, browser, download, JSON/CSV/NodeSet2 export (GUI and headless `opcua-export`), live
-monitoring, a functional test suite that is read-only by default with JSON/HTML reports, guarded single-target
+monitoring, a functional test suite with JSON/HTML reports and guarded single-target
 write and method call, address-space comparison (`opcua-compare` and the Compare tab) and operator-written
 control sequences (`opcua-run-sequence` and the Sequences tab). See section 12 for what is deliberately out of
 scope.
@@ -134,14 +134,14 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
   asyncio thread and emits one `EventNotification`. The tab never sees an asyncua object.
 * A source that cannot publish events (no `EventNotifier`, unknown NodeId, unsupported service) is recorded as a
   rejected `EventSourceInfo` with its StatusCode; one bad source never aborts the others or the subscription.
-* Event monitoring itself is read-only. Its one action is a condition acknowledgement:
+* Event monitoring publishes notifications only. Its one action is a condition acknowledgement:
   `write_service.acknowledge_condition()` resolves the instance's `Acknowledge` method below the condition node,
   requires `InputArguments` = (ByteString, LocalizedText), and sends exactly one call through
   `send_prepared_call` with `WriteAuthority("operator-dialog", …)`. The tab asks for an optional comment, shows
   the confirmation text from `operator_text.acknowledge_condition_confirmation`, and never calls
   `Confirm`/`Enable`/`AddComment` or retries.
 
-### Server status (read-only)
+### Server status
 
 The **Server** tab (`opcua/server_diagnostics.py` + `gui/tabs/server_tab.py`) issues one batched `Read` of
 namespace-0 variables and never writes:
@@ -156,7 +156,7 @@ namespace-0 variables and never writes:
   `LiveMonitor.items_snapshot()` instead, labelled as the client's own view.
 * The tab refreshes when the session connects and on **Refresh**; it owns no subscription and no timer.
 
-### History (read-only)
+### History (raw reads)
 
 The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one raw `HistoryRead` of
 the selected variable; it never calls `HistoryUpdate` and never retries:
@@ -173,7 +173,7 @@ the selected variable; it never calls `HistoryUpdate` and never retries:
   status line says whether the node reports `Historizing = false` or simply has no values in the range. A Bad
   StatusCode is reported with that StatusCode, never as an exception or as row loss.
 
-### Value read options (read-only)
+### Value read options
 
 The Address space *Value* panel reads one attribute with explicit options through
 `opcua/value_read.py` (`build_read_parameters` → `read_value_with_options`):
@@ -186,6 +186,20 @@ The Address space *Value* panel reads one attribute with explicit options throug
 * The answer is decoded with the shared `decode_data_value()` and wrapped in `ValueReadResult`, which carries the
   options, the duration and a detail line naming what was requested. A server may ignore the slice or return
   fewer timestamps; the panel therefore shows the request next to the value instead of claiming an effect.
+
+### Browse filters (read-only)
+
+The Address space tree browses through `models.BrowseOptions` and `opcua/browse.py::browse_children(...,
+options=...)`:
+
+* One `BrowseDescription` per node with `ReferenceTypeId`, `BrowseDirection`, `IncludeSubtypes` and
+  `NodeClassMask`; the default (forward `HierarchicalReferences` with subtypes, every node class) is what the
+  tree always used, so an unfiltered tree and a download stay identical.
+* **Apply filter** replaces the tree. `BrowserTab._tree_generation` is bumped on every `load_node`, and a browse
+  result that arrives afterwards is dropped (`_is_stale`) — plus a `RuntimeError` guard, because a cleared
+  `QTreeWidget` deletes its items and a late callback must never touch them.
+* The server decides whether it applies the mask; the status line names the filter and the tree stays a
+  navigation aid, never an export scope.
 
 ## 4. Sessions, connection and trust flow
 
@@ -208,8 +222,8 @@ there is no retry. `FindServersOnNetwork` (multicast/GDS discovery) is not offer
 `BadUserAccessDenied` and the client has no verified multicast path.
 
 `MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
-bar and three shared tabs: `UnifiedMonitorTab` (read-only merge of all sessions' monitors), `CompareTab`
-(read-only structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
+bar and three shared tabs: `UnifiedMonitorTab` (a merge of all sessions' monitors), `CompareTab`
+(a structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
 `OpcUaService` and the ten pages
 (Connection, Address space, Export, Live monitor, Events, History, Write & call, Server, Tests, Sequences). Sessions are fully independent — separate client,
 discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
@@ -409,12 +423,12 @@ document is reported as partial rather than as "nodes missing on the other side"
 
 ## 9. Delivered scope and test-suite policy
 
-Connection/security, read-only event subscriptions with the one guarded condition acknowledgement, server status
-and diagnostics, raw history reads, the read-only functional checks with reports, NodeSet2 export and the guarded
+Connection/security, event subscriptions with the one guarded condition acknowledgement, server status
+and diagnostics, raw history reads, the functional checks with reports, NodeSet2 export and the guarded
 write and method call are delivered, together with address-space comparison and operator sequences; `PLAN.md` §1
 is the authoritative capability list.
 
-Test-suite policy: read-only by default, a subscription that is created but reports no value change is not a
+Test-suite policy: a default run performs no write, a subscription that is created but reports no value change is not a
 failure, no unrestricted stress testing, no automatic production-network scanning; results are described as
 functional/interoperability checks, never as OPC UA certification.
 
@@ -464,7 +478,7 @@ same `opcua/write_service.py` primitives. The interactive page adds one wrinkle:
 optional restore as one `WriteResult`.
 
 Both operations live in `opcua/guarded_operations.py` (the runner schedules them through the same plan as the
-read-only checks) and share three rules:
+verification checks) and share three rules:
 
 1. **Opt-in, per target.** `TestConfig.allow_writes` is a master switch that is off by default. Each entry in
    `write_targets` / `method_calls` is one node and one operation; the runner never enumerates writable nodes,

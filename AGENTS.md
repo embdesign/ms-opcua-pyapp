@@ -20,8 +20,8 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 571 passed (≈8–15 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 427 passed, ~4 s
+uv run pytest -q                           # full suite, 604 passed (≈8–15 min depending on host load)
+uv run pytest tests/unit -q                # fast subset, 447 passed, ~4 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -43,11 +43,11 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Integration tests start in-process demo servers on free loopback ports; they need no Docker and no sudo.
 - GUI tests run headless (`QT_QPA_PLATFORM=offscreen`) and are split by concern (`test_gui_smoke`,
   `test_gui_workflows`, `test_gui_monitor`, `test_gui_events`, `test_gui_server`, `test_gui_history`,
-  `test_gui_write`, `test_gui_directory`, `test_gui_read_options`, `test_gui_connection_states`,
-  `test_gui_project`, `test_gui_compare`, `test_gui_sequences`; `test_pyside_stability` guards the Qt pin).
-  Shared helpers live in `tests/integration/gui_support.py`; the module-scoped `qapp` fixture lives in
-  `tests/integration/conftest.py` and closes/deletes top-level widgets after each module. Do not remove that
-  cleanup.
+  `test_gui_write`, `test_gui_directory`, `test_gui_read_options`, `test_gui_browse_filters`,
+  `test_gui_connection_states`, `test_gui_project`, `test_gui_compare`, `test_gui_sequences`;
+  `test_pyside_stability` guards the Qt pin). Shared helpers live in `tests/integration/gui_support.py`; the
+  module-scoped `qapp` fixture lives in `tests/integration/conftest.py` and closes/deletes top-level widgets after
+  each module. Do not remove that cleanup.
 - `tests/support.py` creates throw-away certificates; `cryptography` is an explicit dev dependency.
 
 ## Architecture constraints — do not break
@@ -78,6 +78,10 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   (`build_read_parameters` → `read_value_with_options`), reached through
   `OpcUaService.read_value_with_options`. The Address space panel must not build `ReadParameters` itself, and a
   NumericRange is validated there before it is sent.
+- Browse filters live in `models.BrowseOptions` and `opcua/browse.py::browse_children(..., options=...)`;
+  `OpcUaService.browse_children(node, options=...)` is the only path the tree uses. Keep the
+  `BrowserTab._tree_generation` guard: a cleared `QTreeWidget` deletes its items, so a late browse result must be
+  dropped instead of touched.
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.

@@ -20,7 +20,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Events tab** — one page per session: add/remove event sources (the Server object `i=2253` is offered by
   default), choose the event type and publishing interval, then read a bounded event log (received time, event
   time, severity, type, source, message) with a per-field detail view for the selected event. Its only action is
-  a confirmed condition acknowledgement (below); plain event monitoring stays read-only.
+  a confirmed condition acknowledgement (below); plain event monitoring publishes notifications only.
 - **Demo server events** — `opcua-demo-server --event-interval SECONDS` publishes a demo event on the Server
   object at that rate (off by default), so an event subscription can be exercised locally and in tests.
 - **Complete standard attributes in the address-space panel** — the details panel now reads and shows every
@@ -48,7 +48,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`. The method's
   `InputArguments` must be (ByteString, LocalizedText) or nothing is sent; `Confirm`, `Enable` and `AddComment`
   are never called, nothing is retried, and a cancelled request sends nothing.
-- **Server status & diagnostics tab** — one read-only batched Read of the standard `ServerStatus` values
+- **Server status & diagnostics tab** — one batched Read of the standard `ServerStatus` values
   (state, current/start time, uptime, shutdown fields), the `ServerDiagnostics` summary counters and the
   `ServerCapabilities` limits this client depends on (`MaxNodesPerRead`, `MaxNodesPerBrowse`,
   `MaxMonitoredItemsPerCall`, continuation points, sessions/subscriptions, sample rate). The tab also shows this
@@ -88,6 +88,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the name is matched case-insensitively; an empty text or any other attribute is refused locally. Servers usually
   allow non-Value writes for administrators only, so asyncua's demo server answers `BadUserAccessDenied` —
   reported, never retried. `OpcUaService.attribute_write_preview` / `write_attribute_value` expose the path.
+- **Address-space browse filters** — a filter row above the tree browses with an explicit reference type
+  (`HierarchicalReferences`, `Organizes`, `HasComponent`, `HasProperty`, `HasChild`, all references), a
+  `Forward`/`Inverse`/`Both` direction, optional subtype inclusion and a `NodeClassMask`. **Apply filter** reloads
+  the current root with the selection and the status line names what was asked for; a late browse result that
+  belongs to a replaced tree is discarded instead of touching a deleted item. `models.BrowseOptions` +
+  `browse.browse_children(..., options=...)` carry the settings; the default browse (forward hierarchical
+  references with subtypes) is unchanged, and an unparsable reference-type NodeId is refused locally.
 - **Demo server history** — `opcua-demo-server --history` historizes Temperature and Speed in the server's
   in-memory historian, so the History tab can be exercised locally and in tests.
 - **Find servers (FindServers directory)** — the Connection tab gains **Find servers…**: it sends one
@@ -101,6 +108,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Documentation presents the client as a full OPC UA client.** `README.md`, `PLAN.md`,
+  `docs/architecture.md` and `HANDOFF.md` no longer label the application or whole features "read-only": the
+  wording describes what each pane does (a `FindServers` lookup, one batched `ServerStatus` read, raw
+  `HistoryRead`, a structural comparison) and which operations a default test run sends. Write, method call and
+  sequence execution are described as the full features they are. No behaviour changed.
 - **NodeSet2 export reports what it cannot write.** `NodeSet2Result.limitations` now names `WriteMask` /
   `UserWriteMask`, `AccessRestrictions`, `RolePermissions` / `UserRolePermissions`, `Symmetric` / `IsAbstract`
   of custom ReferenceTypes, `IsAbstract` of custom DataTypes and skipped `View` nodes, because asyncua's XML
@@ -128,6 +140,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `sequence-document` plus the step for sequences — and records it on the outcome (and in the check data /
   step result). `tests/unit/test_layer_boundaries.py` now fails if a `write_value` / `call_method` call appears
   outside `write_service.py`, or if `authorization` gains a default.
+
+### Fixed
+
+- Labelled widgets show their literal ampersand again. Qt draws tab labels and group-box titles with
+  `Qt::TextShowMnemonic`, so a single `&` was consumed as a mnemonic marker and the next letter was
+  underlined: the `Write & call` and `Logs & reports` tabs rendered as `Write _call` / `Logs _reports`, and
+  four group-box titles (`Client certificate & private key`, `Limits & batching`, `Timing & sampling`,
+  `Guarded write & method call`) lost their `&`. These texts now use `&&`, and a session tab title taken from
+  a project file or a server application name is escaped the same way. `QLabel` texts are unchanged because
+  labels without a buddy render `&` literally.
 
 ## [0.1.1] - 2026-11-16
 
