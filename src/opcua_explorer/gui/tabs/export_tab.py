@@ -76,6 +76,9 @@ class ExportTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._settings = settings
         #: Returns the NodeId selected in *this session's* browser tab.
         self._selection_provider = selection_provider
@@ -324,7 +327,10 @@ class ExportTab(QWidget):
         return container
 
     # -- state -------------------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self.download_btn.setEnabled(connected)
         if not connected:
             self._set_busy(False)
@@ -347,7 +353,7 @@ class ExportTab(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
 
     def _refresh_namespaces(self) -> None:
-        if not self._service.is_connected:
+        if not self._connected:
             return
         self.status_label.setText("Reading the namespace array…")
         self._runner.submit(
@@ -654,7 +660,7 @@ class ExportTab(QWidget):
 
     # -- helpers -----------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
-        self.download_btn.setEnabled(not busy and self._service.is_connected)
+        self.download_btn.setEnabled(not busy and self._connected)
         self.cancel_btn.setEnabled(busy)
         self.export_json_btn.setEnabled(not busy and self._snapshot is not None)
         self.export_csv_btn.setEnabled(not busy and self._snapshot is not None)

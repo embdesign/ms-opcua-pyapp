@@ -118,6 +118,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Model and tab plumbing split for maintainability.** `models.py` is now the `models/` package (one module
+  per feature cluster, with `__init__.py` re-exporting the same public names), the session pages share
+  `gui/tabs/base.py`, and the content tabs cache their connection state from `set_connected(...)` instead of
+  reading `OpcUaService` from the GUI thread. No public behaviour or persisted format changed.
 - **Documentation presents the client as a full OPC UA client.** `README.md`, `PLAN.md`,
   `docs/architecture.md` and `HANDOFF.md` no longer label the application or whole features "read-only": the
   wording describes what each pane does (a `FindServers` lookup, one batched `ServerStatus` read, raw

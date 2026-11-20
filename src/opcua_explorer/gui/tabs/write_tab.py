@@ -53,6 +53,7 @@ from ...operator_text import (
 )
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def ask_confirmation(parent: QWidget, title: str, text: str) -> bool:
     return answer == QMessageBox.StandardButton.Yes
 
 
-class WriteCallTab(QWidget):
+class WriteCallTab(SessionTab):
     """Interactive write and method call for one node, each behind a confirmation."""
 
     def __init__(
@@ -83,6 +84,9 @@ class WriteCallTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._selection_provider = selection_provider
         self._busy = False
         self._closed = False
@@ -309,13 +313,13 @@ class WriteCallTab(QWidget):
         layout.addStretch(1)
 
     # -- connection state --------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._busy = False
         self._update_controls()
-
-    def shutdown(self) -> None:
-        self._closed = True
 
     # -- target ------------------------------------------------------------
     def _on_use_selection(self) -> None:
@@ -340,7 +344,7 @@ class WriteCallTab(QWidget):
             return None
 
     def _on_inspect(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         canonical = self._canonical(self.node_edit.text(), "the node field")
         if canonical is None:
@@ -353,7 +357,7 @@ class WriteCallTab(QWidget):
         )
 
     async def _read_target(self, node_id: str) -> tuple[str, NodeDetails, ValueSnapshot]:
-        if not self._service.is_connected:
+        if not self._connected:
             raise RuntimeError("Not connected.")
         details = await self._service.read_node_details(node_id)
         value = await self._service.read_value(node_id)
@@ -390,7 +394,7 @@ class WriteCallTab(QWidget):
 
     # -- write -------------------------------------------------------------
     def _on_write(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         canonical = self._canonical(self.node_edit.text(), "the node field")
         if canonical is None:
@@ -414,7 +418,7 @@ class WriteCallTab(QWidget):
         previous = self._current_value_text if self._current_node == node_id else ""
         restore = self.restore_check.isChecked()
         text = write_value_confirmation(
-            endpoint_url=self._service.endpoint_url,
+            endpoint_url=self._endpoint_url,
             node_id=node_id,
             value_preview=inspection.preview,
             data_type_label=inspection.data_type_label or "unknown",
@@ -470,7 +474,7 @@ class WriteCallTab(QWidget):
         self._set_status(f"The current {name} was put in the text field; edit it before writing.")
 
     def _on_attribute_write(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         canonical = self._canonical(self.node_edit.text(), "the node field")
         if canonical is None:
@@ -496,7 +500,7 @@ class WriteCallTab(QWidget):
             return
         previous = self._current_attribute_text.get(name, "") if self._current_node == node_id else ""
         confirmation = attribute_write_confirmation(
-            endpoint_url=self._service.endpoint_url,
+            endpoint_url=self._endpoint_url,
             node_id=node_id,
             attribute_name=name,
             text=text,
@@ -557,7 +561,7 @@ class WriteCallTab(QWidget):
         ).normalised()
 
     def _on_create_node(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         request = self._node_request()
         if not request.parent_node_id:
@@ -579,7 +583,7 @@ class WriteCallTab(QWidget):
             self._finish("The node creation was refused before sending.")
             return
         text = node_create_confirmation(
-            endpoint_url=self._service.endpoint_url,
+            endpoint_url=self._endpoint_url,
             node_class=request.node_class,
             browse_name=request.browse_name,
             parent_node_id=request.parent_node_id,
@@ -620,12 +624,12 @@ class WriteCallTab(QWidget):
             self.node_edit.setText(outcome.node_id)
 
     def _on_delete_node(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         canonical = self._canonical(self.node_edit.text(), "the node field")
         if canonical is None:
             return
-        text = node_delete_confirmation(endpoint_url=self._service.endpoint_url, node_id=canonical)
+        text = node_delete_confirmation(endpoint_url=self._endpoint_url, node_id=canonical)
         if not ask_confirmation(self, "Confirm node deletion", text):
             self._node_status(False, "Node deletion cancelled; nothing was sent.")
             self._finish("Cancelled.")
@@ -662,7 +666,7 @@ class WriteCallTab(QWidget):
 
     # -- method call -------------------------------------------------------
     def _on_read_signature(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         method = self._canonical(self.method_edit.text(), "the method field")
         if method is None:
@@ -704,7 +708,7 @@ class WriteCallTab(QWidget):
         ]
 
     def _on_call(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         owner = self._canonical(self.object_edit.text(), "the object field")
         if owner is None:
@@ -728,7 +732,7 @@ class WriteCallTab(QWidget):
             self._finish("The call was refused before sending.")
             return
         text = method_call_confirmation(
-            endpoint_url=self._service.endpoint_url,
+            endpoint_url=self._endpoint_url,
             object_node_id=owner,
             method_node_id=method,
             arguments=arguments,
@@ -799,19 +803,8 @@ class WriteCallTab(QWidget):
                 text = text + "\n" + repr(with_json)
         self.result_view.setText(text)
 
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        self._restyle(self.status_label)
-
-    @staticmethod
-    def _restyle(widget: QWidget) -> None:
-        style = widget.style()
-        style.unpolish(widget)
-        style.polish(widget)
-
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         enabled = connected and not self._busy
         for widget in (
             self.node_edit,

@@ -38,7 +38,7 @@ src/opcua_explorer/
 │                   guarded operations, write service, type support, path support,
 │                   sequence runner, shared UA names
 ├── exporters/      JSON and CSV writers, JSON snapshot loader
-├── models.py       plain dataclasses shared by every layer
+├── models/         plain dataclasses shared by every layer (one module per feature cluster)
 ├── config.py       settings, profiles, trust store
 ├── defaults.py     single definition of numeric defaults
 ├── project.py      versioned project documents
@@ -132,7 +132,7 @@ code enforces only mechanical rules.
 
 ### 6.1 Universal document
 
-`opcua-explorer-sequence`, version 1 (`SEQUENCE_FORMAT` / `SEQUENCE_VERSION` in `models.py`):
+`opcua-explorer-sequence`, version 1 (`SEQUENCE_FORMAT` / `SEQUENCE_VERSION` in `models/`):
 
 | Part | Content |
 |---|---|
@@ -160,7 +160,7 @@ Step kinds are fixed (`SEQUENCE_STEP_KINDS`); anything else is refused before th
 
 ### 6.3 Work breakdown
 
-1. **Engine (done)** — `models.py` sequence dataclasses and statuses;
+1. **Engine (done)** — `models/` sequence dataclasses and statuses;
    `opcua/method_support.py` (server DataType/ValueRank, `InputArguments`, `Executable` read once);
    `opcua/write_service.py` (`prepare_write` → one write → read-back, one method call with validated
    arguments); `opcua/sequence_runner.py`; unit tests with a fake client.

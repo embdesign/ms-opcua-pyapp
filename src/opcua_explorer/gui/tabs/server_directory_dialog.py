@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ...models import DiscoveredServer, ServerDiscoveryResult
 from ...opcua.client_service import OpcUaService
 from ..async_runner import AsyncRunner
+from .base import TabRuntime
 
 _logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def split_uris(text: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
-class ServerDirectoryDialog(QDialog):
+class ServerDirectoryDialog(TabRuntime, QDialog):
     """Read-only FindServers browser for a discovery endpoint.
 
     FindServers needs no session and no trust decision, so this dialog works
@@ -237,15 +238,3 @@ class ServerDirectoryDialog(QDialog):
         self.find_btn.setEnabled(not self._busy)
         server = self._selected_server()
         self.use_btn.setEnabled(not self._busy and server is not None and bool(server.discovery_urls))
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)
-
-    # -- lifecycle ---------------------------------------------------------
-    def shutdown(self) -> None:
-        """Mark the dialog closed so late runner results are ignored."""
-        self._closed = True

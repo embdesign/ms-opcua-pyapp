@@ -92,6 +92,9 @@ class TestsTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._settings = settings
         #: Returns the NodeId selected in *this session's* browser tab.
         self._selection_provider = selection_provider
@@ -381,7 +384,10 @@ class TestsTab(QWidget):
         return container
 
     # -- state -------------------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self.run_btn.setEnabled(connected)
         self.use_selection_btn.setEnabled(connected)
         self.write_use_selection_btn.setEnabled(connected)
@@ -566,14 +572,14 @@ class TestsTab(QWidget):
         answer = QMessageBox.question(
             self,
             "Confirm guarded write / method call",
-            guarded_operation_confirmation(endpoint_url=self._service.endpoint_url, config=config),
+            guarded_operation_confirmation(endpoint_url=self._endpoint_url, config=config),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         return answer == QMessageBox.Yes
 
     def _on_run(self) -> None:
-        if not self._service.is_connected:
+        if not self._connected:
             self._show_error("Connect to a server before running the tests.")
             return
         config = self._collect_config()
@@ -766,7 +772,7 @@ class TestsTab(QWidget):
 
     # -- helpers -----------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
-        self.run_btn.setEnabled(not busy and self._service.is_connected)
+        self.run_btn.setEnabled(not busy and self._connected)
         self.cancel_btn.setEnabled(busy)
         self.recovery_check.setEnabled(not busy)
         self.root_edit.setEnabled(not busy)

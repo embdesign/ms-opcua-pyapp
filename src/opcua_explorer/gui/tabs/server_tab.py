@@ -30,19 +30,23 @@ from ...opcua.client_service import OpcUaService
 from ...opcua.server_diagnostics import SERVER_COUNTER_NODES, SERVER_LIMIT_NODES
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
 _NOT_PROVIDED = "not provided"
 
 
-class ServerTab(QWidget):
+class ServerTab(SessionTab):
     """Read-only view of the server's own status and diagnostics counters."""
 
     def __init__(self, runner: AsyncRunner, service: OpcUaService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._busy = False
         self._closed = False
         self._snapshot: ServerStatusSnapshot | None = None
@@ -116,7 +120,10 @@ class ServerTab(QWidget):
         layout.addWidget(self.status_label)
 
     # -- connection state --------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._snapshot = None
             self._busy = False
@@ -129,13 +136,9 @@ class ServerTab(QWidget):
         if connected and not self._closed:
             self._on_refresh()
 
-    def shutdown(self) -> None:
-        """Stop accepting refresh results (the runner cancels the task)."""
-        self._closed = True
-
     # -- refresh -----------------------------------------------------------
     def _on_refresh(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         self._busy = True
         self._update_controls()
@@ -234,15 +237,9 @@ class ServerTab(QWidget):
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         self.refresh_btn.setEnabled(connected and not self._busy)
 
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)
 
 
 def _text(value: Any) -> str | None:

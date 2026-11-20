@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Iterable
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -49,8 +49,9 @@ from ...models import (
 from ...opcua.attributes import format_attribute_value
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
-from ..async_runner import AsyncRunner, TaskHandle
+from ..async_runner import AsyncRunner
 from ..theme import ACCENT, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def _format_cell(value: Any) -> str:
     return format_attribute_value(value)
 
 
-class BrowserTab(QWidget):
+class BrowserTab(SessionTab):
     """On-demand tree, attribute table, reference table and value view."""
 
     download_requested = Signal(str)
@@ -95,9 +96,11 @@ class BrowserTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``; widget decisions
+        #: must not read the service from this thread.
+        self._connected = False
+        self._endpoint_url = ""
         self._loading: set[str] = set()
-        #: In-flight reads by task key, so shutdown can cancel them.
-        self._tasks: dict[str, TaskHandle] = {}
         self._detail_token = 0
         self._snapshot: AddressSpace | None = None
         self._matches: list[str] = []
@@ -313,6 +316,9 @@ class BrowserTab(QWidget):
 
     # -- connection state --------------------------------------------------
     def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self.load_btn.setEnabled(connected)
         self.download_btn.setEnabled(connected)
         self.read_value_btn.setEnabled(connected)
@@ -323,7 +329,7 @@ class BrowserTab(QWidget):
             self._current_node_id = None
             self._clear_details()
             self.status_label.setText("Not connected. Use the Connection tab to open a session.")
-        elif self._service.is_connected:
+        elif self._connected:
             self.load_start_node()
 
     def set_snapshot(self, snapshot: AddressSpace | None) -> None:
@@ -372,7 +378,7 @@ class BrowserTab(QWidget):
 
     def _on_apply_browse_filter(self) -> None:
         """Reload the tree with the selected filters."""
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
         options = self.browse_options()
@@ -403,7 +409,7 @@ class BrowserTab(QWidget):
         except InvalidNodeIdError as exc:
             self._set_status(str(exc), error=True)
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
 
@@ -498,7 +504,7 @@ class BrowserTab(QWidget):
         node_id = item.data(0, ITEM_NODE_ID)
         if not node_id or node_id in self._loading:
             return
-        if not self._service.is_connected:
+        if not self._connected:
             return
         self._loading.add(node_id)
         generation = self._tree_generation
@@ -674,7 +680,7 @@ class BrowserTab(QWidget):
         ).normalised()
 
     def _on_read_value(self) -> None:
-        if not self._current_node_id or not self._service.is_connected:
+        if not self._current_node_id or not self._connected:
             return
         node_id = self._current_node_id
         options = self._read_options()
@@ -796,42 +802,6 @@ class BrowserTab(QWidget):
             return
         self.monitor_requested.emit(self._current_node_id)
         self._set_status(f"{self._current_node_id} added to the Live monitor tab.")
-
-    # -- background work ---------------------------------------------------
-    def _submit(
-        self,
-        coro: Callable[[], Awaitable[Any]],
-        *,
-        on_done: Callable[[Any], None],
-        on_error: Callable[[str], None],
-    ) -> None:
-        """Submit one read and remember its handle so ``shutdown()`` can cancel it."""
-        key = self._runner.new_key()
-        handle = self._runner.submit(
-            coro,
-            key=key,
-            on_done=lambda result: self._finish(key, on_done, result),
-            on_error=lambda message: self._finish(key, on_error, message),
-        )
-        self._tasks[key] = handle
-
-    def _finish(self, key: str, callback: Callable[[Any], None], payload: Any) -> None:
-        self._tasks.pop(key, None)
-        callback(payload)
-
-    def shutdown(self) -> None:
-        """Cancel reads still in flight so no callback targets a deleted widget."""
-        pending = list(self._tasks.values())
-        self._tasks.clear()
-        for handle in pending:
-            handle.cancel()
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)
 
     def current_node_id(self) -> str | None:
         return self._current_node_id

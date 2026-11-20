@@ -36,6 +36,7 @@ Derived design rules:
 │        history,write,server,tests,sequences,logs,                    │
 │        unified_monitor,compare,server_directory_dialog}             │
 │  async_runner.py  ← only place Qt meets asyncio                      │
+│  tabs/base.py · TabRuntime/SessionTab (shared tab plumbing)          │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -55,7 +56,7 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ AddressSpace snapshot / TestRun (plain dataclasses)
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ models.py · config.py · defaults.py · project.py · logging_setup.py  │
+│ models/ · config.py · defaults.py · project.py · logging_setup.py    │
 │ formatting.py · operator_text.py · exporters/ · reporting.py         │
 │ sequence_document.py                                                 │
 └──────────────────────────────────────────────────────────────────────┘
@@ -63,7 +64,8 @@ Derived design rules:
 
 Rules that keep the layers honest:
 
-* `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`, `sequence_document.py`,
+* `models/` (one module per feature cluster, re-exported from `__init__.py`), `config.py`, `defaults.py`,
+  `project.py`, `formatting.py`, `operator_text.py`, `sequence_document.py`,
   `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt. Each module is import-probed in
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).

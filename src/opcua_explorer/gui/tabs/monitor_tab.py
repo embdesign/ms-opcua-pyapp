@@ -57,6 +57,7 @@ from ...opcua.client_service import OpcUaService
 from ...project import MonitorState
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ _VALUE_CELL_CHARS = 300
 _LATEST_CELL_CHARS = 120
 
 
-class MonitorTab(QWidget):
+class MonitorTab(SessionTab):
     """One subscription, a monitored-item list and a bounded live notification table."""
 
     #: Emitted on the GUI thread for every notification delivered to this tab.
@@ -81,6 +82,9 @@ class MonitorTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._running = False
         self._busy = False
         self._paused = False
@@ -298,6 +302,9 @@ class MonitorTab(QWidget):
 
     # -- connection state --------------------------------------------------
     def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._detach_listener()
             self._running = False
@@ -322,8 +329,8 @@ class MonitorTab(QWidget):
 
     def shutdown(self) -> None:
         """Stop receiving notifications; the service deletes the subscription on shutdown."""
-        self._closed = True
         self._detach_listener()
+        super().shutdown()
 
     def _detach_listener(self) -> None:
         if self._monitor_key is not None:
@@ -362,7 +369,7 @@ class MonitorTab(QWidget):
         if self._find_item_row(canonical) is not None:
             self._set_status(f"{canonical} is already in the monitored-item list.")
             return False
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return False
 
@@ -543,7 +550,7 @@ class MonitorTab(QWidget):
         if not node_ids:
             self._set_status("Add at least one NodeId before starting the monitor.", error=True)
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
 
@@ -921,7 +928,7 @@ class MonitorTab(QWidget):
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         has_items = self.items_table.rowCount() > 0
         has_selection = bool(self.items_table.selectedIndexes())
 
@@ -955,10 +962,3 @@ class MonitorTab(QWidget):
         if self._dropped:
             parts.append(f"{self._dropped} not added while paused")
         self.counters_label.setText(" · ".join(parts))
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from ...models import MonitorNotification, iso_utc
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 from .monitor_tab import DEFAULT_MAX_ROWS, MonitorTab
 
 _logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def _is_bad_status(status: str) -> bool:
     return lowered.startswith("bad") or lowered.startswith(("rejected", "failed", "disabled", "invalid"))
 
 
-class UnifiedMonitorTab(QWidget):
+class UnifiedMonitorTab(SessionTab):
     """Merged, read-only view of all sessions' monitored items and notifications."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -123,7 +124,7 @@ class UnifiedMonitorTab(QWidget):
                     session_item.setText(title)
 
     def shutdown(self) -> None:
-        self._closed = True
+        super().shutdown()
         for key in list(self._sessions):
             self.unregister(key)
 
@@ -512,10 +513,3 @@ class UnifiedMonitorTab(QWidget):
             self._set_status(
                 "No monitored items yet. Add nodes and start the subscription in a session's Live monitor tab."
             )
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)

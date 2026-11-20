@@ -53,9 +53,12 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 ## Architecture constraints — do not break
 
 - Layering (enforced by `tests/unit/test_layer_boundaries.py` for exporters):
-  `gui/` → `opcua/` → `models.py` / `config.py` / `defaults.py` / `project.py` / `formatting.py` /
+  `gui/` → `opcua/` → `models/` (package) / `config.py` / `defaults.py` / `project.py` / `formatting.py` /
   `operator_text.py`.
-- `models.py`, `config.py`, `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`,
+- `models/` is a package with one module per feature cluster (`common`, `discovery`, `graph`, `values`, `writes`,
+  `functional_tests`, `monitor`, `events`, `history`, `server_status`, `sequences`); `__init__.py` re-exports every
+  public name, so callers keep using `from opcua_explorer.models import ...`. The package, `config.py`,
+  `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`,
   `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt.
   `exporters/` uses `formatting.py`, never `opcua/`.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
@@ -65,6 +68,9 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   a client.
 - Only `gui/async_runner.py` bridges asyncio and Qt. Widgets never `await`; all OPC UA work runs on the single
   worker loop and results are plain dataclasses delivered through queued signals.
+- Session pages inherit `gui/tabs/base.py::TabRuntime` / `SessionTab` for `_set_status`, `_submit`,
+  `_cancel_tasks` and `shutdown`. A page caches `_connected` / `_endpoint_url` from `set_connected(...)` and must
+  not read `OpcUaService` state from the GUI thread; only `ConnectionTab` (which owns the lifecycle) does.
 - `gui/main_window.py` is a shell (session tabs, menus, status bar, shared tabs). A session's state and Qt
   wiring live in `gui/session_workspace.py`. New cross-tab dependencies are injected by the workspace
   (see `selection_provider`), never looked up through `MainWindow` compatibility properties.

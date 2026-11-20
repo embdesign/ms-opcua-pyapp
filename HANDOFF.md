@@ -101,7 +101,7 @@ clears the tree while a browse is in flight exposed a real crash path: a cleared
 so `BrowserTab` carries a `_tree_generation` guard (plus a `RuntimeError` guard) and drops stale results — keep it.
 
 **Value read options — delivered.** `opcua/value_read.py` builds one `Read` request for the Value attribute with
-`IndexRange`, `MaxAge` and `TimestampsToReturn` (`ValueReadOptions`/`ValueReadResult` in `models.py`,
+`IndexRange`, `MaxAge` and `TimestampsToReturn` (`ValueReadOptions`/`ValueReadResult` in `models/`,
 `DEFAULT_READ_MAX_AGE_MS`/`MAX_READ_MAX_AGE_MS` in `defaults.py`); the Address space *Value* panel exposes the
 three controls and shows the request next to the decoded value. A malformed NumericRange is refused locally.
 asyncua's demo server ignores `IndexRange` and `TimestampsToReturn`, so tests assert the request/report, never a
@@ -127,7 +127,7 @@ so the demo server answers `BadUserAccessDenied` (reported, never retried) and t
 its own server with an admin user manager.
 
 **Universal sequences (device control) — delivered.** `PLAN.md` §6 records the plan and all six items are done:
-`models.py` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
+`models/` sequence dataclasses (`Sequence`, `SequenceGate`, `SequenceStep`, `SequenceRun`,
 `SequenceStepResult`, step kinds/statuses), `opcua/method_support.py` (shared DataType/ValueRank,
 `InputArguments`, `Executable` reads), `opcua/type_support.py` (server-driven typing: built-ins, enumerations by
 name or number, structures encoded with their `DefaultEncodingId`; matrices/unions/optional fields refused),
@@ -188,7 +188,7 @@ bundles are built now (GUI, export, compare).
   “Logs & reports”). One session = `gui/session_workspace.py` + its ten pages under `gui/tabs/`.
 - Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
   `asyncua.Client`.
-- Pure layers (no asyncua, no Qt): `models.py`, `config.py`, `defaults.py`, `project.py`,
+- Pure layers (no asyncua, no Qt): `models/`, `config.py`, `defaults.py`, `project.py`,
   `formatting.py`, `operator_text.py`, `sequence_document.py`, `compare.py`, `exporters/`, `reporting.py`.
 - OPC UA helpers: `opcua/ua_names.py` (names), `opcua/check_support.py` (check primitives),
   `opcua/value_parsing.py` / `opcua/type_support.py` (typed values), `opcua/method_support.py`,

@@ -10,6 +10,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from PySide6.QtCore import QDateTime, Qt
 from PySide6.QtGui import QColor
@@ -37,6 +38,7 @@ from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ HISTORY_PAYLOAD = Qt.UserRole + 21
 _MAX_VALUE_CELL_CHARS = 300
 
 
-class HistoryTab(QWidget):
+class HistoryTab(SessionTab):
     """Raw history of one variable, bounded by a time range and a value cap."""
 
     def __init__(
@@ -58,6 +60,9 @@ class HistoryTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._selection_provider = selection_provider
         self._busy = False
         self._closed = False
@@ -159,7 +164,10 @@ class HistoryTab(QWidget):
         layout.addWidget(self.status_label)
 
     # -- connection state --------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._busy = False
             self.values_table.setRowCount(0)
@@ -168,9 +176,6 @@ class HistoryTab(QWidget):
         elif not self._busy:
             self._set_status("Connected. Enter a NodeId or take the browser selection, then read history.")
         self._update_controls()
-
-    def shutdown(self) -> None:
-        self._closed = True
 
     # -- configuration -----------------------------------------------------
     def _on_use_selection(self) -> None:
@@ -192,7 +197,7 @@ class HistoryTab(QWidget):
 
     # -- read --------------------------------------------------------------
     def _on_read(self) -> None:
-        if self._busy or not self._service.is_connected:
+        if self._busy or not self._connected:
             return
         text = self.node_edit.text().strip()
         if not text:
@@ -274,7 +279,7 @@ class HistoryTab(QWidget):
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         self.node_edit.setEnabled(connected and not self._busy)
         self.use_selection_btn.setEnabled(connected and not self._busy)
         self.from_edit.setEnabled(self.from_check.isChecked() and connected and not self._busy)
@@ -284,10 +289,3 @@ class HistoryTab(QWidget):
         self.max_spin.setEnabled(connected and not self._busy)
         self.read_btn.setEnabled(connected and not self._busy)
         self.clear_btn.setEnabled(not self._busy)
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)

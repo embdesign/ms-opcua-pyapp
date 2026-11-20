@@ -290,7 +290,7 @@ group.
 ```
 src/opcua_explorer/
 ├── config.py             settings, connection profiles (no secrets), trust store, profile→settings
-├── models.py             NodeRecord, Edge, AddressSpace snapshot, progress, connection info
+├── models/               plain dataclasses per feature cluster, re-exported from __init__.py
 ├── defaults.py           numeric defaults shared by model, project files and tabs
 ├── project.py            versioned project files (configuration and editor state only)
 ├── formatting.py         Qt/asyncua-free cell formatting shared by the exporters

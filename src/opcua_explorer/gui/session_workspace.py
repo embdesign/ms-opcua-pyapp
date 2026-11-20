@@ -219,18 +219,26 @@ class SessionWorkspace(QWidget):
         """Prefix operator-facing summaries with the session name."""
         self.report.emit(f"[{self._title}] {text}")
 
+    @property
+    def _session_tabs(self) -> tuple[Any, ...]:
+        """Every page that follows the connection state, in tab order."""
+        return (
+            self.browser_tab,
+            self.export_tab,
+            self.monitor_tab,
+            self.events_tab,
+            self.history_tab,
+            self.write_tab,
+            self.server_tab,
+            self.tests_tab,
+            self.sequences_tab,
+        )
+
     # -- connection state --------------------------------------------------
     def _on_connected(self, info: ConnectionInfo) -> None:
         self._connection = info
-        self.browser_tab.set_connected(True, info)
-        self.export_tab.set_connected(True)
-        self.monitor_tab.set_connected(True)
-        self.events_tab.set_connected(True)
-        self.history_tab.set_connected(True)
-        self.write_tab.set_connected(True)
-        self.server_tab.set_connected(True)
-        self.tests_tab.set_connected(True)
-        self.sequences_tab.set_connected(True)
+        for tab in self._session_tabs:
+            tab.set_connected(True, info)
         self.export_tab.refresh_namespaces()
 
         server = info.server_application_name or "server"
@@ -257,15 +265,8 @@ class SessionWorkspace(QWidget):
         self._report("Session closed.")
 
     def _set_tabs_connected(self, connected: bool) -> None:
-        self.browser_tab.set_connected(connected)
-        self.export_tab.set_connected(connected)
-        self.monitor_tab.set_connected(connected)
-        self.events_tab.set_connected(connected)
-        self.history_tab.set_connected(connected)
-        self.write_tab.set_connected(connected)
-        self.server_tab.set_connected(connected)
-        self.tests_tab.set_connected(connected)
-        self.sequences_tab.set_connected(connected)
+        for tab in self._session_tabs:
+            tab.set_connected(connected)
 
     def _on_connection_lost(self) -> None:
         """The session disappeared without the operator pressing Disconnect."""
@@ -328,12 +329,5 @@ class SessionWorkspace(QWidget):
     def shutdown(self) -> None:
         """Stop UI work for this session (the service is released by the shell)."""
         self.connection_tab.shutdown()
-        self.browser_tab.shutdown()
-        self.export_tab.shutdown()
-        self.monitor_tab.shutdown()
-        self.events_tab.shutdown()
-        self.history_tab.shutdown()
-        self.write_tab.shutdown()
-        self.server_tab.shutdown()
-        self.tests_tab.shutdown()
-        self.sequences_tab.shutdown()
+        for tab in self._session_tabs:
+            tab.shutdown()

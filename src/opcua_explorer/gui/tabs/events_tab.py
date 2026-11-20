@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -54,8 +54,9 @@ from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...opcua.event_service import SERVER_OBJECT_NODE_ID, event_id_bytes
 from ...operator_text import acknowledge_condition_confirmation
-from ..async_runner import AsyncRunner, TaskHandle
+from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ _MAX_MESSAGE_CELL_CHARS = 300
 _MAX_TIME_CELL_CHARS = 32
 
 
-class EventsTab(QWidget):
+class EventsTab(SessionTab):
     """One event subscription with a source list and a bounded event log."""
 
     #: Emitted on the GUI thread for every event delivered to this tab.
@@ -88,13 +89,14 @@ class EventsTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._selection_provider = selection_provider
         self._running = False
         self._busy = False
         self._closed = False
         self._events_key: str | None = None
-        #: In-flight operations by task key, so shutdown can cancel them.
-        self._tasks: dict[str, TaskHandle] = {}
         self._subscription_id: int | None = None
         self._total_events = 0
         self._selected_notification: EventNotification | None = None
@@ -269,7 +271,10 @@ class EventsTab(QWidget):
         layout.addWidget(self.counters_label)
 
     # -- connection state --------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._detach_listener()
             self._running = False
@@ -288,12 +293,8 @@ class EventsTab(QWidget):
 
     def shutdown(self) -> None:
         """Stop receiving events and cancel work; the service deletes the subscription."""
-        self._closed = True
         self._detach_listener()
-        pending = list(self._tasks.values())
-        self._tasks.clear()
-        for handle in pending:
-            handle.cancel()
+        super().shutdown()
 
     def _detach_listener(self) -> None:
         if self._events_key is not None:
@@ -321,7 +322,7 @@ class EventsTab(QWidget):
         if self._find_source_row(canonical) is not None:
             self._set_status(f"{canonical} is already in the source list.")
             return False
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return False
 
@@ -446,7 +447,7 @@ class EventsTab(QWidget):
         if not source_ids:
             self._set_status("Add at least one event source before starting.", error=True)
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
 
@@ -680,7 +681,7 @@ class EventsTab(QWidget):
             notification is not None
             and bool(notification.condition_node_id)
             and event_id_bytes(notification.event_id) is not None
-            and self._service.is_connected
+            and self._connected
             and not self._ack_busy
             and not self._busy
         )
@@ -704,7 +705,7 @@ class EventsTab(QWidget):
             self._set_status("Acknowledging the condition was cancelled; nothing was sent.")
             return
         text = acknowledge_condition_confirmation(
-            endpoint_url=self._service.endpoint_url,
+            endpoint_url=self._endpoint_url,
             condition_node_id=notification.condition_node_id,
             event_id=notification.event_id,
             comment=comment,
@@ -773,7 +774,7 @@ class EventsTab(QWidget):
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         has_sources = self.sources_table.rowCount() > 0
         has_selection = bool(self.sources_table.selectedIndexes())
 
@@ -795,34 +796,4 @@ class EventsTab(QWidget):
             parts.append(f"subscription {self._subscription_id}")
         self.counters_label.setText(" · ".join(parts))
 
-    # -- background work ---------------------------------------------------
-    def _submit(
-        self,
-        coro: Callable[[], Awaitable[Any]],
-        *,
-        on_done: Callable[[Any], None],
-        on_error: Callable[[str], None],
-        key: str | None = None,
-    ) -> None:
-        """Submit one operation and remember its handle so ``shutdown()`` can cancel it."""
-        task_key = key or self._runner.new_key()
-        handle = self._runner.submit(
-            coro,
-            key=task_key,
-            on_done=lambda result: self._finish(task_key, on_done, result),
-            on_error=lambda message: self._finish(task_key, on_error, message),
-        )
-        self._tasks[task_key] = handle
 
-    def _finish(self, key: str, callback: Callable[[Any], None], payload: Any) -> None:
-        self._tasks.pop(key, None)
-        if self._closed:
-            return
-        callback(payload)
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)
