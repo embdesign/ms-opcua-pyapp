@@ -138,6 +138,64 @@ def test_write_service_stays_transport_neutral() -> None:
     assert forbidden == set(), f"write_service must stay Qt-free and default-free: {sorted(forbidden)}"
 
 
+def _client_construction_sites() -> dict[str, list[int]]:
+    """Every ``Client(...)`` call in the package (asyncua's client class name)."""
+    sites: dict[str, list[int]] = {}
+    for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
+        relative = path.relative_to(_PACKAGE_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Client":
+                sites.setdefault(relative, []).append(node.lineno)
+    return sites
+
+
+def test_only_client_service_constructs_an_asyncua_client() -> None:
+    sites = _client_construction_sites()
+    assert set(sites) == {"opcua/client_service.py"}, (
+        "construct the asyncua client only in opcua/client_service.py: " f"{sites}"
+    )
+
+
+def _asyncio_import_sites() -> dict[str, list[int]]:
+    """Every asyncio import under ``gui/``."""
+    sites: dict[str, list[int]] = {}
+    for path in sorted((_PACKAGE_ROOT / "gui").rglob("*.py")):
+        relative = path.relative_to(_PACKAGE_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            if any(name == "asyncio" or name.startswith("asyncio.") for name in names):
+                sites.setdefault(relative, []).append(node.lineno)
+    return sites
+
+
+def test_only_async_runner_imports_asyncio_in_the_gui() -> None:
+    sites = _asyncio_import_sites()
+    assert set(sites) == {"gui/async_runner.py"}, (
+        "only gui/async_runner.py may bridge asyncio into the GUI: " f"{sites}"
+    )
+
+
+def test_cli_front_ends_do_not_import_asyncua() -> None:
+    for front_end in ("cli.py", "cli_compare.py", "cli_sequence.py"):
+        tree = ast.parse((_PACKAGE_ROOT / front_end).read_text(encoding="utf-8"))
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        assert not any(name == "asyncua" or name.startswith("asyncua.") for name in imported), (
+            f"{front_end} must stay a Qt-free adapter over OpcUaService, not touch asyncua"
+        )
+
+
 def test_every_send_requires_an_authority() -> None:
     for name in (
         "send_prepared_write",

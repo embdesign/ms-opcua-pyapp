@@ -7,7 +7,7 @@ Read this before changing code. It records only facts verified in this tree.
 
 - Python **3.11–3.13**, managed with **uv** + `pyproject.toml` (hatchling, `src/` layout).
 - Runtime dependencies are pinned: `asyncua==2.1.0`, `PySide6==6.11.3`. Optional extra `validation` = `lxml`.
-  Dev group: `pytest`, `pytest-asyncio`, `lxml`, `cryptography`.
+  Dev group: `pytest`, `pytest-asyncio`, `pytest-xdist`, `lxml`, `cryptography`.
 - Desktop OPC UA client: discovery/security/identity, lazy browser, bounded address-space download,
   JSON/CSV/NodeSet2 export, headless NodeSet2 export (`opcua-export`), live monitoring, read-only functional
   checks, guarded single-target write/method call, JSON/HTML reports, address-space comparison (`opcua-compare`
@@ -20,8 +20,9 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 626 passed (≈8–15 min depending on host load)
-uv run pytest tests/unit -q                # fast subset, 463 passed, ~4 s
+uv run pytest -q                           # full suite, 633 passed (≈8–15 min depending on host load)
+uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
+uv run pytest tests/unit -q                # fast subset, 472 passed, ~4 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)

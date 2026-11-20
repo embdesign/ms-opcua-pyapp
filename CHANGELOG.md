@@ -122,6 +122,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   per feature cluster, with `__init__.py` re-exporting the same public names), the session pages share
   `gui/tabs/base.py`, and the content tabs cache their connection state from `set_connected(...)` instead of
   reading `OpcUaService` from the GUI thread. No public behaviour or persisted format changed.
+- **Test and error-handling hardening.** `AsyncRunner` no longer keeps a cancel marker for an already-finished
+  task and now guards its cross-thread bookkeeping with a lock; `SequenceBusyError`, `SequenceAborted` and
+  `MetadataUnavailable` derive from `OpcUaExplorerError`; boundary tests pin the single `Client(...)`
+  construction site, the single GUI asyncio bridge and the asyncua-free CLI front ends. `pytest-xdist` is
+  available for `-n auto --dist loadscope`; the default run is unchanged.
 - **Documentation presents the client as a full OPC UA client.** `README.md`, `PLAN.md`,
   `docs/architecture.md` and `HANDOFF.md` no longer label the application or whole features "read-only": the
   wording describes what each pane does (a `FindServers` lookup, one batched `ServerStatus` read, raw

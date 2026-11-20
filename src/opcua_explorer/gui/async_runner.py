@@ -65,7 +65,11 @@ class AsyncRunner(QObject):
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._callbacks: dict[str, tuple[Callable[[Any], None] | None, Callable[[str], None] | None, Callable[[Any], None] | None]] = {}
         self._listeners: dict[str, Callable[[Any], None]] = {}
+        #: Submitted but not yet started on the loop thread.
+        self._pending: set[str] = set()
         self._cancelled_before_start: set[str] = set()
+        #: Guards the task/callback bookkeeping written on both threads.
+        self._lock = threading.Lock()
         self._keys = itertools.count(1)
 
         # Queued automatically because these connections are made in the GUI thread
@@ -116,6 +120,10 @@ class AsyncRunner(QObject):
         except RuntimeError:  # pragma: no cover - loop already closed
             pass
         self._listeners.clear()
+        with self._lock:
+            self._callbacks.clear()
+            self._pending.clear()
+            self._cancelled_before_start.clear()
         if self._thread is not None:
             self._thread.join(timeout)
             self._thread = None
@@ -165,7 +173,9 @@ class AsyncRunner(QObject):
             raise RuntimeError("The asyncio worker loop is not running.")
 
         task_key = key or self.new_key()
-        self._callbacks[task_key] = (on_done, on_error, on_progress)
+        with self._lock:
+            self._callbacks[task_key] = (on_done, on_error, on_progress)
+            self._pending.add(task_key)
 
         if asyncio.iscoroutine(coro):
             pending = coro
@@ -187,17 +197,20 @@ class AsyncRunner(QObject):
             return
 
         def _cancel() -> None:
-            task = self._tasks.get(key)
+            with self._lock:
+                task = self._tasks.get(key)
+                # Only a task that has not started yet needs a marker. A cancel for a
+                # finished task must not leave an entry behind for the window lifetime.
+                if task is None and key in self._pending:
+                    self._cancelled_before_start.add(key)
             if task is not None:
                 task.cancel()
-            else:
-                # The task is still queued on the loop; remember to cancel it on start.
-                self._cancelled_before_start.add(key)
 
         loop.call_soon_threadsafe(_cancel)
 
     def is_active(self, key: str) -> bool:
-        task = self._tasks.get(key)
+        with self._lock:
+            task = self._tasks.get(key)
         return task is not None and not task.done()
 
     def progress_callback(self, key: str) -> Callable[[Any], None]:
@@ -223,21 +236,27 @@ class AsyncRunner(QObject):
 
     # -- loop-thread plumbing ---------------------------------------------
     async def _track(self, key: str, factory: Callable[[], Awaitable[Any]]) -> None:
-        if key in self._cancelled_before_start:
-            self._cancelled_before_start.discard(key)
-            self._callbacks.pop(key, None)
+        with self._lock:
+            self._pending.discard(key)
+            cancelled_before_start = key in self._cancelled_before_start
+            if cancelled_before_start:
+                self._cancelled_before_start.discard(key)
+                self._callbacks.pop(key, None)
+        if cancelled_before_start:
             self.cancelled.emit(key)
             return
 
         task = asyncio.current_task()
         if task is not None:
-            self._tasks[key] = task
+            with self._lock:
+                self._tasks[key] = task
         try:
             result = await factory()
         except asyncio.CancelledError:
             # A cancelled task never reports done/failed, so release its callbacks here;
             # otherwise the closures (and the widgets they reference) are retained until stop().
-            self._callbacks.pop(key, None)
+            with self._lock:
+                self._callbacks.pop(key, None)
             self.cancelled.emit(key)
         except Exception as exc:
             _logger.debug("Async task %s failed", key, exc_info=True)
@@ -245,11 +264,13 @@ class AsyncRunner(QObject):
         else:
             self.done.emit(key, result)
         finally:
-            self._tasks.pop(key, None)
+            with self._lock:
+                self._tasks.pop(key, None)
 
     # -- GUI-thread dispatch ----------------------------------------------
     def _dispatch_done(self, key: str, result: Any) -> None:
-        callbacks = self._callbacks.pop(key, None)
+        with self._lock:
+            callbacks = self._callbacks.pop(key, None)
         if callbacks and callbacks[0] is not None:
             try:
                 callbacks[0](result)
@@ -257,7 +278,8 @@ class AsyncRunner(QObject):
                 _logger.exception("on_done callback for %s raised", key)
 
     def _dispatch_failed(self, key: str, message: str) -> None:
-        callbacks = self._callbacks.pop(key, None)
+        with self._lock:
+            callbacks = self._callbacks.pop(key, None)
         if callbacks and callbacks[1] is not None:
             try:
                 callbacks[1](message)
@@ -265,7 +287,8 @@ class AsyncRunner(QObject):
                 _logger.exception("on_error callback for %s raised", key)
 
     def _dispatch_progress(self, key: str, payload: Any) -> None:
-        callbacks = self._callbacks.get(key)
+        with self._lock:
+            callbacks = self._callbacks.get(key)
         callback = callbacks[2] if callbacks else None
         if callback is None:
             callback = self._listeners.get(key)

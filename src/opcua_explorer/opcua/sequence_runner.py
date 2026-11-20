@@ -28,6 +28,7 @@ from typing import Any
 
 from asyncua import ua
 
+from ..errors import OpcUaExplorerError
 from ..models import (
     AUTHORITY_SEQUENCE_DOCUMENT,
     KEEPALIVE_ABORT,
@@ -62,11 +63,11 @@ _INPUT_PATTERN = re.compile(r"\$\{([A-Za-z0-9_.\-]+)\}")
 _logger = logging.getLogger(__name__)
 
 
-class SequenceBusyError(RuntimeError):
+class SequenceBusyError(OpcUaExplorerError):
     """A sequence is already running on this runner."""
 
 
-class SequenceAborted(Exception):
+class SequenceAborted(OpcUaExplorerError):
     """The run stopped early; the message is shown to the operator."""
 
 

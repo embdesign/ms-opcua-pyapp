@@ -36,6 +36,9 @@ validation = ["lxml>=5.0"]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=1.0",
+    # Optional parallel runs: `uv run pytest -n auto --dist loadscope`.
+    # Module-scoped `qapp` and free-port demo servers make loadscope safe.
+    "pytest-xdist>=3.6",
     "lxml>=5.0",
     # tests/support.py creates throw-away certificates; do not rely on asyncua's
     # transitive dependency for it.

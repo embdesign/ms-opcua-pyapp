@@ -16,10 +16,11 @@ from typing import Any
 
 from asyncua import ua
 
+from ..errors import OpcUaExplorerError
 from .ua_names import status_name
 
 
-class MetadataUnavailable(RuntimeError):
+class MetadataUnavailable(OpcUaExplorerError):
     """The server did not provide a fact the caller needs; nothing has been sent."""
 
 

@@ -678,8 +678,9 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 
 ```bash
 uv sync
-uv run pytest -q              # unit + integration (starts a local demo server)
-uv run pytest tests/unit -q   # fast, no network
+uv run pytest -q                          # unit + integration (starts a local demo server)
+uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
+uv run pytest tests/unit -q               # fast, no network (472 tests, ~4 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
