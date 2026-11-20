@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtWidgets import QScrollArea
+
 from opcua_explorer.config import AppSettings, TrustStore
 from opcua_explorer.gui.async_runner import AsyncRunner
 from opcua_explorer.gui.main_window import MainWindow
@@ -209,3 +211,21 @@ def test_node_management_group_reports_the_server_refusal(qapp, tmp_path, monkey
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_write_tab_scrolls_instead_of_squeezing(qapp, tmp_path) -> None:
+    """A short window must scroll the page, not compress the five group boxes."""
+    tab = write_tab_module.WriteCallTab(
+        AsyncRunner(), OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    )
+    try:
+        tab.resize(420, 320)
+        tab.show()
+        qapp.processEvents()
+        scroll = tab.findChild(QScrollArea)
+        assert scroll is not None
+        assert scroll.widgetResizable()
+        assert scroll.verticalScrollBar().maximum() > 0
+    finally:
+        tab.close()
+        tab.deleteLater()

@@ -162,6 +162,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Write & call keeps its layout when the window shrinks.** The page now lives in a scroll area, so its five
+  groups keep their natural size and the page scrolls instead of squeezing labels, buttons and line edits.
 - Labelled widgets show their literal ampersand again. Qt draws tab labels and group-box titles with
   `Qt::TextShowMnemonic`, so a single `&` was consumed as a mnemonic marker and the next letter was
   underlined: the `Write & call` and `Logs & reports` tabs rendered as `Write _call` / `Logs _reports`, and
