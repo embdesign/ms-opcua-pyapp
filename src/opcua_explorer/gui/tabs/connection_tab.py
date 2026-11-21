@@ -48,6 +48,7 @@ from ...opcua.security import (
 )
 from ...operator_text import connection_diagnostics_text
 from ..async_runner import AsyncRunner, TaskHandle
+from ..tab_notice import TabNotice
 from ..theme import mono_font, set_chip_state
 from .connection_dialogs import CertificateReviewDialog, TrustStoreDialog
 from .server_directory_dialog import ServerDirectoryDialog
@@ -118,10 +119,12 @@ class ConnectionTab(QWidget):
         heading = QLabel("Connection & security")
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
-        subtitle = QLabel("Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.")
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        layout.addWidget(
+            TabNotice(
+                "Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.",
+                "Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.",
+            )
+        )
 
         # Endpoint ---------------------------------------------------------
         endpoint_box = QGroupBox("Endpoint")

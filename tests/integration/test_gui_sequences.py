@@ -44,7 +44,9 @@ def _sequence_document(node_id: str) -> dict:
 
 def test_sequences_tab_loads_dry_runs_and_runs(qapp, tmp_path) -> None:
     port = free_port()
-    server = start_demo_server(port)
+    # --no-updates: the dry run must see the value the document expects, not a value
+    # the demo updater moved while the test was waiting.
+    server = start_demo_server(port, "--no-updates")
     runner = AsyncRunner()
     runner.start()
     service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))

@@ -60,6 +60,7 @@ from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...project import MonitorState
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
 from .base import SessionTab
 
@@ -113,15 +114,15 @@ class MonitorTab(SessionTab):
         title = QLabel("Live monitor")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "One data-change subscription on nodes you add explicitly. The left table keeps one row per node "
-            "and overwrites it with the latest value; the notification list is an append-only log. The server "
-            "decides the effective publishing and sampling rate. Nothing is written to the server and nothing is "
-            "exported from this tab."
+        layout.addWidget(
+            TabNotice(
+                "One data-change subscription on the nodes you add; the server decides the effective rates.",
+                "One data-change subscription on nodes you add explicitly. The left table keeps one row per node "
+                "and overwrites it with the latest value; the notification list is an append-only log. The server "
+                "decides the effective publishing and sampling rate. Nothing is written to the server and nothing "
+                "is exported from this tab.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         items_row = QHBoxLayout()
         self.node_edit = QLineEdit()

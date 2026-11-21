@@ -8,6 +8,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Layout: working area first.** The description at the top of every page is now one line (`TabNotice`); the
+  full text is its tooltip and **View → Show tab descriptions** (persisted as `show_tab_descriptions`), which
+  recovers 30–100 px of height on the read pages. The Events tab's server-side filter and the History tab's
+  aggregate/interval/value cap moved into collapsible **Filter** / **Options** rows whose button names whatever
+  is in effect (`Filter (severity ≥ 10) ▸`), and the action they belong to names them in its status line, so a
+  hidden row can never be forgotten.
+- **Tab order follows the on-site workflow**: Connection, Server, Address space, Live monitor, Events, History,
+  Write & call, Tests, Sequences, Export. Server status (the first thing to check on a device) moved up from
+  eighth, and Export moved last because it is a reporting step.
+- **No silent stale target.** Every page that acts on a node (History, Events, Write & call, Export, Tests) shows
+  a `SelectionMarker` next to its target field: hidden while the field matches the address-space selection, and a
+  warning naming both NodeIds as soon as it differs. Each page keeps its own target — watching one node while
+  writing another stays legitimate — and the marker never changes what is sent.
+- **Server and Write & call use their space better.** The Server tab's status and monitored-item tables sit in a
+  splitter instead of the second table having a fixed 150 px cap, and the Write & call page is laid out in two
+  columns with its status line as a fixed footer, so all four confirmed actions are reachable at the minimum
+  window size without scrolling.
+
 ### Added
 
 - **History trend chart.** The History tab now draws the numeric values of one history read above the table

@@ -266,6 +266,8 @@ class AppSettings:
     credentials_in_profiles: bool = False  # explicit, always False for now
     #: Keep retrying when the link drops instead of releasing the session.
     auto_reconnect: bool = True
+    #: Show each page's full description instead of its one-line summary.
+    show_tab_descriptions: bool = False
     profiles: list[ConnectionProfile] = field(default_factory=list)
 
     # -- persistence ------------------------------------------------------
@@ -303,6 +305,7 @@ class AppSettings:
             last_project_path=data.get("last_project_path"),
             credentials_in_profiles=False,
             auto_reconnect=bool(data.get("auto_reconnect", True)),
+            show_tab_descriptions=bool(data.get("show_tab_descriptions", False)),
             profiles=profiles,
         )
 
@@ -316,6 +319,7 @@ class AppSettings:
             "last_export_dir": self.last_export_dir,
             "last_project_path": self.last_project_path,
             "auto_reconnect": self.auto_reconnect,
+            "show_tab_descriptions": self.show_tab_descriptions,
             "profiles": [profile.to_dict() for profile in self.profiles],
         }
         assert_no_secrets(payload, context=str(target))

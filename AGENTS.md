@@ -83,6 +83,17 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - `gui/main_window.py` is a shell (session tabs, menus, status bar, shared tabs). A session's state and Qt
   wiring live in `gui/session_workspace.py`. New cross-tab dependencies are injected by the workspace
   (see `selection_provider`), never looked up through `MainWindow` compatibility properties.
+- **Layout is a contract too.** A session's pages are ordered by the on-site workflow (Connection, Server,
+  Address space, Live monitor, Events, History, Write & call, Tests, Sequences, Export) — `test_gui_smoke`
+  asserts that list, so a new page means updating it there. The description at the top of a page is a
+  `gui/tab_notice.py::TabNotice` (one line; the full text is its tooltip and **View → Show tab descriptions**,
+  persisted as `show_tab_descriptions`), never a raw paragraph `QLabel`. Secondary controls go into an
+  `OptionsRow` whose toggle names every non-default value it is hiding (`Options (average) ▸`), so a collapsed
+  row can never shape a request silently; a hidden filter must still be named in the status line of the action
+  it affects. A page that acts on a node puts a `gui/selection_marker.py::SelectionMarker` next to its target
+  field; it is visible **only** while that field differs from the browser selection (the workspace refreshes all
+  markers from `BrowserTab.selection_changed`), so a stale target is never silent and no space is spent while
+  they agree. `tests/integration/test_gui_layout.py` enforces the notice, options and marker rules.
 - The shared **Compare** tab (`gui/tabs/compare_tab.py`) owns no client and no subscription: it downloads
   through the two selected sessions' `OpcUaService` and calls `compare_address_spaces()`. Keep it read-only and
   do not add a second comparison implementation — GUI and `opcua-compare` share the config, the comparison and

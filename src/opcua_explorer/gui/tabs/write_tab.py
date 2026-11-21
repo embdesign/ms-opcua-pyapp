@@ -54,6 +54,8 @@ from ...operator_text import (
     write_value_confirmation,
 )
 from ..async_runner import AsyncRunner
+from ..selection_marker import SelectionMarker
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
 from .base import SessionTab
 
@@ -101,17 +103,21 @@ class WriteCallTab(SessionTab):
 
     # -- UI ----------------------------------------------------------------
     def _build_ui(self) -> None:
-        # Five stacked groups do not fit a short window; scroll instead of letting
-        # Qt squeeze the rows (which clips labels and buttons while resizing).
+        # Five groups do not fit a short window; scroll instead of letting Qt squeeze
+        # the rows (which clips labels and buttons while resizing). They are laid out
+        # in two columns so the page fits without scrolling at the normal window size,
+        # and the status line stays outside the scroll area as a fixed footer: the
+        # result of a confirmed write must never be scrolled out of sight.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         content = QWidget()
         scroll.setWidget(content)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
 
         layout = QVBoxLayout(content)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -120,14 +126,14 @@ class WriteCallTab(SessionTab):
         title = QLabel("Write & call")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "One write and one method call, each sent once after you confirm the exact target. A write is read "
-            "back and compared; the previous value is restored only if you tick that box (and then as one more "
-            "verified write). A call uses the server's InputArguments and is never retried."
+        layout.addWidget(
+            TabNotice(
+                "One write or one method call per confirmation, sent once and read back. Nothing is retried.",
+                "One write and one method call, each sent once after you confirm the exact target. A write is read "
+                "back and compared; the previous value is restored only if you tick that box (and then as one more "
+                "verified write). A call uses the server's InputArguments and is never retried.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         # Target ------------------------------------------------------------
         target_box = QGroupBox("Target node")
@@ -139,10 +145,13 @@ class WriteCallTab(SessionTab):
         self.use_selection_btn.clicked.connect(self._on_use_selection)
         self.inspect_btn = QPushButton("Read node")
         self.inspect_btn.clicked.connect(self._on_inspect)
+        # Speaks up only when this page's target differs from the browser selection.
+        self.selection_marker = SelectionMarker(self.node_edit, self._selection_provider)
         node_row.addWidget(QLabel("Node:"))
         node_row.addWidget(self.node_edit, 2)
         node_row.addWidget(self.use_selection_btn)
         node_row.addWidget(self.inspect_btn)
+        node_row.addWidget(self.selection_marker)
         target_layout.addLayout(node_row)
         self.info_label = QLabel("Select a node and press Read node to see its type, access level and value.")
         self.info_label.setObjectName("hintLabel")
@@ -150,6 +159,15 @@ class WriteCallTab(SessionTab):
         self.info_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         target_layout.addWidget(self.info_label)
         layout.addWidget(target_box)
+
+        # Two columns: writing on the left, structure and method calls on the right.
+        columns = QHBoxLayout()
+        left_column = QVBoxLayout()
+        right_column = QVBoxLayout()
+        columns.setSpacing(10)
+        columns.addLayout(left_column, 1)
+        columns.addLayout(right_column, 1)
+        layout.addLayout(columns, 1)
 
         # Write -------------------------------------------------------------
         write_box = QGroupBox("Write value")
@@ -176,7 +194,7 @@ class WriteCallTab(SessionTab):
         self.write_status_label.setObjectName("hintLabel")
         self.write_status_label.setWordWrap(True)
         write_layout.addWidget(self.write_status_label)
-        layout.addWidget(write_box)
+        left_column.addWidget(write_box)
 
         # Attribute write ---------------------------------------------------
         attribute_box = QGroupBox("Write metadata attribute")
@@ -209,7 +227,8 @@ class WriteCallTab(SessionTab):
         self.attribute_status_label.setObjectName("hintLabel")
         self.attribute_status_label.setWordWrap(True)
         attribute_layout.addWidget(self.attribute_status_label)
-        layout.addWidget(attribute_box)
+        left_column.addWidget(attribute_box)
+        left_column.addStretch(1)
 
         # Node management ---------------------------------------------------
         node_box = QGroupBox("Node management (structure)")
@@ -271,7 +290,7 @@ class WriteCallTab(SessionTab):
         self.node_status_label.setObjectName("hintLabel")
         self.node_status_label.setWordWrap(True)
         node_layout.addWidget(self.node_status_label)
-        layout.addWidget(node_box)
+        right_column.addWidget(node_box)
 
         # Method call -------------------------------------------------------
         call_box = QGroupBox("Call method")
@@ -318,13 +337,19 @@ class WriteCallTab(SessionTab):
         self.result_view.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.result_view.setFont(mono_font(9))
         call_layout.addWidget(self.result_view)
-        layout.addWidget(call_box)
+        right_column.addWidget(call_box)
+        right_column.addStretch(1)
 
+        # Fixed footer: the outcome of the last confirmed operation.
+        footer = QWidget()
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(14, 6, 14, 10)
+        footer_layout.setSpacing(0)
         self.status_label = QLabel("Not connected.")
         self.status_label.setObjectName("hintLabel")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
-        layout.addStretch(1)
+        footer_layout.addWidget(self.status_label)
+        outer.addWidget(footer)
 
     # -- connection state --------------------------------------------------
     def set_connected(self, connected: bool, connection: Any = None) -> None:

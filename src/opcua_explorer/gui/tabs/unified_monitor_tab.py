@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from ...defaults import MAX_KEEP_ROWS, MIN_KEEP_ROWS
 from ...models import MonitorNotification, iso_utc
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
 from .base import SessionTab
 from .monitor_tab import DEFAULT_MAX_ROWS, MonitorTab
@@ -138,14 +139,14 @@ class UnifiedMonitorTab(SessionTab):
         title = QLabel("All monitors")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Merged view of every session's live monitor. This page is read-only: add, start, stop and remove "
-            "monitored items in the session's own Live monitor tab. Each row and log entry is labelled with the "
-            "session it came from; identical NodeIds on different servers stay separate."
+        layout.addWidget(
+            TabNotice(
+                "Merged, read-only view of every session's live monitor; start and stop in the session tab.",
+                "Merged view of every session's live monitor. This page is read-only: add, start, stop and remove "
+                "monitored items in the session's own Live monitor tab. Each row and log entry is labelled with "
+                "the session it came from; identical NodeIds on different servers stay separate.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         controls = QHBoxLayout()
         self.filter_combo = QComboBox()

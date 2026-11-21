@@ -29,6 +29,7 @@ from ..opcua.client_service import OpcUaService
 from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectFile
 from .async_runner import AsyncRunner
 from .session_workspace import SessionWorkspace
+from .tab_notice import apply_notices
 from .tabs import CompareTab, LogsTab, UnifiedMonitorTab
 from .theme import set_chip_state
 
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self.compare_tab.message.connect(self._on_message)
         self.compare_tab.report.connect(self.logs_tab.append_report)
 
+        self._apply_show_descriptions()
         _logger.info("OPC UA Explorer %s started", __version__)
         self.statusBar().showMessage("Ready. Enter an endpoint URL on the Connection tab.")
 
@@ -102,6 +104,7 @@ class MainWindow(QMainWindow):
         workspace.changed.connect(self._on_workspace_changed)
         workspace.message.connect(self._on_message)
         workspace.report.connect(self.logs_tab.append_report)
+        workspace.set_verbose_notices(self._settings.show_tab_descriptions)
         self.workspaces.append(workspace)
         self.unified_monitor_tab.register(workspace, workspace.title, workspace.monitor_tab)
         logs_index = self.tabs.indexOf(self.logs_tab)
@@ -307,10 +310,37 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        view_menu = self.menuBar().addMenu("&View")
+        self.show_descriptions_action = QAction("Show tab descriptions", self)
+        self.show_descriptions_action.setCheckable(True)
+        self.show_descriptions_action.setChecked(self._settings.show_tab_descriptions)
+        self.show_descriptions_action.setStatusTip(
+            "Show the full explanation at the top of each page instead of its one-line summary."
+        )
+        self.show_descriptions_action.toggled.connect(self._on_show_descriptions_toggled)
+        view_menu.addAction(self.show_descriptions_action)
+
         help_menu = self.menuBar().addMenu("&Help")
         about = QAction("About OPC UA Explorer", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
+
+    # -- page descriptions -------------------------------------------------
+    def _on_show_descriptions_toggled(self, checked: bool) -> None:
+        """One switch for every page description in every session, persisted in the settings."""
+        self._settings.show_tab_descriptions = bool(checked)
+        self._apply_show_descriptions()
+        try:
+            self._settings.save()
+        except OSError as exc:  # pragma: no cover - an unwritable profile is not fatal
+            _logger.warning("Saving the settings failed: %s", exc)
+
+    def _apply_show_descriptions(self) -> None:
+        show = bool(self._settings.show_tab_descriptions)
+        for workspace in self.workspaces:
+            workspace.set_verbose_notices(show)
+        for fixed in (self.unified_monitor_tab, self.compare_tab, self.logs_tab):
+            apply_notices(fixed, show)
 
     # -- shell status ------------------------------------------------------
     def _on_current_tab_changed(self, _index: int) -> None:

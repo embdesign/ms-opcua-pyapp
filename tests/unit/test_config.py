@@ -239,3 +239,15 @@ def test_profile_to_settings_maps_every_runtime_field() -> None:
     assert settings.password is None
     assert settings.private_key_password is None
     assert settings.server_certificate_der is None
+
+
+def test_settings_roundtrip_keeps_the_tab_description_switch(tmp_path) -> None:
+    path = tmp_path / "settings.json"
+    AppSettings(show_tab_descriptions=True).save(path)
+
+    assert AppSettings.load(path).show_tab_descriptions is True
+
+    # Settings written by an older build (no key) start collapsed.
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps({"last_endpoint": "opc.tcp://old:4840"}), encoding="utf-8")
+    assert AppSettings.load(legacy).show_tab_descriptions is False

@@ -64,6 +64,8 @@ from ...opcua.client_service import OpcUaService
 from ...opcua.event_service import SERVER_OBJECT_NODE_ID, event_id_bytes
 from ...operator_text import acknowledge_condition_confirmation, condition_refresh_text
 from ..async_runner import AsyncRunner
+from ..selection_marker import SelectionMarker
+from ..tab_notice import OptionsRow, TabNotice
 from ..theme import ERROR, mono_font
 from .base import SessionTab
 
@@ -123,17 +125,18 @@ class EventsTab(SessionTab):
         title = QLabel("Events")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "One event subscription on the source nodes you add explicitly (usually the Server object). The "
-            "server decides what it publishes; the fields come from the selected event type. For condition "
-            "events choose an event type such as ConditionType (i=2782) or AcknowledgeableConditionType "
-            "(i=2881), then a selected event can be acknowledged: one confirmed Acknowledge method call, "
-            "sent once. Refresh conditions asks the server once to publish the conditions it already "
-            "retains for this subscription. No variable is written and no other condition method is called."
+        layout.addWidget(
+            TabNotice(
+                "One event subscription on the sources you add; a selected condition can be acknowledged or "
+                "refreshed.",
+                "One event subscription on the source nodes you add explicitly (usually the Server object). The "
+                "server decides what it publishes; the fields come from the selected event type. For condition "
+                "events choose an event type such as ConditionType (i=2782) or AcknowledgeableConditionType "
+                "(i=2881), then a selected event can be acknowledged: one confirmed Acknowledge method call, "
+                "sent once. Refresh conditions asks the server once to publish the conditions it already "
+                "retains for this subscription. No variable is written and no other condition method is called.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         source_row = QHBoxLayout()
         self.source_edit = QLineEdit(SERVER_OBJECT_NODE_ID)
@@ -157,6 +160,7 @@ class EventsTab(SessionTab):
         source_row.addWidget(self.use_selection_btn)
         source_row.addWidget(self.remove_source_btn)
         source_row.addWidget(self.clear_sources_btn)
+        source_row.addWidget(SelectionMarker(self.source_edit, self._selection_provider))
         layout.addLayout(source_row)
 
         controls = QHBoxLayout()
@@ -187,6 +191,9 @@ class EventsTab(SessionTab):
         self.max_rows_spin.setValue(DEFAULT_EVENT_KEEP_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the event log; the oldest rows are dropped first.")
         self.max_rows_spin.valueChanged.connect(self._on_max_rows_changed)
+        # The server-side filter is fixed when the subscription starts; it lives in a
+        # hidden row whose toggle names whatever is in effect.
+        self.options = OptionsRow("Filter")
 
         controls.addWidget(QLabel("Event type:"))
         controls.addWidget(self.event_type_edit, 1)
@@ -199,26 +206,29 @@ class EventsTab(SessionTab):
         controls.addWidget(self.clear_log_btn)
         controls.addWidget(QLabel("Keep rows:"))
         controls.addWidget(self.max_rows_spin)
+        controls.addSpacing(12)
+        controls.addWidget(self.options.toggle)
         layout.addLayout(controls)
 
-        filters = QHBoxLayout()
         self.fields_edit = QLineEdit()
         self.fields_edit.setPlaceholderText("Extra fields, e.g. ConditionClassId, 2:Temperature")
         self.fields_edit.setToolTip(
             "Requested in addition to the standard fields. Comma-separated; use 'index:Name' for a "
             "property outside namespace 0. The filter is fixed when the subscription starts."
         )
+        self.fields_edit.textChanged.connect(self._update_controls)
         self.min_severity_spin = QSpinBox()
         self.min_severity_spin.setRange(0, 65_535)
         self.min_severity_spin.setSpecialValueText("any")
         self.min_severity_spin.setToolTip(
             "Server-side WhereClause: only events with at least this Severity are delivered (0 = any)."
         )
-        filters.addWidget(QLabel("Extra fields:"))
-        filters.addWidget(self.fields_edit, 1)
-        filters.addWidget(QLabel("Min severity:"))
-        filters.addWidget(self.min_severity_spin)
-        layout.addLayout(filters)
+        self.min_severity_spin.valueChanged.connect(self._update_controls)
+        self.options.add_widget(QLabel("Extra fields:"))
+        self.options.add_widget(self.fields_edit, 1)
+        self.options.add_widget(QLabel("Min severity:"))
+        self.options.add_widget(self.min_severity_spin)
+        layout.addWidget(self.options.widget)
 
         splitter = QSplitter(Qt.Vertical)
 
@@ -497,7 +507,9 @@ class EventsTab(SessionTab):
         self._detach_listener()
         self._events_key = key
         self._runner.listen(key, self._on_progress)
-        self._set_status(f"Creating an event subscription for {len(source_ids)} source(s)…")
+        filter_text = self._filter_summary()
+        suffix = f" with a server-side filter ({filter_text})" if filter_text else ""
+        self._set_status(f"Creating an event subscription for {len(source_ids)} source(s){suffix}…")
         self._submit(
             lambda: self._service.start_event_monitor(
                 source_ids, config, emit=self._runner.progress_callback(key)
@@ -858,11 +870,23 @@ class EventsTab(SessionTab):
         return answer == QMessageBox.Yes
 
     # -- controls ----------------------------------------------------------
+    def _filter_summary(self) -> str:
+        """Name the server-side filter the collapsed row is carrying."""
+        parts: list[str] = []
+        fields = [text for text in self.fields_edit.text().split(",") if text.strip()]
+        if fields:
+            parts.append(f"{len(fields)} extra field(s)")
+        severity = int(self.min_severity_spin.value())
+        if severity > 0:
+            parts.append(f"severity ≥ {severity}")
+        return ", ".join(parts)
+
     def _update_controls(self) -> None:
         connected = self._connected
         has_sources = self.sources_table.rowCount() > 0
         has_selection = bool(self.sources_table.selectedIndexes())
 
+        self.options.set_active(self._filter_summary())
         self.source_edit.setEnabled(connected and not self._busy)
         self.add_source_btn.setEnabled(connected and not self._busy)
         self.use_selection_btn.setEnabled(connected and not self._busy)

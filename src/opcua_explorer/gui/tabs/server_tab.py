@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -29,6 +30,7 @@ from ...models import ServerStatusSnapshot
 from ...opcua.client_service import OpcUaService
 from ...opcua.server_diagnostics import SERVER_COUNTER_NODES, SERVER_LIMIT_NODES
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
 from .base import SessionTab
 
@@ -63,15 +65,15 @@ class ServerTab(SessionTab):
         title = QLabel("Server status & diagnostics")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Read-only: one batched Read of the standard ServerStatus and ServerDiagnostics variables plus the "
-            "ServerCapabilities limits this client depends on. Nothing is written and no method is called. The "
-            "monitored-item rows are this client's own view of its live-monitor subscription, not the server's "
-            "GetMonitoredItems answer."
+        layout.addWidget(
+            TabNotice(
+                "Read-only ServerStatus, diagnostics and capability limits in one batched Read.",
+                "Read-only: one batched Read of the standard ServerStatus and ServerDiagnostics variables plus "
+                "the ServerCapabilities limits this client depends on. Nothing is written and no method is called. "
+                "The monitored-item rows are this client's own view of its live-monitor subscription, not the "
+                "server's GetMonitoredItems answer.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         controls = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
@@ -84,7 +86,11 @@ class ServerTab(SessionTab):
         controls.addWidget(self.last_label, 1)
         layout.addLayout(controls)
 
-        layout.addWidget(QLabel("Status, diagnostics summary and capability limits"))
+        status_box = QWidget()
+        status_layout = QVBoxLayout(status_box)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(6)
+        status_layout.addWidget(QLabel("Status, diagnostics summary and capability limits"))
         self.values_table = QTableWidget(0, 4)
         self.values_table.setHorizontalHeaderLabels(["Group", "Item", "Value", "Status"])
         self.values_table.verticalHeader().setVisible(False)
@@ -96,11 +102,15 @@ class ServerTab(SessionTab):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(self.values_table, 1)
+        status_layout.addWidget(self.values_table, 1)
 
+        monitor_box = QWidget()
+        monitor_layout = QVBoxLayout(monitor_box)
+        monitor_layout.setContentsMargins(0, 0, 0, 0)
+        monitor_layout.setSpacing(6)
         self.monitor_label = QLabel("This session's live monitor: no subscription.")
         self.monitor_label.setObjectName("hintLabel")
-        layout.addWidget(self.monitor_label)
+        monitor_layout.addWidget(self.monitor_label)
         self.monitor_table = QTableWidget(0, 4)
         self.monitor_table.setHorizontalHeaderLabels(["NodeId", "Server handle", "Status", "Sampling (ms)"])
         self.monitor_table.verticalHeader().setVisible(False)
@@ -111,8 +121,17 @@ class ServerTab(SessionTab):
         self.monitor_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.monitor_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.monitor_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.monitor_table.setMaximumHeight(150)
-        layout.addWidget(self.monitor_table)
+        monitor_layout.addWidget(self.monitor_table, 1)
+
+        # Server diagnostics are long lists; the operator decides which of the two
+        # tables gets the height instead of a fixed maximum on the second one.
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(status_box)
+        splitter.addWidget(monitor_box)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([380, 150])
+        layout.addWidget(splitter, 1)
 
         self.status_label = QLabel("Not connected.")
         self.status_label.setObjectName("hintLabel")

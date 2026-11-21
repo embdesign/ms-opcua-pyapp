@@ -77,17 +77,19 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
         # "All sessions" + the one open session.
         assert window.unified_monitor_tab.filter_combo.count() == 2
         workspace = window.workspaces[0]
+        # The order follows the on-site walk: connect, check the server, browse, observe,
+        # act, verify/report.
         assert [workspace.tabs.tabText(i) for i in range(workspace.tabs.count())] == [
             "Connection",
+            "Server",
             "Address space",
-            "Export",
             "Live monitor",
             "Events",
             "History",
             "Write && call",
-            "Server",
             "Tests",
             "Sequences",
+            "Export",
         ]
 
         tab = window.connection_tab

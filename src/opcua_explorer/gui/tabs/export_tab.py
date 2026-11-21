@@ -47,6 +47,8 @@ from ...opcua.client_service import OpcUaService
 from ...opcua.nodeset2 import NodeSet2Config, NodeSet2Result
 from ...project import ExportState
 from ..async_runner import AsyncRunner, TaskHandle
+from ..selection_marker import SelectionMarker
+from ..tab_notice import TabNotice
 from ..theme import mono_font
 
 _logger = logging.getLogger(__name__)
@@ -119,13 +121,13 @@ class ExportTab(QWidget):
         title = QLabel("Download & export")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Downloads are bounded and cancellable. Continuation points are released when possible, "
-            "including after cancellation."
+        layout.addWidget(
+            TabNotice(
+                "Bounded, cancellable downloads; continuation points are released, also after cancelling.",
+                "Downloads are bounded and cancellable. Continuation points are released when possible, "
+                "including after cancellation.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         scope_box = QGroupBox("Scope")
         scope_layout = QVBoxLayout(scope_box)
@@ -142,6 +144,7 @@ class ExportTab(QWidget):
         self.use_selection_btn.clicked.connect(self._on_use_selection)
         subtree_row.addWidget(self.subtree_edit, 1)
         subtree_row.addWidget(self.use_selection_btn)
+        subtree_row.addWidget(SelectionMarker(self.subtree_edit, self._selection_provider))
         scope_layout.addLayout(subtree_row)
         self.subtree_radio.toggled.connect(self._sync_scope)
         layout.addWidget(scope_box)

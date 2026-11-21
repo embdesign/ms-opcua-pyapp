@@ -50,6 +50,7 @@ from ...opcua.attributes import format_attribute_value
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import ACCENT, mono_font
 from .base import SessionTab
 
@@ -91,6 +92,8 @@ class BrowserTab(SessionTab):
 
     download_requested = Signal(str)
     monitor_requested = Signal(str)
+    #: The selected tree node changed (``""`` when nothing is selected any more).
+    selection_changed = Signal(str)
 
     def __init__(self, runner: AsyncRunner, service: OpcUaService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -129,15 +132,15 @@ class BrowserTab(SessionTab):
         title = QLabel("Address space")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Loading happens on demand. The address space is a graph, not a tree: a node referenced from several "
-            "parents appears under each of them, while duplicate references from the same parent are merged into "
-            "one row. Nodes in this session's live monitor are prefixed with ● while the subscription runs and "
-            "with ○ when they are added but not subscribed yet."
+        layout.addWidget(
+            TabNotice(
+                "Loads on demand; the address space is a graph, so a shared child appears under each parent.",
+                "Loading happens on demand. The address space is a graph, not a tree: a node referenced from "
+                "several parents appears under each of them, while duplicate references from the same parent are "
+                "merged into one row. Nodes in this session's live monitor are prefixed with ● while the "
+                "subscription runs and with ○ when they are added but not subscribed yet.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         toolbar = QHBoxLayout()
         self.start_combo = QComboBox()
@@ -327,6 +330,7 @@ class BrowserTab(SessionTab):
             self.tree.clear()
             self._loading.clear()
             self._current_node_id = None
+            self.selection_changed.emit("")
             self._clear_details()
             self.status_label.setText("Not connected. Use the Connection tab to open a session.")
         elif self._connected:
@@ -581,6 +585,7 @@ class BrowserTab(SessionTab):
         if not node_id:
             return
         self._current_node_id = str(node_id)
+        self.selection_changed.emit(self._current_node_id)
         self._load_details(str(node_id))
 
     # -- details -----------------------------------------------------------

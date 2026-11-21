@@ -74,9 +74,10 @@ Rules that keep the layers honest:
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
 * Only `opcua/session_setup.py` constructs an `asyncua.Client` — one instance per session; `OpcUaService`
   owns the resulting state and delegates discovery/connect to that module.
-* `gui/session_workspace.py` owns one service and its ten pages and injects that session's browser
-  selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
-  and never touches a client.
+* `gui/session_workspace.py` owns one service and its ten pages, orders them by the on-site workflow
+  (`Connection`, `Server`, `Address space`, `Live monitor`, `Events`, `History`, `Write & call`, `Tests`,
+  `Sequences`, `Export`) and injects that session's browser selection into the Export and Tests tabs;
+  `gui/main_window.py` is only the tab bar, menus and status bar, and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
 * `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_history.py`, `cli_write.py`, `cli_compare.py` and
   `cli_sequence.py` are the Qt-free front ends:
@@ -256,8 +257,8 @@ there is no retry. `FindServersOnNetwork` (multicast/GDS discovery) is not offer
 `MainWindow` is a shell: it owns the top-level tab bar (one tab per `SessionWorkspace`), the menus, the status
 bar and three shared tabs: `UnifiedMonitorTab` (a merge of all sessions' monitors), `CompareTab`
 (a structural comparison of two sessions) and `Logs & reports`. A `SessionWorkspace` owns exactly one
-`OpcUaService` and the ten pages
-(Connection, Address space, Export, Live monitor, Events, History, Write & call, Server, Tests, Sequences). Sessions are fully independent — separate client,
+`OpcUaService` and the ten pages, in workflow order (Connection, Server, Address space, Live monitor, Events,
+History, Write & call, Tests, Sequences, Export). Sessions are fully independent — separate client,
 discovery result, namespace table, address-space snapshot, live subscription and auto-reconnect supervisor — and
 two sessions to the same endpoint are allowed. `File → New connection` (`Ctrl+N`) creates a new service on the
 same asyncio runner and the same trust store; closing a session tab releases only that client. All sessions share

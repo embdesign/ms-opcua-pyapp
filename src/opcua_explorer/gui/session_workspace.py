@@ -24,6 +24,8 @@ from ..models import ConnectionInfo
 from ..opcua.client_service import OpcUaService
 from ..project import ProjectSession
 from .async_runner import AsyncRunner
+from .selection_marker import refresh_markers
+from .tab_notice import apply_notices
 from .tabs import (
     BrowserTab,
     ConnectionTab,
@@ -68,6 +70,8 @@ class SessionWorkspace(QWidget):
         self._chip_text = "Disconnected"
         self._server_text = ""
         self._connection: ConnectionInfo | None = None
+        #: Set by the shell: show every page description in full.
+        self._verbose_notices = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -100,17 +104,19 @@ class SessionWorkspace(QWidget):
         )
         self.sequences_tab = SequencesTab(runner, service, settings)
 
+        # The order follows an on-site walk of the device: connect, check the server, browse,
+        # observe, act, verify/report. The write tab stays last before the long workflows.
         self.tabs.addTab(self.connection_tab, "Connection")
+        self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.browser_tab, "Address space")
-        self.tabs.addTab(self.export_tab, "Export")
         self.tabs.addTab(self.monitor_tab, "Live monitor")
         self.tabs.addTab(self.events_tab, "Events")
         self.tabs.addTab(self.history_tab, "History")
         # Tab labels are drawn with Qt::TextShowMnemonic: '&&' is one literal '&'.
         self.tabs.addTab(self.write_tab, "Write && call")
-        self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.tests_tab, "Tests")
         self.tabs.addTab(self.sequences_tab, "Sequences")
+        self.tabs.addTab(self.export_tab, "Export")
 
         self._wire()
 
@@ -135,6 +141,13 @@ class SessionWorkspace(QWidget):
     @property
     def server_text(self) -> str:
         return self._server_text
+
+    # -- page descriptions -------------------------------------------------
+    def set_verbose_notices(self, verbose: bool) -> None:
+        """Show every page description in full (View menu), or keep it to one line."""
+        self._verbose_notices = bool(verbose)
+        for index in range(self.tabs.count()):
+            apply_notices(self.tabs.widget(index), self._verbose_notices)
 
     def describe(self) -> str:
         """Tooltip text: endpoint, security, identity and session name."""
@@ -187,6 +200,7 @@ class SessionWorkspace(QWidget):
         self.connection_tab.connection_restored.connect(self._on_connection_restored)
         self.browser_tab.download_requested.connect(self._on_download_requested)
         self.browser_tab.monitor_requested.connect(self._on_monitor_requested)
+        self.browser_tab.selection_changed.connect(self._on_selection_changed)
         self.export_tab.snapshot_ready.connect(self._on_snapshot_ready)
         self.export_tab.busy_changed.connect(self._on_export_busy)
         self.export_tab.export_finished.connect(self._report)
@@ -201,6 +215,10 @@ class SessionWorkspace(QWidget):
             self.monitor_tab.monitored_node_ids(),
             active=self.monitor_tab.is_running,
         )
+
+    def _on_selection_changed(self, _node_id: str) -> None:
+        """Every page's target marker re-checks itself when the selection moves."""
+        refresh_markers(self)
 
     def _set_state(self, state: str, chip_text: str, server_text: str | None = None) -> None:
         self._chip_state = state

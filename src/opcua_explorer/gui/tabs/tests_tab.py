@@ -69,6 +69,8 @@ from ...operator_text import EQUIPMENT_WARNING, guarded_operation_confirmation
 from ...project import TestsState
 from ...reporting import write_html_report, write_json_report
 from ..async_runner import AsyncRunner, TaskHandle
+from ..selection_marker import SelectionMarker
+from ..tab_notice import TabNotice
 from ..theme import mono_font
 
 _logger = logging.getLogger(__name__)
@@ -134,13 +136,14 @@ class TestsTab(QWidget):
         title = QLabel("Functional tests")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Bounded, read-only checks against the current session: discovery, browsing, attribute and value "
-            "reads, subscriptions, latency and (opt-in) connection recovery."
+        layout.addWidget(
+            TabNotice(
+                "Bounded, read-only checks against this session; writes only in the explicit opt-in group.",
+                "Bounded, read-only checks against the current session: discovery, browsing, attribute and value "
+                "reads, subscriptions, latency and (opt-in) connection recovery. Guarded write and method-call "
+                "checks run only when you tick them, name a single target and confirm.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         notice = QLabel(
             "The read-only checks never write and never call a method. Guarded writes and method calls exist "
@@ -163,6 +166,7 @@ class TestsTab(QWidget):
         self.use_selection_btn = QPushButton("Use browser selection")
         self.use_selection_btn.clicked.connect(self._on_use_selection)
         variable_row.addWidget(self.use_selection_btn)
+        variable_row.addWidget(SelectionMarker(self.variable_edit, self._selection_provider))
         target_layout.addRow("Browse root:", self.root_edit)
         target_layout.addRow("Variable node:", variable_row)
         layout.addWidget(target_box)
@@ -274,6 +278,7 @@ class TestsTab(QWidget):
         self.add_write_btn.clicked.connect(self._on_add_write)
         write_row.addWidget(self.write_use_selection_btn)
         write_row.addWidget(self.add_write_btn)
+        write_row.addWidget(SelectionMarker(self.write_node_edit, self._selection_provider))
         write_row.addStretch(1)
         write_form.addRow("Node:", self.write_node_edit)
         write_form.addRow("Value:", self.write_value_edit)
@@ -304,6 +309,7 @@ class TestsTab(QWidget):
         self.add_call_btn.clicked.connect(self._on_add_call)
         call_row.addWidget(self.call_use_selection_btn)
         call_row.addWidget(self.add_call_btn)
+        call_row.addWidget(SelectionMarker(self.call_object_edit, self._selection_provider))
         call_row.addStretch(1)
         call_form.addRow("Object node:", self.call_object_edit)
         call_form.addRow("Method node:", self.call_method_edit)

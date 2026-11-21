@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from ...logging_setup import get_log_bus
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import mono_font
 
 _LEVELS = [
@@ -60,12 +61,14 @@ class LogsTab(QWidget):
         title = QLabel("Logs & reports")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Passwords, private-key passwords and PEM key material are redacted before a record reaches this view."
+        layout.addWidget(
+            TabNotice(
+                "Passwords, private-key passwords and PEM key material are redacted before they reach this view.",
+                "Passwords, private-key passwords and PEM key material are redacted before a record reaches "
+                "this view. The Reports page lists what the write, test and sequence paths wrote, with the path "
+                "of each file.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         tabs = QTabWidget()
         tabs.addTab(self._build_log_page(), "Application log")

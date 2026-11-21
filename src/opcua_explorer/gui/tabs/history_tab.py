@@ -43,6 +43,8 @@ from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...trend import build_trend_series
 from ..async_runner import AsyncRunner
+from ..selection_marker import SelectionMarker
+from ..tab_notice import OptionsRow, TabNotice
 from ..theme import ERROR, mono_font
 from ..trend_chart import TrendChart
 from .base import SessionTab
@@ -86,16 +88,16 @@ class HistoryTab(SessionTab):
         title = QLabel("History")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Raw HistoryRead for one variable: an optional time range and a maximum number of values, "
-            "optionally one aggregate (average/minimum/maximum/count) over that range. Read-only — no "
-            "HistoryUpdate and no event history. The server decides whether a node has history and whether "
-            "it computes aggregates; an empty result is not an error. Single numeric values are also drawn "
-            "as a trend: nothing is interpolated, and non-numeric values are counted instead of plotted."
+        layout.addWidget(
+            TabNotice(
+                "One HistoryRead: raw or one aggregate over a range, shown as a table and a trend. Read-only.",
+                "HistoryRead for one variable: an optional time range and a maximum number of values, "
+                "optionally one aggregate (average/minimum/maximum/count) over that range. Read-only — no "
+                "HistoryUpdate and no event history. The server decides whether a node has history and whether "
+                "it computes aggregates; an empty result is not an error. Single numeric values are also drawn "
+                "as a trend: nothing is interpolated, and non-numeric values are counted instead of plotted.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         node_row = QHBoxLayout()
         self.node_edit = QLineEdit()
@@ -103,9 +105,12 @@ class HistoryTab(SessionTab):
         self.node_edit.returnPressed.connect(self._on_read)
         self.use_selection_btn = QPushButton("Use browser selection")
         self.use_selection_btn.clicked.connect(self._on_use_selection)
+        # Speaks up only when this page's target differs from the browser selection.
+        self.selection_marker = SelectionMarker(self.node_edit, self._selection_provider)
         node_row.addWidget(QLabel("Node:"))
         node_row.addWidget(self.node_edit, 2)
         node_row.addWidget(self.use_selection_btn)
+        node_row.addWidget(self.selection_marker)
         layout.addLayout(node_row)
 
         range_row = QHBoxLayout()
@@ -126,11 +131,15 @@ class HistoryTab(SessionTab):
         self.max_spin.setSingleStep(100)
         self.max_spin.setValue(DEFAULT_HISTORY_MAX_VALUES)
         self.max_spin.setToolTip("Hard cap: also sent as NumValuesPerNode.")
+        self.max_spin.valueChanged.connect(self._update_controls)
         self.read_btn = QPushButton("Read history")
         self.read_btn.setObjectName("primary")
         self.read_btn.clicked.connect(self._on_read)
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.clicked.connect(self._on_clear)
+        # Secondary read settings stay out of the working area; the toggle names
+        # whatever is in effect, so a collapsed row can never be forgotten.
+        self.options = OptionsRow("Options")
 
         range_row.addWidget(self.from_check)
         range_row.addWidget(self.from_edit)
@@ -138,15 +147,13 @@ class HistoryTab(SessionTab):
         range_row.addWidget(self.to_check)
         range_row.addWidget(self.to_edit)
         range_row.addSpacing(12)
-        range_row.addWidget(QLabel("Max values:"))
-        range_row.addWidget(self.max_spin)
+        range_row.addWidget(self.options.toggle)
         range_row.addSpacing(12)
         range_row.addWidget(self.read_btn)
         range_row.addWidget(self.clear_btn)
         range_row.addStretch(1)
         layout.addLayout(range_row)
 
-        aggregate_row = QHBoxLayout()
         self.aggregate_combo = QComboBox()
         self.aggregate_combo.addItem("Raw", "")
         for name in HISTORY_AGGREGATES:
@@ -164,12 +171,16 @@ class HistoryTab(SessionTab):
         self.interval_spin.setToolTip(
             "Processing interval for an aggregate read; 0 asks for one value over the whole range."
         )
-        aggregate_row.addWidget(QLabel("Aggregate:"))
-        aggregate_row.addWidget(self.aggregate_combo)
-        aggregate_row.addWidget(QLabel("Interval:"))
-        aggregate_row.addWidget(self.interval_spin)
-        aggregate_row.addStretch(1)
-        layout.addLayout(aggregate_row)
+        self.interval_spin.valueChanged.connect(self._update_controls)
+        self.options.add_widget(QLabel("Aggregate:"))
+        self.options.add_widget(self.aggregate_combo)
+        self.options.add_widget(QLabel("Interval:"))
+        self.options.add_widget(self.interval_spin)
+        self.options.add_spacing(12)
+        self.options.add_widget(QLabel("Max values:"))
+        self.options.add_widget(self.max_spin)
+        self.options.add_stretch(1)
+        layout.addWidget(self.options.widget)
 
         self.values_table = QTableWidget(0, 5)
         self.values_table.setHorizontalHeaderLabels(
@@ -260,7 +271,7 @@ class HistoryTab(SessionTab):
             return
         self._busy = True
         self._update_controls()
-        self._set_status(f"Reading raw history of {canonical}…")
+        self._set_status(f"Reading {config.aggregate or 'raw'} history of {canonical}…")
 
         def done(result: HistoryResult) -> None:
             self._busy = False
@@ -344,8 +355,20 @@ class HistoryTab(SessionTab):
         self._set_status("Cleared the local history table and trend.")
 
     # -- controls ----------------------------------------------------------
+    def _options_summary(self) -> str:
+        """Name the non-default read settings, so a collapsed row is never forgotten."""
+        config = self._config()
+        parts: list[str] = []
+        if config.aggregate:
+            interval = config.processing_interval_ms
+            parts.append(f"{config.aggregate}" if not interval else f"{config.aggregate} / {interval:g} ms")
+        if config.max_values != DEFAULT_HISTORY_MAX_VALUES:
+            parts.append(f"max {config.max_values}")
+        return ", ".join(parts)
+
     def _update_controls(self) -> None:
         connected = self._connected
+        self.options.set_active(self._options_summary())
         self.node_edit.setEnabled(connected and not self._busy)
         self.use_selection_btn.setEnabled(connected and not self._busy)
         self.from_edit.setEnabled(self.from_check.isChecked() and connected and not self._busy)
