@@ -198,6 +198,25 @@ class EventsTab(SessionTab):
         controls.addWidget(self.max_rows_spin)
         layout.addLayout(controls)
 
+        filters = QHBoxLayout()
+        self.fields_edit = QLineEdit()
+        self.fields_edit.setPlaceholderText("Extra fields, e.g. ConditionClassId, 2:Temperature")
+        self.fields_edit.setToolTip(
+            "Requested in addition to the standard fields. Comma-separated; use 'index:Name' for a "
+            "property outside namespace 0. The filter is fixed when the subscription starts."
+        )
+        self.min_severity_spin = QSpinBox()
+        self.min_severity_spin.setRange(0, 65_535)
+        self.min_severity_spin.setSpecialValueText("any")
+        self.min_severity_spin.setToolTip(
+            "Server-side WhereClause: only events with at least this Severity are delivered (0 = any)."
+        )
+        filters.addWidget(QLabel("Extra fields:"))
+        filters.addWidget(self.fields_edit, 1)
+        filters.addWidget(QLabel("Min severity:"))
+        filters.addWidget(self.min_severity_spin)
+        layout.addLayout(filters)
+
         splitter = QSplitter(Qt.Vertical)
 
         sources_box = QWidget()
@@ -313,6 +332,8 @@ class EventsTab(SessionTab):
         return EventConfig(
             publishing_interval_ms=float(self.publishing_spin.value()),
             event_type_node_id=self.event_type_edit.text().strip(),
+            select_fields=[part.strip() for part in self.fields_edit.text().split(",") if part.strip()],
+            min_severity=int(self.min_severity_spin.value()) or None,
         ).normalised()
 
     # -- sources -----------------------------------------------------------
@@ -792,6 +813,8 @@ class EventsTab(SessionTab):
         self.clear_sources_btn.setEnabled(connected and not self._running)
         self.event_type_edit.setEnabled(not self._running)
         self.publishing_spin.setEnabled(not self._running)
+        self.fields_edit.setEnabled(not self._running)
+        self.min_severity_spin.setEnabled(not self._running)
         self.start_btn.setEnabled(connected and has_sources and not self._running and not self._busy)
         self.stop_btn.setEnabled(self._running and not self._busy)
         self._update_ack_button()

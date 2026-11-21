@@ -139,6 +139,10 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
 * `OpcUaService.start_event_monitor(...)` creates one subscription and subscribes each source node's
   `EventNotifier` attribute through `Subscription.subscribe_events`, so the server's event-type definition
   decides which fields are requested (`BaseEventType` by default, a custom type on request).
+* `event_service.build_event_filter()` runs the selection on the **server**: the standard fields plus any
+  `select_fields` (an `index:Name` selects outside namespace 0) become the `SelectClauses`, and `min_severity`
+  becomes a `ContentFilter` WhereClause (`Severity >= n`). The filter is built once when the subscription starts
+  and passed to every source, so low-severity events never reach the client.
 * asyncua delivers an `Event` per notification; `LiveEvents` reduces every selected field to bounded text in the
   asyncio thread and emits one `EventNotification`. The tab never sees an asyncua object.
 * A source that cannot publish events (no `EventNotifier`, unknown NodeId, unsupported service) is recorded as a

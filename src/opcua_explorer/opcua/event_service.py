@@ -41,6 +41,7 @@ from ..models import (
     iso_utc,
 )
 from .attributes import status_name
+from .path_support import parse_browse_name
 from .serialize import SerializationContext, serialize_value
 
 _logger = logging.getLogger(__name__)
@@ -55,6 +56,71 @@ _LIFETIME_COUNT = 10_000
 _MAX_KEEP_ALIVE_COUNT = 20
 #: Events arrive in bursts far more readily than data changes; keep more per publish.
 _MAX_NOTIFICATIONS_PER_PUBLISH = 1_000
+
+#: Fields every event subscription selects, so the summary columns always work.
+DEFAULT_EVENT_FIELDS = (
+    "EventId",
+    "EventType",
+    "SourceNode",
+    "SourceName",
+    "Time",
+    "ReceiveTime",
+    "Message",
+    "Severity",
+)
+
+
+def build_event_filter(event_type: ua.NodeId, config: EventConfig) -> ua.EventFilter | None:
+    """Build the server-side filter for ``config``; ``None`` keeps asyncua's default.
+
+    The standard fields are always selected so the summary columns never depend
+    on what the operator typed. Extra fields are added to the select clauses;
+    ``min_severity`` becomes a ``WhereClause`` (Severity >= n), so the server
+    discards low-severity events instead of the client receiving and dropping
+    them.
+    """
+    settings = config.normalised()
+    if not settings.select_fields and settings.min_severity is None:
+        return None
+
+    names: list[ua.QualifiedName] = []
+    seen: set[tuple[str, int]] = set()
+    for text in (*DEFAULT_EVENT_FIELDS, *settings.select_fields):
+        try:
+            name = parse_browse_name(text)
+        except ValueError:  # pragma: no cover - normalised() removed empty entries
+            continue
+        key = (name.Name or "", int(name.NamespaceIndex or 0))
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+
+    select = [
+        ua.SimpleAttributeOperand(
+            TypeDefinitionId=event_type,
+            BrowsePath=[name],
+            AttributeId=ua.AttributeIds.Value,
+        )
+        for name in names
+    ]
+
+    where = ua.ContentFilter(Elements=[])
+    if settings.min_severity is not None:
+        severity = ua.SimpleAttributeOperand(
+            TypeDefinitionId=event_type,
+            BrowsePath=[ua.QualifiedName("Severity", 0)],
+            AttributeId=ua.AttributeIds.Value,
+        )
+        literal = ua.LiteralOperand(Value=ua.Variant(int(settings.min_severity), ua.VariantType.UInt16))
+        element = ua.ContentFilterElement(
+            FilterOperator=ua.FilterOperator.GreaterThanOrEqual,
+            FilterOperands=[severity, literal],
+        )
+        where = ua.ContentFilter(Elements=[element])
+
+    return ua.EventFilter(SelectClauses=select, WhereClause=where)
+
 
 #: Attributes of ``asyncua.common.subscription.Event`` that are bookkeeping, not fields.
 _INTERNAL_EVENT_ATTRIBUTES = frozenset(
@@ -171,6 +237,7 @@ class LiveEvents:
         self._subscription: Any | None = None
         self._config = EventConfig()
         self._event_type: ua.NodeId = ua.NodeId(ua.ObjectIds.BaseEventType)
+        self._event_filter: ua.EventFilter | None = None
         self._sources: dict[int, EventSourceInfo] = {}
         self._sequence = 0
 
@@ -197,6 +264,7 @@ class LiveEvents:
 
         self._config = config.normalised()
         self._event_type = self._parse_event_type(self._config.event_type_node_id)
+        self._event_filter = build_event_filter(self._event_type, self._config)
 
         if self._subscription is not None:
             await self.stop()
@@ -234,6 +302,7 @@ class LiveEvents:
                 handle = await self._subscription.subscribe_events(
                     self._client.get_node(node_id),
                     self._event_type,
+                    evfilter=self._event_filter,
                     queuesize=int(self._config.queue_size),
                 )
             except asyncio.CancelledError:

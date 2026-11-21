@@ -10,6 +10,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Server-side event filtering.** `EventConfig` gained `select_fields` (extra EventType properties, with
+  `index:Name` support) and `min_severity`; `event_service.build_event_filter()` builds an `ua.EventFilter` with
+  the standard fields plus the extras and an optional `Severity >= n` WhereClause, and every source subscribes
+  with it. The Events tab exposes **Extra fields** and **Min severity**; the filter is fixed when the subscription
+  starts. Low-severity events are dropped by the server, not by the client.
 - **Event subscriptions** (`opcua/event_service.py`) — one event subscription per session on explicitly added
   source nodes. The source's `EventNotifier` is monitored through `Subscription.subscribe_events`, so the
   server's event type decides which fields are requested (`BaseEventType` by default, a named custom type on

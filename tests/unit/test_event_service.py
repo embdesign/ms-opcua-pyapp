@@ -40,15 +40,19 @@ class _FakeSubscription:
     def __init__(self) -> None:
         self.subscription_id = 42
         self.subscribed: list[tuple[str, Any, int]] = []
+        self.event_filters: list[Any] = []
         self.unsubscribed: list[int] = []
         self.deleted = False
 
-    async def subscribe_events(self, node: _FakeNode, event_type: Any, queuesize: int = 0) -> int:
+    async def subscribe_events(
+        self, node: _FakeNode, event_type: Any, evfilter: Any = None, queuesize: int = 0
+    ) -> int:
         node_id = node.nodeid.to_string()
         if node_id == REJECTED_SOURCE:
             raise ua.UaStatusCodeError(ua.StatusCodes.BadNodeIdUnknown)
         handle = 200 + len(self.subscribed)
         self.subscribed.append((node_id, event_type, queuesize))
+        self.event_filters.append(evfilter)
         return handle
 
     async def unsubscribe(self, handles: list[int]) -> None:
@@ -170,6 +174,13 @@ async def test_add_and_remove_require_a_running_subscription() -> None:
     await events.remove([added[0].client_handle])
     assert client.subscription.unsubscribed == [added[0].client_handle]
     assert events.source_count() == 1
+
+
+async def test_configured_filter_is_forwarded_to_each_source() -> None:
+    client = _FakeClient()
+    events = LiveEvents(client, lambda _event: None)
+    await events.start(["i=2253", "ns=2;s=Plant"], EventConfig(min_severity=10))
+    assert all(event_filter is not None for event_filter in client.subscription.event_filters)
 
 
 async def test_custom_event_type_is_forwarded_to_the_server() -> None:

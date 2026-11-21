@@ -35,8 +35,19 @@ class EventConfig:
     #: Server-side queue size per monitored item; ``0`` uses the server default.
     queue_size: int = 0
     event_type_node_id: str = ""
+    #: Extra EventType properties requested in addition to the standard fields.
+    #: ``"index:Name"`` selects a property outside namespace 0.
+    select_fields: list[str] = field(default_factory=list)
+    #: Server-side ``WhereClause``: only events with at least this Severity.
+    min_severity: int | None = None
 
     def normalised(self) -> EventConfig:
+        fields: list[str] = []
+        for name in self.select_fields:
+            cleaned = str(name).strip()
+            if cleaned and cleaned not in fields:
+                fields.append(cleaned)
+        severity = None if self.min_severity is None else max(0, min(int(self.min_severity), 65_535))
         return EventConfig(
             publishing_interval_ms=min(
                 MAX_PUBLISHING_INTERVAL_MS,
@@ -44,6 +55,8 @@ class EventConfig:
             ),
             queue_size=min(1000, max(0, int(self.queue_size))),
             event_type_node_id=str(self.event_type_node_id or "").strip(),
+            select_fields=fields,
+            min_severity=severity,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,6 +64,8 @@ class EventConfig:
             "publishing_interval_ms": self.publishing_interval_ms,
             "queue_size": self.queue_size,
             "event_type_node_id": self.event_type_node_id,
+            "select_fields": list(self.select_fields),
+            "min_severity": self.min_severity,
         }
 
 

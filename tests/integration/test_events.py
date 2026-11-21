@@ -78,6 +78,39 @@ async def test_event_subscription_delivers_events(events_service) -> None:
     assert await service.browse_children("i=85")
 
 
+async def test_min_severity_filter_is_applied_by_the_server(events_service) -> None:
+    service, _model = events_service
+    received: list[EventNotification] = []
+    await service.start_event_monitor(
+        [SERVER_OBJECT_NODE_ID],
+        EventConfig(publishing_interval_ms=200, min_severity=10),
+        emit=received.append,
+    )
+    try:
+        # The demo event has Severity 1, so a >=10 WhereClause must suppress it.
+        assert not await _wait_for(lambda: bool(received), timeout=2.0), "a severity-1 event passed a >=10 filter"
+    finally:
+        await service.event_monitor_stop()
+
+
+async def test_extra_fields_are_requested_with_the_standard_ones(events_service) -> None:
+    service, _model = events_service
+    received: list[EventNotification] = []
+    await service.start_event_monitor(
+        [SERVER_OBJECT_NODE_ID],
+        EventConfig(publishing_interval_ms=200, select_fields=["ConditionClassId"]),
+        emit=received.append,
+    )
+    try:
+        assert await _wait_for(lambda: bool(received)), "no event notification arrived"
+    finally:
+        await service.event_monitor_stop()
+
+    fields = received[0].fields
+    assert {"EventId", "EventType", "SourceNode", "Message", "Severity"} <= set(fields)
+    assert "ConditionClassId" in fields
+
+
 async def test_a_source_that_cannot_publish_events_is_reported(events_service) -> None:
     service, model = events_service
 
