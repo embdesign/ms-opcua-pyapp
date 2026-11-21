@@ -41,7 +41,12 @@ from .discovery import (
     ServerDiscoveryResult,
 )
 from .events import (
+    CONDITION_REFRESH_METHOD_ID,
+    CONDITION_TYPE_NODE_ID,
     EVENT_FIELD_CHAR_LIMIT,
+    REFRESH_END_EVENT_TYPE_ID,
+    REFRESH_START_EVENT_TYPE_ID,
+    ConditionRefreshResult,
     EventConfig,
     EventNotification,
     EventSourceInfo,
@@ -71,7 +76,7 @@ from .graph import (
     TraversalProgress,
     ValueSnapshot,
 )
-from .history import HistoryConfig, HistoryResult
+from .history import HISTORY_AGGREGATES, HistoryConfig, HistoryResult
 from .monitor import (
     DATA_CHANGE_TRIGGERS,
     DEADBAND_TYPES,
@@ -131,8 +136,11 @@ __all__ = [
     "BROWSE_NODE_CLASSES",
     "BROWSE_REFERENCE_TYPES",
     "BrowseOptions",
+    "CONDITION_REFRESH_METHOD_ID",
+    "CONDITION_TYPE_NODE_ID",
     "CREATABLE_NODE_CLASSES",
     "ChildEntry",
+    "ConditionRefreshResult",
     "ConnectionInfo",
     "DATA_CHANGE_TRIGGERS",
     "DEADBAND_TYPES",
@@ -147,6 +155,7 @@ __all__ = [
     "EventSourceInfo",
     "EventStart",
     "FUNCTIONAL_TEST_DISCLAIMER",
+    "HISTORY_AGGREGATES",
     "HistoryConfig",
     "HistoryResult",
     "KEEPALIVE_ABORT",
@@ -170,6 +179,8 @@ __all__ = [
     "PHASE_KEEPALIVE",
     "PHASE_PRECONDITION",
     "PHASE_STEP",
+    "REFRESH_END_EVENT_TYPE_ID",
+    "REFRESH_START_EVENT_TYPE_ID",
     "ReferenceInfo",
     "SEQUENCE_FORMAT",
     "SEQUENCE_STEP_KINDS",

@@ -10,6 +10,10 @@ from ..defaults import DEFAULT_HISTORY_MAX_VALUES, MAX_HISTORY_MAX_VALUES
 from .common import iso_utc, utc_now
 from .graph import ValueSnapshot
 
+#: Aggregate functions the client can request; the wire NodeIds live in
+#: ``opcua/history_service.py``. ``""``/``None`` means a raw read.
+HISTORY_AGGREGATES = ("average", "minimum", "maximum", "count")
+
 
 @dataclass(slots=True)
 class HistoryConfig:
@@ -22,12 +26,22 @@ class HistoryConfig:
     start: datetime | None = None
     end: datetime | None = None
     max_values: int = DEFAULT_HISTORY_MAX_VALUES
+    #: Raw when empty; otherwise one of :data:`HISTORY_AGGREGATES`.
+    aggregate: str | None = None
+    #: Processing interval in milliseconds for an aggregate read; ``0`` lets the
+    #: server choose (one value over the whole range).
+    processing_interval_ms: float = 0.0
 
     def normalised(self) -> HistoryConfig:
+        aggregate = (self.aggregate or "").strip().lower() or None
+        if aggregate not in HISTORY_AGGREGATES:
+            aggregate = None
         return HistoryConfig(
             start=self.start,
             end=self.end,
             max_values=min(MAX_HISTORY_MAX_VALUES, max(1, int(self.max_values))),
+            aggregate=aggregate,
+            processing_interval_ms=max(0.0, float(self.processing_interval_ms)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -35,6 +49,8 @@ class HistoryConfig:
             "start": iso_utc(self.start),
             "end": iso_utc(self.end),
             "max_values": self.max_values,
+            "aggregate": self.aggregate,
+            "processing_interval_ms": self.processing_interval_ms,
         }
 
 

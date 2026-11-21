@@ -1,9 +1,10 @@
-"""Raw history reads (``HistoryRead`` with ``ReadRawModifiedDetails``).
+"""Read-only history reads: raw or processed (aggregate).
 
-One call path, read-only: no ``HistoryUpdate``, no processed/aggregate reads, no
-event history and no at-time reads. The loop follows continuation points up to a
-bounded number of pages and the requested maximum number of values, and releases
-a continuation point it does not follow.
+One call path: ``ReadRawModifiedDetails`` for raw values, ``ReadProcessedDetails``
+when an aggregate is selected (average/minimum/maximum/count). There is no
+``HistoryUpdate``, no event history and no at-time read. The loop follows
+continuation points up to a bounded number of pages and the requested maximum
+number of values, and releases a continuation point it does not follow.
 
 The server decides ordering and availability. A Good StatusCode with no values
 is normal (empty range or a node without history); the node's ``Historizing``
@@ -31,6 +32,14 @@ _logger = logging.getLogger(__name__)
 #: Safety bound for continuation points; the value cap is the primary limit.
 _MAX_PAGES = 50
 
+#: Aggregate function keys (``HistoryConfig.aggregate``) to the standard NodeIds.
+_AGGREGATE_NODE_IDS: dict[str, int] = {
+    "average": ua.ObjectIds.AggregateFunction_Average,
+    "minimum": ua.ObjectIds.AggregateFunction_Minimum,
+    "maximum": ua.ObjectIds.AggregateFunction_Maximum,
+    "count": ua.ObjectIds.AggregateFunction_Count,
+}
+
 
 def build_history_request(
     node_id: str,
@@ -39,14 +48,26 @@ def build_history_request(
     continuation_point: bytes = b"",
     release: bool = False,
 ) -> ua.HistoryReadParameters:
-    """Build one ``HistoryRead`` request for a single node."""
+    """Build one ``HistoryRead`` request for a single node (raw or processed)."""
     normalised = config.normalised()
-    details = ua.ReadRawModifiedDetails()
-    details.IsReadModified = False
-    details.StartTime = normalised.start or ua.get_win_epoch()
-    details.EndTime = normalised.end or ua.get_win_epoch()
-    details.NumValuesPerNode = int(normalised.max_values)
-    details.ReturnBounds = False
+    if normalised.aggregate:
+        if normalised.start is None or normalised.end is None:
+            raise OpcUaExplorerError("An aggregate history read requires a start and an end time.")
+        details: Any = ua.ReadProcessedDetails()
+        details.StartTime = normalised.start
+        details.EndTime = normalised.end
+        details.ProcessingInterval = float(normalised.processing_interval_ms)
+        details.AggregateType = [ua.NodeId(_AGGREGATE_NODE_IDS[normalised.aggregate])]
+        aggregate_config = ua.AggregateConfiguration()
+        aggregate_config.UseServerCapabilitiesDefaults = True
+        details.AggregateConfiguration = aggregate_config
+    else:
+        details = ua.ReadRawModifiedDetails()
+        details.IsReadModified = False
+        details.StartTime = normalised.start or ua.get_win_epoch()
+        details.EndTime = normalised.end or ua.get_win_epoch()
+        details.NumValuesPerNode = int(normalised.max_values)
+        details.ReturnBounds = False
 
     read_value = ua.HistoryReadValueId()
     read_value.NodeId = to_node_id(node_id)
@@ -116,6 +137,8 @@ async def read_history(session: Any, node_id: Any, config: HistoryConfig) -> His
             if not result.StatusCode.is_good():
                 status = status_name(result.StatusCode)
                 detail = f"HistoryRead returned {status}."
+                if normalised.aggregate and status in ("BadNotImplemented", "BadHistoryOperationUnsupported"):
+                    detail += " The server does not provide aggregate history for this node."
                 break
 
             history_data = getattr(result, "HistoryData", None)

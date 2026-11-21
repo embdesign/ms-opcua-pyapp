@@ -40,7 +40,7 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py · cli_read.py · cli_monitor.py · cli_history.py · cli_compare.py │
+│ cli.py · cli_read · cli_monitor · cli_history · cli_write · cli_compare │
 │ opcua-export · opcua-compare · opcua-run-sequence                    │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
@@ -78,8 +78,8 @@ Rules that keep the layers honest:
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
-* `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_history.py`, `cli_compare.py` and `cli_sequence.py` are the
-  Qt-free front ends:
+* `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_history.py`, `cli_write.py`, `cli_compare.py` and
+  `cli_sequence.py` are the Qt-free front ends:
   each owns its own event loop
   through `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They
   must not re-implement traversal, dependency collection, writing, validation, certificate approval, the
@@ -149,12 +149,18 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
   asyncio thread and emits one `EventNotification`. The tab never sees an asyncua object.
 * A source that cannot publish events (no `EventNotifier`, unknown NodeId, unsupported service) is recorded as a
   rejected `EventSourceInfo` with its StatusCode; one bad source never aborts the others or the subscription.
-* Event monitoring publishes notifications only. Its one action is a condition acknowledgement:
+* Event monitoring publishes notifications only. Its **guarded** action is a condition acknowledgement:
   `write_service.acknowledge_condition()` resolves the instance's `Acknowledge` method below the condition node,
   requires `InputArguments` = (ByteString, LocalizedText), and sends exactly one call through
   `send_prepared_call` with `WriteAuthority("operator-dialog", …)`. The tab asks for an optional comment, shows
   the confirmation text from `operator_text.acknowledge_condition_confirmation`, and never calls
   `Confirm`/`Enable`/`AddComment` or retries.
+* Its **unguarded** action is `ConditionRefresh`: `write_service.refresh_conditions()` sends one call of the
+  standard method `i=3875` on the ConditionType object (`i=2782`) with the subscription id as its only `UInt32`
+  input, and `LiveEvents.refresh_conditions()` composes a `ConditionRefreshResult` from that outcome plus a
+  bounded (2 s) wait for the server's `RefreshStart`/`RefreshEnd` events. The call stores nothing, so the tab
+  shows no dialog; an authority is still recorded and a missing refresh event is reported rather than claimed.
+  There is no `ConditionRefresh2`, no second parent object and no retry.
 
 ### Server status
 
@@ -173,12 +179,16 @@ namespace-0 variables and never writes:
 
 ### History (raw reads)
 
-The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one raw `HistoryRead` of
-the selected variable; it never calls `HistoryUpdate` and never retries:
+The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one read-only
+`HistoryRead` of the selected variable, raw or one aggregate; it never calls `HistoryUpdate` and never retries:
 
 * `build_history_request()` produces `HistoryReadParameters` with `ReadRawModifiedDetails`, an open range
   (`ua.get_win_epoch()` on both ends) unless the operator sets From/To, `NumValuesPerNode` from the value cap,
-  `ReturnBounds = False` and `TimestampsToReturn.Both` for exactly one node.
+  `ReturnBounds = False` and `TimestampsToReturn.Both` for exactly one node. With
+  `HistoryConfig.aggregate` set (average/minimum/maximum/count) it produces `ReadProcessedDetails` instead:
+  a required start/end, `ProcessingInterval`, the aggregate's standard `AggregateType` NodeId and
+  `UseServerCapabilitiesDefaults = True`. A server without aggregate support is reported with its StatusCode
+  (the demo historian answers `BadNotImplemented`), never silently treated as raw.
 * `read_history()` validates the range, follows continuation points up to `_MAX_PAGES = 50`, decodes each
   `DataValue` through the shared `decode_data_value()`, releases the continuation point when the cap or the page
   limit ends the read, and makes a best-effort release in `finally` so no server-side cursor is left behind.
@@ -187,6 +197,12 @@ the selected variable; it never calls `HistoryUpdate` and never retries:
 * A Good StatusCode with no values is normal: the result records the node's `Historizing` attribute and the
   status line says whether the node reports `Historizing = false` or simply has no values in the range. A Bad
   StatusCode is reported with that StatusCode, never as an exception or as row loss.
+* The trend chart is a **view of that one result**: `trend.py` (`build_trend_series`) walks the returned
+  snapshots, keeps the ones that are a single number (a bool becomes 0/1), counts the rest as skipped, and
+  decides `time_based` from the timestamps; `gui/trend_chart.py` paints the series and nothing else. It never
+  reads, subscribes, interpolates or resamples, so the picture cannot show values the server did not return.
+  `opcua-history --sparkline` prints the same series as one line of block characters (bucketed by average when
+  it is longer than the line).
 
 ### Value read options
 
@@ -439,10 +455,11 @@ document is reported as partial rather than as "nodes missing on the other side"
 
 ## 9. Delivered scope and test-suite policy
 
-Connection/security, event subscriptions with the one guarded condition acknowledgement, server status
-and diagnostics, raw history reads, the functional checks with reports, NodeSet2 export and the guarded
-write and method call are delivered, together with address-space comparison and operator sequences; `PLAN.md` §1
-is the authoritative capability list.
+Connection/security, event subscriptions with the one guarded condition acknowledgement and one unguarded
+`ConditionRefresh`, server status and diagnostics, history reads (raw or one aggregate) with a trend chart drawn
+from that result, the functional checks with reports, NodeSet2 export and the guarded write and method call are
+delivered, together with address-space comparison and operator sequences; `PLAN.md` §1 is the authoritative
+capability list.
 
 Test-suite policy: a default run performs no write, a subscription that is created but reports no value change is not a
 failure, no unrestricted stress testing, no automatic production-network scanning; results are described as
@@ -529,6 +546,12 @@ never calls `Confirm`/`Enable`/`AddComment`, never retries, and an acknowledged 
 process condition has cleared. The outcome is emitted as a session summary (`EventsTab.report_ready`), so the
 shared log records what was acknowledged; a declined confirmation sends nothing and records nothing.
 
+The Events tab's second condition action is deliberately **not** guarded: **Refresh conditions** sends one
+`ConditionRefresh` call through `write_service.refresh_conditions()` and needs no dialog because it stores
+nothing and interrupts nothing. It is still one call on one subscription, is never retried, records
+`WriteAuthority("operator-dialog", …)`, and reports the server's `RefreshStart`/`RefreshEnd` events as the only
+evidence that it arrived (`operator_text.condition_refresh_text()` explains this to the operator).
+
 Restoring a previous value is a separate, explicit choice (`restore_previous_value`, off by default). When it is
 on, the runner reads the previous value before writing, writes it back afterwards through
 `write_service.restore_value()` — the same one write plus read-back, with the same `authorization` — and
@@ -598,7 +621,7 @@ opening a project never loads or runs a sequence.
 
 ## 12. Deliberate limitations
 
-* History is raw only: no processed/aggregate read, no read-at-time, no event history and no `HistoryUpdate`;
+* History is raw or one aggregate only: no read-at-time, no event history and no `HistoryUpdate`; no trend chart;
   a point-in-time read remains the value path everywhere else.
 * Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
   opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.

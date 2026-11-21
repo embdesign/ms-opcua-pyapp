@@ -46,6 +46,14 @@ def test_history_tab_reads_raw_history_and_reports_missing_history(qapp, tmp_pat
         assert tab.values_table.item(0, 1).text().endswith("Z")
         assert tab.values_table.item(0, 3).text() == "Good"
 
+        # Temperature is numeric, so the same result is drawn as a trend: the chart
+        # plots the returned values and states what it left out.
+        series = tab.trend_chart.series
+        assert series.is_empty is False
+        assert len(series.points) == tab.values_table.rowCount()
+        assert series.time_based is True
+        assert "Trend of" in tab.summary_label.text()
+
         # A node the demo does not historize returns no values, not an error.
         tab.node_edit.setText("ns=2;s=Pressure")
         tab.read_btn.click()
@@ -55,6 +63,12 @@ def test_history_tab_reads_raw_history_and_reports_missing_history(qapp, tmp_pat
             time.sleep(0.03)
         assert "Historizing = false" in tab.status_label.text(), tab.status_label.text()
         assert tab.values_table.rowCount() == 0
+        assert tab.trend_chart.series.is_empty is True
+
+        # Clearing drops both views.
+        tab.clear_btn.click()
+        assert tab.values_table.rowCount() == 0
+        assert tab.trend_chart.series.is_empty is True
     finally:
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)

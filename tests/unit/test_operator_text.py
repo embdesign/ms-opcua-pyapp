@@ -14,6 +14,7 @@ from opcua_explorer.models import (
 from opcua_explorer.operator_text import (
     EQUIPMENT_WARNING,
     acknowledge_condition_confirmation,
+    condition_refresh_text,
     connection_diagnostics_text,
     guarded_operation_confirmation,
     method_call_confirmation,
@@ -43,6 +44,17 @@ def test_acknowledge_confirmation_renders_an_empty_comment() -> None:
         endpoint_url="opc.tcp://x", condition_node_id="i=1", event_id="00", comment=""
     )
     assert "Comment: (empty)" in text
+
+
+def test_condition_refresh_text_states_what_it_does_and_does_not_do() -> None:
+    text = condition_refresh_text(subscription_id=78, object_node_id="i=2782")
+
+    assert "ConditionRefresh on subscription 78" in text
+    assert "i=2782" in text
+    assert "already retains" in text
+    assert "Nothing is written, acknowledged, confirmed or reset" in text
+    assert "sent once without a retry" in text
+    assert "RefreshStart/RefreshEnd" in text
 
 
 def test_guarded_confirmation_lists_exact_operations_and_warning() -> None:

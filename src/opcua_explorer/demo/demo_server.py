@@ -124,6 +124,10 @@ async def build_demo_server(
     """Create and initialise (but do not start) the demo server."""
     user_manager = DemoUserManager(allow_username=allow_username) if allow_username else None
     server = Server(user_manager=user_manager)
+    # Bind the standard A&C ConditionRefresh method, as a real server does, so the
+    # refresh path can be exercised end to end. asyncua dispatches a method call by
+    # method NodeId, so the parent object only has to exist.
+    server.iserver.bind_condition_methods = True
     await server.init()
     server.set_endpoint(endpoint)
     server.set_server_name("OPC UA Explorer Demo Server")

@@ -41,6 +41,7 @@ from ..models import (
     AddressSpace,
     BrowseOptions,
     ChildEntry,
+    ConditionRefreshResult,
     ConnectionInfo,
     DiscoveryResult,
     EventConfig,
@@ -447,6 +448,18 @@ class OpcUaService:
     async def event_monitor_stop(self) -> None:
         """Delete the event subscription; safe to call when none runs."""
         await self._events.stop()
+
+    async def refresh_event_conditions(self, *, reference: str = "") -> ConditionRefreshResult:
+        """Ask the server to re-publish the retained conditions of the event subscription.
+
+        One ``ConditionRefresh`` method call on the running subscription, sent
+        once. It stores nothing, acknowledges nothing and interrupts nothing, so
+        it needs no confirmation dialog; the result reports the StatusCode and
+        whether the server's RefreshStart/RefreshEnd events were observed.
+        """
+        self._require_client()
+        self._require_session()
+        return await self._events.refresh_conditions(reference=reference)
 
     async def acknowledge_condition(
         self,

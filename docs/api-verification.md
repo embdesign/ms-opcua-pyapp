@@ -179,6 +179,29 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   output `Variant`s. asyncua's server has no built-in condition object; tests create one at runtime with
   `add_object` + `add_method(..., [VariantType.ByteString, VariantType.LocalizedText], [])`.
 
+## ConditionRefresh (verified 2026-11-21)
+
+* `ConditionRefresh` is the standard method `i=3875` (`ua.ObjectIds.ConditionType_ConditionRefresh`), a
+  component of the `ConditionType` object `i=2782`, with one `UInt32` input (`SubscriptionId`) and no output.
+  `ConditionRefresh2` (`i=12912`) adds a MonitoredItemId; this project calls only `ConditionRefresh`.
+* The call is an ordinary `CallMethodRequest`: `await client.get_node(ua.NodeId(ua.ObjectIds.ConditionType))
+  .call_method(ua.NodeId(ua.ObjectIds.ConditionType_ConditionRefresh), ua.Variant(sid, ua.VariantType.UInt32))`.
+  A refused request arrives as `UaStatusCodeError` (`BadSubscriptionIdInvalid` for an unknown id,
+  `BadMonitoredItemIdInvalid` for a wrong monitored item), not as a return value.
+* **asyncua's server dispatches a method call by `MethodId` only** (`AddressSpace._call` looks up
+  `self._aspace[method.MethodId]` and passes `ObjectId` to the callback as `parent`), so the parent object
+  only has to exist. The project uses the ConditionType object, which owns the method in the standard address
+  space. `ConditionRefresh` is unavailable unless the server binds condition methods: asyncua's
+  `InternalServer.bind_condition_methods` defaults to `False` (the method node exists without a callback and
+  the call fails), and the demo server sets it to `True` before `Server.init()`.
+* The server's own evidence is a `RefreshStartEventType` (`i=2787`) / `RefreshEndEventType` (`i=2788`) event
+  pair on that subscription, plus one notification per retained condition. Both are ordinary events in the
+  subscription and appear in the event log; a server-side `WhereClause` (the tab's minimum severity) can
+  hide them, so their absence is reported and never treated as a failure of the call.
+* `ConditionRefresh` stores nothing: it re-publishes conditions the server already retains. It is therefore
+  not a write and needs no confirmation dialog, but the project still records a `WriteAuthority`
+  (`operator-dialog`) for it and sends it through `write_service.refresh_conditions`.
+
 ## Server status and diagnostics (verified 2026-11-17)
 
 * Standard namespace-0 variables read by the Server tab: State 2259, CurrentTime 2258, StartTime 2257,

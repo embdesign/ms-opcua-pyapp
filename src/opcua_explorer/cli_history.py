@@ -35,9 +35,10 @@ from .config import TrustStore
 from .defaults import DEFAULT_HISTORY_MAX_VALUES, MAX_HISTORY_MAX_VALUES
 from .errors import OpcUaExplorerError
 from .formatting import flatten_for_csv
-from .models import HistoryConfig, HistoryResult
+from .models import HISTORY_AGGREGATES, HistoryConfig, HistoryResult
 from .opcua.client_service import OpcUaService
 from .opcua.node_ids import normalise_node_id
+from .trend import build_trend_series, sparkline
 
 FORMAT = "opcua-history"
 FORMAT_VERSION = 1
@@ -85,9 +86,27 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=f"client-side value cap, at most {MAX_HISTORY_MAX_VALUES} (default: {DEFAULT_HISTORY_MAX_VALUES})",
     )
+    target.add_argument(
+        "--aggregate",
+        choices=HISTORY_AGGREGATES,
+        help="processed read (requires --from and --to); the server may not support it",
+    )
+    target.add_argument(
+        "--interval",
+        dest="processing_interval",
+        type=float,
+        default=0.0,
+        metavar="MS",
+        help="processing interval for an aggregate in ms (0 = one value over the range)",
+    )
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--json", action="store_true", help="print a versioned JSON document")
     output.add_argument("--csv", action="store_true", help="print CSV rows (header included)")
+    parser.add_argument(
+        "--sparkline",
+        action="store_true",
+        help="also print the numeric values as a one-line text trend (text output only)",
+    )
 
     add_connection_arguments(parser)
     add_output_arguments(parser)
@@ -109,7 +128,9 @@ def _write_csv(result: HistoryResult) -> None:
         )
 
 
-def _print_result(result: HistoryResult, *, as_json: bool, as_csv: bool) -> None:
+def _print_result(
+    result: HistoryResult, *, as_json: bool, as_csv: bool, as_sparkline: bool = False
+) -> None:
     if as_json:
         print(
             json.dumps(
@@ -127,6 +148,14 @@ def _print_result(result: HistoryResult, *, as_json: bool, as_csv: bool) -> None
     for snapshot in result.values:
         stamp = snapshot.source_timestamp or snapshot.server_timestamp or ""
         print(f"{stamp}  {snapshot.status}  {flatten_for_csv(snapshot.value)}")
+    if as_sparkline:
+        series = build_trend_series(result.values)
+        trend = sparkline(series)
+        if trend:
+            print(f"trend  {trend}")
+            print(f"       {series.summary_text()}")
+        else:
+            print("trend  no numeric values to plot")
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -135,6 +164,8 @@ async def _run(args: argparse.Namespace) -> int:
         start=_parse_time(args.start, "--from"),
         end=_parse_time(args.end, "--to"),
         max_values=int(args.max_values),
+        aggregate=args.aggregate,
+        processing_interval_ms=float(args.processing_interval),
     ).normalised()
     trust_store = TrustStore(args.trust_store) if args.trust_store else TrustStore()
     service = OpcUaService(trust_store=trust_store)
@@ -147,7 +178,7 @@ async def _run(args: argparse.Namespace) -> int:
     finally:
         await service.shutdown()
 
-    _print_result(result, as_json=args.json, as_csv=args.csv)
+    _print_result(result, as_json=args.json, as_csv=args.csv, as_sparkline=args.sparkline)
     return EXIT_OK if result.status == "Good" else EXIT_INVALID_OUTPUT
 
 

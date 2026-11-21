@@ -5,10 +5,12 @@ Nothing is subscribed implicitly. The operator adds one or more source NodeIds
 server publishes as a bounded log. Every selected event can be inspected field
 by field.
 
-The tab never writes a variable. Its one action is an operator-confirmed
-``Acknowledge`` method call on a condition event, sent once through
-``write_service``; it never calls ``Confirm``, ``Enable`` or anything else and
-never changes a monitoring mode.
+The tab never writes a variable. It has exactly two condition actions, both
+sent once through ``write_service``: an operator-confirmed ``Acknowledge``
+method call on a condition event, and a ``ConditionRefresh`` call on the running
+subscription that asks the server to publish its retained conditions again. It
+never calls ``Confirm``, ``Enable`` or anything else and never changes a
+monitoring mode.
 """
 
 from __future__ import annotations
@@ -60,7 +62,7 @@ from ...models import (
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...opcua.event_service import SERVER_OBJECT_NODE_ID, event_id_bytes
-from ...operator_text import acknowledge_condition_confirmation
+from ...operator_text import acknowledge_condition_confirmation, condition_refresh_text
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
 from .base import SessionTab
@@ -126,7 +128,8 @@ class EventsTab(SessionTab):
             "server decides what it publishes; the fields come from the selected event type. For condition "
             "events choose an event type such as ConditionType (i=2782) or AcknowledgeableConditionType "
             "(i=2881), then a selected event can be acknowledged: one confirmed Acknowledge method call, "
-            "sent once. No variable is written and no other condition method is called."
+            "sent once. Refresh conditions asks the server once to publish the conditions it already "
+            "retains for this subscription. No variable is written and no other condition method is called."
         )
         subtitle.setObjectName("subTitle")
         subtitle.setWordWrap(True)
@@ -274,6 +277,14 @@ class EventsTab(SessionTab):
         self.acknowledge_btn.clicked.connect(self._on_acknowledge)
         self.acknowledge_btn.setEnabled(False)
         details_header.addWidget(self.acknowledge_btn)
+        self.refresh_conditions_btn = QPushButton("Refresh conditions")
+        self.refresh_conditions_btn.setToolTip(
+            "Calls ConditionRefresh once on this subscription so the server publishes the conditions it "
+            "already retains again. Stores, acknowledges and changes nothing; no confirmation is needed."
+        )
+        self.refresh_conditions_btn.clicked.connect(self._on_refresh_conditions)
+        self.refresh_conditions_btn.setEnabled(False)
+        details_header.addWidget(self.refresh_conditions_btn)
         details_layout.addLayout(details_header)
         self.details_view = QPlainTextEdit()
         self.details_view.setReadOnly(True)
@@ -702,7 +713,7 @@ class EventsTab(SessionTab):
         self.details_view.setPlainText(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
         self._update_ack_button()
 
-    # -- condition acknowledgement ----------------------------------------
+    # -- condition acknowledgement and refresh ----------------------------
     def _update_ack_button(self) -> None:
         notification = self._selected_notification
         can_acknowledge = (
@@ -714,6 +725,52 @@ class EventsTab(SessionTab):
             and not self._busy
         )
         self.acknowledge_btn.setEnabled(can_acknowledge)
+        self.refresh_conditions_btn.setEnabled(
+            self._connected and self._running and not self._ack_busy and not self._busy
+        )
+
+    def _on_refresh_conditions(self) -> None:
+        """Call ConditionRefresh once on the running subscription; no dialog, no retry."""
+        if not self._running:
+            self._set_status(
+                "Start event monitoring first: ConditionRefresh applies to one subscription.", error=True
+            )
+            return
+        self._ack_busy = True
+        self._update_ack_button()
+        self._set_status("Asking the server to refresh the conditions of the running subscription…")
+
+        def done(result: Any) -> None:
+            self._ack_busy = False
+            self._update_ack_button()
+            if self._closed:
+                return
+            self._set_status(result.summary_text(), error=not result.ok)
+            self.report_ready.emit(
+                " ".join(
+                    [
+                        result.summary_text(),
+                        condition_refresh_text(
+                            subscription_id=result.subscription_id,
+                            object_node_id=result.object_node_id,
+                        ),
+                    ]
+                )
+            )
+
+        def failed(message: str) -> None:
+            self._ack_busy = False
+            self._update_ack_button()
+            if self._closed:
+                return
+            self._set_status(f"ConditionRefresh failed: {message}", error=True)
+            self.report_ready.emit(f"ConditionRefresh failed: {message}.")
+
+        self._submit(
+            lambda: self._service.refresh_event_conditions(reference="events-tab refresh conditions"),
+            on_done=done,
+            on_error=failed,
+        )
 
     def _on_acknowledge(self) -> None:
         notification = self._selected_notification

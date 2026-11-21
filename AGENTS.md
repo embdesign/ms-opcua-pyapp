@@ -30,6 +30,7 @@ uv run opcua-compare --help                # headless comparison of two servers 
 uv run opcua-read --help                   # headless attribute read (Qt-free)
 uv run opcua-monitor --help                # headless live data-change monitor (Qt-free)
 uv run opcua-history --help                # headless raw-history read (Qt-free)
+uv run opcua-write --help                  # headless guarded single write (Qt-free, needs --confirm)
 uv run opcua-run-sequence --help           # headless run of a sequence document (Qt-free)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py
@@ -58,12 +59,12 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 
 - Layering (enforced by `tests/unit/test_layer_boundaries.py` for exporters):
   `gui/` → `opcua/` → `models/` (package) / `config.py` / `defaults.py` / `project.py` / `formatting.py` /
-  `operator_text.py`.
+  `operator_text.py` / `trend.py`.
 - `models/` is a package with one module per feature cluster (`common`, `discovery`, `graph`, `values`, `writes`,
   `functional_tests`, `monitor`, `events`, `history`, `server_status`, `sequences`); `__init__.py` re-exports every
   public name, so callers keep using `from opcua_explorer.models import ...`. The package, `config.py`,
   `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`,
-  `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt.
+  `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py`, `trend.py` import neither asyncua nor Qt.
   `exporters/` uses `formatting.py`, never `opcua/`.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
 - Only `opcua/session_setup.py` constructs an `asyncua.Client`; one instance per session. The two
@@ -99,10 +100,12 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.
-- History is read-only and raw only: `opcua/history_service.py` is the single `HistoryRead` implementation
+- History is read-only: `opcua/history_service.py` is the single `HistoryRead` implementation
   (`build_history_request` → `read_history`). It uses `session.history_read` (there is no `Client.history_read`
-  in asyncua 2.1.0), releases continuation points, and never sends `HistoryUpdate`. Do not add processed,
-  aggregate, at-time or event-history paths without a verified asyncua API.
+  in asyncua 2.1.0), releases continuation points, and never sends `HistoryUpdate`. Raw is the default; one
+  aggregate (average/minimum/maximum/count) uses `ReadProcessedDetails` and requires both start and end
+  (`AggregateType` is a NodeId list). Do not add at-time, event-history or other aggregate paths without a
+  verified asyncua API; a server that does not support aggregates is reported with its StatusCode.
 - There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
   (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`, and the only
   non-Value path `prepare_attribute_write` → `send_prepared_attribute_write` for `DisplayName`/`Description`). The
@@ -122,13 +125,25 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   tests can stub the dialog. Never bypass the preview: a refused value must not reach a confirmation dialog.
   `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
   `write_service.py` (the demo server excepted), and no default for `authorization`.
-- Condition acknowledgement is the **only** action of the Events tab: one `Acknowledge` method call through
-  `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`, after the explicit
+- Condition acknowledgement is the **only guarded** action of the Events tab: one `Acknowledge` method call
+  through `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`, after the explicit
   confirmation text in `operator_text.acknowledge_condition_confirmation`. It is never retried, never calls
   `Confirm`/`Enable`/`AddComment`, and refuses a method whose `InputArguments` are not
   (ByteString, LocalizedText). Event notifications stay read-only; there is no automatic acknowledgement.
+- The tab's **second** condition action is unguarded on purpose: **Refresh conditions** sends one
+  `ConditionRefresh` (`i=3875`, one `UInt32` SubscriptionId) through `write_service.refresh_conditions`, with
+  `WriteAuthority("operator-dialog", …)` recorded but **no dialog**, because it stores, acknowledges and changes
+  nothing. `LiveEvents.refresh_conditions` composes a `ConditionRefreshResult` from the call outcome plus a
+  bounded wait for the server's `RefreshStart`/`RefreshEnd` events; a missing event is reported, never claimed.
+  There is no `ConditionRefresh2`, no retry and no second parent object: the parent is the ConditionType object
+  (`i=2782`), and a refusal is reported with its StatusCode.
 - Writes are typed from the server by `opcua/type_support.py` (built-ins, enumerations, structures) and targets
   may be addressed by browse path through `opcua/path_support.py` (complete, unambiguous matches only).
+- The History tab's trend chart is a **view of one HistoryRead result**: `trend.py` (`build_trend_series` →
+  `TrendSeries`/`TrendPoint`, `sparkline`) extracts the single numbers and counts what it skipped (arrays,
+  structures, unparsable text), and `gui/trend_chart.py` only paints that series. It must never read, subscribe,
+  interpolate or resample; `time_based` decides whether the x axis is time or row order, so a point without a
+  timestamp falls back to row order instead of inventing a time.
 - `opcua/sequence_runner.py` is device-neutral: it never names a lock, a vendor or a method. A sequence document
   (`sequence_document.py`) owns the preconditions, the gate and the body. Mechanical rules that must stay:
   `gate.off` in `finally`, `gate.verify` before the body, one run per session, no retry, and

@@ -1,7 +1,9 @@
-"""History tab: read-only raw HistoryRead for one variable.
+"""History tab: read-only HistoryRead for one variable (raw or one aggregate).
 
-One node, one range, one bounded raw-history read. No HistoryUpdate, no
-processed/aggregate reads, no event history and no retry.
+One node, one range, one bounded read. No HistoryUpdate, no event history and no
+retry; an aggregate requires both From and To and the server may not support it.
+The values are shown as a table and - when they are single numbers - as a trend
+chart that plots what the server returned and nothing else.
 """
 
 from __future__ import annotations
@@ -17,13 +19,16 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDateTimeEdit,
+    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -33,11 +38,13 @@ from PySide6.QtWidgets import (
 from ...defaults import DEFAULT_HISTORY_MAX_VALUES, MAX_HISTORY_MAX_VALUES
 from ...errors import InvalidNodeIdError
 from ...formatting import flatten_for_csv
-from ...models import HistoryConfig, HistoryResult
+from ...models import HISTORY_AGGREGATES, HistoryConfig, HistoryResult
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
+from ...trend import build_trend_series
 from ..async_runner import AsyncRunner
 from ..theme import ERROR, mono_font
+from ..trend_chart import TrendChart
 from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
@@ -47,7 +54,7 @@ _MAX_VALUE_CELL_CHARS = 300
 
 
 class HistoryTab(SessionTab):
-    """Raw history of one variable, bounded by a time range and a value cap."""
+    """History of one variable, bounded by a time range and a value cap."""
 
     def __init__(
         self,
@@ -80,9 +87,11 @@ class HistoryTab(SessionTab):
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
         subtitle = QLabel(
-            "Raw HistoryRead for one variable: an optional time range and a maximum number of values. "
-            "Read-only — no HistoryUpdate, no processed/aggregate reads and no event history. The server "
-            "decides whether a node has history; an empty result is not an error."
+            "Raw HistoryRead for one variable: an optional time range and a maximum number of values, "
+            "optionally one aggregate (average/minimum/maximum/count) over that range. Read-only — no "
+            "HistoryUpdate and no event history. The server decides whether a node has history and whether "
+            "it computes aggregates; an empty result is not an error. Single numeric values are also drawn "
+            "as a trend: nothing is interpolated, and non-numeric values are counted instead of plotted."
         )
         subtitle.setObjectName("subTitle")
         subtitle.setWordWrap(True)
@@ -137,6 +146,31 @@ class HistoryTab(SessionTab):
         range_row.addStretch(1)
         layout.addLayout(range_row)
 
+        aggregate_row = QHBoxLayout()
+        self.aggregate_combo = QComboBox()
+        self.aggregate_combo.addItem("Raw", "")
+        for name in HISTORY_AGGREGATES:
+            self.aggregate_combo.addItem(name.capitalize(), name)
+        self.aggregate_combo.setToolTip(
+            "Aggregate read; requires both From and To. The server may not provide aggregate history."
+        )
+        self.aggregate_combo.currentIndexChanged.connect(self._update_controls)
+        self.interval_spin = QDoubleSpinBox()
+        self.interval_spin.setRange(0.0, 86_400_000.0)
+        self.interval_spin.setDecimals(0)
+        self.interval_spin.setSingleStep(1000.0)
+        self.interval_spin.setValue(0.0)
+        self.interval_spin.setSuffix(" ms")
+        self.interval_spin.setToolTip(
+            "Processing interval for an aggregate read; 0 asks for one value over the whole range."
+        )
+        aggregate_row.addWidget(QLabel("Aggregate:"))
+        aggregate_row.addWidget(self.aggregate_combo)
+        aggregate_row.addWidget(QLabel("Interval:"))
+        aggregate_row.addWidget(self.interval_spin)
+        aggregate_row.addStretch(1)
+        layout.addLayout(aggregate_row)
+
         self.values_table = QTableWidget(0, 5)
         self.values_table.setHorizontalHeaderLabels(
             ["#", "Source timestamp", "Server timestamp", "Status", "Value"]
@@ -151,7 +185,15 @@ class HistoryTab(SessionTab):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.Stretch)
-        layout.addWidget(self.values_table, 1)
+
+        self.trend_chart = TrendChart()
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(self.trend_chart)
+        splitter.addWidget(self.values_table)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([200, 280])
+        layout.addWidget(splitter, 1)
 
         self.summary_label = QLabel("No history read yet.")
         self.summary_label.setObjectName("hintLabel")
@@ -171,6 +213,7 @@ class HistoryTab(SessionTab):
         if not connected:
             self._busy = False
             self.values_table.setRowCount(0)
+            self.trend_chart.clear("Not connected. Read history to plot a trend.")
             self.summary_label.setText("No history read yet.")
             self._set_status("Not connected. Use the Connection tab to open a session.")
         elif not self._busy:
@@ -193,6 +236,8 @@ class HistoryTab(SessionTab):
             start=start if isinstance(start, datetime) else None,
             end=end if isinstance(end, datetime) else None,
             max_values=int(self.max_spin.value()),
+            aggregate=self.aggregate_combo.currentData() or None,
+            processing_interval_ms=float(self.interval_spin.value()),
         ).normalised()
 
     # -- read --------------------------------------------------------------
@@ -210,6 +255,9 @@ class HistoryTab(SessionTab):
             return
 
         config = self._config()
+        if config.aggregate and (config.start is None or config.end is None):
+            self._set_status("Set both From and To for an aggregate read.", error=True)
+            return
         self._busy = True
         self._update_controls()
         self._set_status(f"Reading raw history of {canonical}…")
@@ -262,6 +310,7 @@ class HistoryTab(SessionTab):
                 table.setItem(row, column, item)
 
         self.summary_label.setText(result.summary_text())
+        self._plot(result)
         if result.status != "Good":
             self._set_status(f"HistoryRead returned {result.status}.", error=True)
         elif not result.values:
@@ -272,10 +321,27 @@ class HistoryTab(SessionTab):
                 f"({result.pages} page(s))."
             )
 
+    def _plot(self, result: HistoryResult) -> None:
+        """Draw the numeric part of one result; nothing is invented for the rest."""
+        series = build_trend_series(result.values)
+        if series.is_empty:
+            if result.values:
+                message = (
+                    "This read returned values that are not single numbers, so there is nothing to plot. "
+                    "Read a numeric variable (or an aggregate of one) to see a trend."
+                )
+            else:
+                message = result.detail or "The server returned no values for this range."
+            self.trend_chart.set_series(series, message=message)
+            return
+        self.trend_chart.set_series(series, title=result.node_id)
+        self.summary_label.setText(f"{result.summary_text()} {series.summary_text()}")
+
     def _on_clear(self) -> None:
         self.values_table.setRowCount(0)
+        self.trend_chart.clear()
         self.summary_label.setText("No history read yet.")
-        self._set_status("Cleared the local history table.")
+        self._set_status("Cleared the local history table and trend.")
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
@@ -287,5 +353,7 @@ class HistoryTab(SessionTab):
         self.from_check.setEnabled(connected and not self._busy)
         self.to_check.setEnabled(connected and not self._busy)
         self.max_spin.setEnabled(connected and not self._busy)
+        self.aggregate_combo.setEnabled(connected and not self._busy)
+        self.interval_spin.setEnabled(connected and not self._busy and bool(self.aggregate_combo.currentData()))
         self.read_btn.setEnabled(connected and not self._busy)
         self.clear_btn.setEnabled(not self._busy)

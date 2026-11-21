@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,7 +11,7 @@ from asyncua import ua
 from asyncua.common.subscription import Event
 
 from opcua_explorer.errors import MonitorNotActiveError
-from opcua_explorer.models import EventConfig, EventNotification
+from opcua_explorer.models import AUTHORITY_OPERATOR_DIALOG, EventConfig, EventNotification, WriteAuthority
 from opcua_explorer.opcua.event_service import (
     BASE_EVENT_TYPE_NODE_ID,
     LiveEvents,
@@ -21,6 +22,8 @@ from opcua_explorer.opcua.event_service import (
 )
 
 REJECTED_SOURCE = "ns=2;s=NoEvents"
+
+_AUTHORITY = WriteAuthority(AUTHORITY_OPERATOR_DIALOG, "events-tab refresh conditions")
 
 
 class _FakeNodeId:
@@ -67,11 +70,13 @@ class _FakeClient:
         self.params: ua.CreateSubscriptionParameters | None = None
         self.handler: Any = None
         self.subscription = _FakeSubscription()
-        self.nodes: list[str] = []
+        self.nodes: list[Any] = []
+        #: Returned by ``get_node`` when set, so a ConditionRefresh call lands on it.
+        self.method_node: Any | None = None
 
-    def get_node(self, node_id: str) -> _FakeNode:
+    def get_node(self, node_id: Any) -> Any:
         self.nodes.append(node_id)
-        return _FakeNode(node_id)
+        return self.method_node if self.method_node is not None else _FakeNode(node_id)
 
     async def create_subscription(
         self, params: ua.CreateSubscriptionParameters, handler: Any
@@ -286,3 +291,100 @@ async def test_a_condition_event_without_identity_falls_back_to_the_source() -> 
 
     # No ConditionId/NodeId field: the emitting node is the condition object.
     assert emitted[0].condition_node_id == "i=2253"
+
+
+class _ConditionRefreshNode(_FakeNode):
+    """The node the refresh method call lands on; records the method and arguments."""
+
+    def __init__(self, node_id: str, *, error: Exception | None = None) -> None:
+        super().__init__(node_id)
+        self.calls: list[tuple[Any, tuple[Any, ...]]] = []
+        self._error = error
+
+    async def call_method(self, method: Any, *args: Any) -> Any:
+        self.calls.append((method, args))
+        if self._error is not None:
+            raise self._error
+        return None
+
+
+def _refresh_events(count: int = 1) -> list[Event]:
+    """The RefreshStart/RefreshEnd pair a server publishes around a refresh."""
+    events = []
+    for _ in range(count):
+        events.append(
+            _event(EventType=(ua.NodeId(ua.ObjectIds.RefreshStartEventType), ua.VariantType.NodeId))
+        )
+        events.append(
+            _event(EventType=(ua.NodeId(ua.ObjectIds.RefreshEndEventType), ua.VariantType.NodeId))
+        )
+    return events
+
+
+async def test_refresh_conditions_calls_once_and_reports_the_refresh_events() -> None:
+    client = _FakeClient()
+    node = _ConditionRefreshNode("i=2782")
+    client.method_node = node
+    events = LiveEvents(client, lambda _event: None)
+    await events.start(["i=2253"], EventConfig(publishing_interval_ms=200))
+
+    async def publish() -> None:
+        await asyncio.sleep(0.02)
+        for event in _refresh_events():
+            events._handle_event(event)
+
+    feeder = asyncio.create_task(publish())
+    result = await events.refresh_conditions(authorization=_AUTHORITY, observation_timeout_s=1.0)
+    await feeder
+
+    # Exactly one method call, with this subscription's id.
+    assert len(node.calls) == 1
+    method, arguments = node.calls[0]
+    assert method == ua.NodeId(ua.ObjectIds.ConditionType_ConditionRefresh)
+    assert arguments[0].Value == 42
+    assert result.status == "passed"
+    assert result.sent is True
+    assert result.subscription_id == 42
+    assert result.object_node_id == "i=2782"
+    assert result.refresh_started is True
+    assert result.refresh_ended is True
+    await events.stop()
+
+
+async def test_refresh_conditions_without_a_subscription_is_refused() -> None:
+    events = LiveEvents(_FakeClient(), lambda _event: None)
+
+    with pytest.raises(MonitorNotActiveError):
+        await events.refresh_conditions(authorization=_AUTHORITY)
+
+
+async def test_refresh_conditions_reports_a_missing_refresh_event() -> None:
+    client = _FakeClient()
+    node = _ConditionRefreshNode("i=2782")
+    client.method_node = node
+    events = LiveEvents(client, lambda _event: None)
+    await events.start(["i=2253"], EventConfig())
+
+    result = await events.refresh_conditions(authorization=_AUTHORITY, observation_timeout_s=0.1)
+
+    assert result.status == "passed"
+    assert result.refresh_started is False
+    assert result.refresh_ended is False
+    assert "no RefreshStart event" in result.detail
+    await events.stop()
+
+
+async def test_refresh_conditions_reports_a_refused_call() -> None:
+    client = _FakeClient()
+    node = _ConditionRefreshNode("i=2782", error=ua.UaStatusCodeError(ua.StatusCodes.BadSubscriptionIdInvalid))
+    client.method_node = node
+    events = LiveEvents(client, lambda _event: None)
+    await events.start(["i=2253"], EventConfig())
+
+    result = await events.refresh_conditions(authorization=_AUTHORITY, observation_timeout_s=0.1)
+
+    assert result.status == "failed"
+    assert result.status_code == "BadSubscriptionIdInvalid"
+    assert result.sent is True
+    assert result.refresh_started is False
+    await events.stop()

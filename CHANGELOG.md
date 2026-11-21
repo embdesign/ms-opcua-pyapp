@@ -10,6 +10,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **History trend chart.** The History tab now draws the numeric values of one history read above the table
+  (`gui/trend_chart.py` paints it, the new pure `trend.py` extracts it): a time axis when every value has a
+  timestamp and row order when one does not, a hover readout, and a summary that names how many values were
+  not plotted because they are not single numbers. It is a view of that one result — no second read, no
+  interpolation and no resampling. `opcua-history --sparkline` prints the same series as one line of text.
+- **`ConditionRefresh` on the running event subscription.** The Events tab gained **Refresh conditions**, which
+  asks the server once to publish the conditions it already retains. `write_service.refresh_conditions()` sends
+  the single standard method call (`i=3875` on the ConditionType object, subscription id as the only input) and
+  `LiveEvents.refresh_conditions()` reports the call outcome plus whether the server's `RefreshStart`/
+  `RefreshEnd` events arrived. No confirmation dialog (it stores and changes nothing), never retried, no
+  `ConditionRefresh2`. The demo server now binds the standard condition methods.
+- **Aggregate history reads.** `HistoryConfig` gained `aggregate` (average/minimum/maximum/count) and
+  `processing_interval_ms`; `history_service.build_history_request()` then sends `ReadProcessedDetails` with the
+  standard aggregate NodeId and `UseServerCapabilitiesDefaults = True`. Both From and To are required. The
+  History tab gained an **Aggregate** selector and **Interval** field, and `opcua-history` gained `--aggregate`
+  / `--interval`. A server without aggregate support (including the demo historian, which answers
+  `BadNotImplemented`) is reported with its StatusCode and a hint.
+- **Headless `opcua-write` command.** One variable, one value: preview (DataType/ValueRank + parsed text), then
+  send only with `--confirm`, one write, read-back, optional `--restore` as one further verified write. Without
+  `--confirm` nothing is sent (exit `2`); a failed or unverifiable write exits `3`; there is no retry or batch.
 - **Headless `opcua-history` command.** One raw `HistoryRead` for one variable with `--from`/`--to` (ISO-8601),
   `--max-values`, and text, versioned JSON or CSV output. Exit codes match the other read commands (`3` for a Bad
   HistoryRead status).

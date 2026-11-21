@@ -213,6 +213,20 @@ def acknowledge_condition_confirmation(
     )
 
 
+def condition_refresh_text(*, subscription_id: int | None, object_node_id: str) -> str:
+    """What a ``ConditionRefresh`` call does, for the Events tab and its log line.
+
+    No dialog uses this text: the call stores nothing and interrupts nothing, so
+    the operator only needs to know what it asks the server to do.
+    """
+    return (
+        f"ConditionRefresh on subscription {subscription_id} (method call on {object_node_id}): the server "
+        "is asked to publish the Conditions it already retains for this subscription again. Nothing is "
+        "written, acknowledged, confirmed or reset, no condition is cleared and the call is sent once "
+        "without a retry. The server's RefreshStart/RefreshEnd events are the only evidence it arrived."
+    )
+
+
 def connection_diagnostics_text(
     *,
     discovery: DiscoveryResult | None = None,

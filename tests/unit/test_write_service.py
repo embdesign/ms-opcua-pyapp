@@ -142,3 +142,85 @@ async def test_a_refused_write_keeps_the_authority() -> None:
     assert outcome.sent is False
     assert outcome.authorization is _AUTHORITY
     assert "could not be read" in outcome.detail
+
+
+class _RefreshNode:
+    """The node ConditionRefresh is called on; records method id and arguments."""
+
+    def __init__(self, *, result: Any = None, error: Exception | None = None) -> None:
+        self.calls: list[tuple[Any, tuple[Any, ...]]] = []
+        self._result = result
+        self._error = error
+
+    async def call_method(self, method: Any, *args: Any) -> Any:
+        self.calls.append((method, args))
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+class _RefreshClient:
+    def __init__(self, node: _RefreshNode) -> None:
+        self.node = node
+        self.requested: list[Any] = []
+
+    def get_node(self, node_id: Any) -> _RefreshNode:
+        self.requested.append(node_id)
+        return self.node
+
+
+async def test_refresh_conditions_sends_one_call_with_the_subscription_id() -> None:
+    node = _RefreshNode()
+    client = _RefreshClient(node)
+
+    outcome = await write_service.refresh_conditions(client, 42, authorization=_AUTHORITY)
+
+    # One call, on the ConditionType object, with the SubscriptionId as the only input.
+    assert client.requested == [ua.NodeId(ua.ObjectIds.ConditionType)]
+    assert len(node.calls) == 1
+    method, arguments = node.calls[0]
+    assert method == ua.NodeId(ua.ObjectIds.ConditionType_ConditionRefresh)
+    assert len(arguments) == 1
+    assert arguments[0].Value == 42
+    assert arguments[0].VariantType == ua.VariantType.UInt32
+    assert outcome.status == STATUS_PASSED
+    assert outcome.status_code == "Good"
+    assert outcome.sent is True
+    assert outcome.authorization is _AUTHORITY
+    assert outcome.arguments == ["SubscriptionId=42"]
+
+
+async def test_refresh_conditions_can_name_another_parent_object() -> None:
+    node = _RefreshNode()
+    client = _RefreshClient(node)
+
+    outcome = await write_service.refresh_conditions(
+        client, 7, object_node_id="i=2253", authorization=_AUTHORITY
+    )
+
+    assert client.requested == [ua.NodeId(ua.ObjectIds.Server)]
+    assert outcome.object_node_id == "i=2253"
+    assert len(node.calls) == 1
+
+
+async def test_refresh_conditions_reports_a_refused_request() -> None:
+    node = _RefreshNode(error=ua.UaStatusCodeError(ua.StatusCodes.BadSubscriptionIdInvalid))
+
+    outcome = await write_service.refresh_conditions(_RefreshClient(node), 999, authorization=_AUTHORITY)
+
+    assert outcome.status == STATUS_FAILED
+    assert outcome.status_code == "BadSubscriptionIdInvalid"
+    assert outcome.sent is True
+    assert "refused" in outcome.detail
+
+
+async def test_refresh_conditions_without_a_subscription_sends_nothing() -> None:
+    node = _RefreshNode()
+    client = _RefreshClient(node)
+
+    outcome = await write_service.refresh_conditions(client, 0, authorization=_AUTHORITY)
+
+    assert outcome.status == STATUS_SKIPPED
+    assert outcome.sent is False
+    assert node.calls == []
+    assert client.requested == []

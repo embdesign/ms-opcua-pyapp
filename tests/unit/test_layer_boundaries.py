@@ -2,7 +2,7 @@
 
 ``docs/architecture.md`` §2 declares the pure core Qt-free and asyncua-free: ``models``,
 ``config``, ``defaults``, ``project``, ``formatting``, ``operator_text``,
-``sequence_document``, ``reporting``, ``compare`` and ``exporters``. Each module is
+``sequence_document``, ``reporting``, ``compare``, ``trend`` and ``exporters``. Each module is
 imported in its own subprocess, so the probe observes exactly what importing that one
 module (and its dependencies) pulls in, and a regression names the offending module.
 
@@ -34,6 +34,7 @@ _PURE_MODULES = (
     "opcua_explorer.sequence_document",
     "opcua_explorer.reporting",
     "opcua_explorer.compare",
+    "opcua_explorer.trend",
     "opcua_explorer.exporters",
 )
 
@@ -204,6 +205,7 @@ def test_every_send_requires_an_authority() -> None:
         "call_method",
         "restore_value",
         "acknowledge_condition",
+        "refresh_conditions",
     ):
         parameter = inspect.signature(getattr(write_service, name)).parameters.get("authorization")
         assert parameter is not None, f"{name} must state the authority it sends under"

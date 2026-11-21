@@ -19,9 +19,8 @@ locally, and `dist/` and `build/` are already ignored by `.gitignore`.
 `opcua-demo-server` is **not** bundled. It is a development aid that starts an
 in-process demo server; use `uv run opcua-demo-server` from a checkout.
 
-`opcua-run-sequence`, `opcua-read`, `opcua-monitor` and `opcua-history` are also **not** bundled yet: they run
-from a `uv` checkout (`uv run opcua-run-sequence --help`, `uv run opcua-read --help`, `uv run opcua-monitor --help`,
-`uv run opcua-history --help`).
+`opcua-run-sequence`, `opcua-read`, `opcua-monitor`, `opcua-history` and `opcua-write` are also **not** bundled
+yet: they run from a `uv` checkout (`uv run <command> --help`).
 Adding more specs is deliberately left until a build has been verified on both CI platforms.
 
 `opcua-compare` **is** bundled (console, Qt-free): it can compare two saved JSON

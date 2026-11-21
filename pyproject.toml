@@ -58,6 +58,8 @@ opcua-read = "opcua_explorer.cli_read:main"
 opcua-monitor = "opcua_explorer.cli_monitor:main"
 # Headless raw-history read (Qt-free).
 opcua-history = "opcua_explorer.cli_history:main"
+# Headless guarded single write (Qt-free, needs --confirm).
+opcua-write = "opcua_explorer.cli_write:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 

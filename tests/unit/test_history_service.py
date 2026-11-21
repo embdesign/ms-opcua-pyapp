@@ -66,6 +66,48 @@ def test_history_config_is_normalised() -> None:
     assert HistoryConfig(max_values=250).normalised().max_values == 250
 
 
+def test_aggregate_request_uses_read_processed_details() -> None:
+    start = datetime(2026, 11, 18, 8, 0, tzinfo=UTC)
+    end = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
+    params = build_history_request(
+        "ns=2;s=Temperature",
+        HistoryConfig(start=start, end=end, aggregate="average", processing_interval_ms=60_000),
+    )
+
+    details = params.HistoryReadDetails
+    assert isinstance(details, ua.ReadProcessedDetails)
+    assert details.StartTime == start
+    assert details.EndTime == end
+    assert details.ProcessingInterval == 60_000.0
+    assert details.AggregateType == [ua.NodeId(ua.ObjectIds.AggregateFunction_Average)]
+    assert details.AggregateConfiguration.UseServerCapabilitiesDefaults is True
+
+
+def test_aggregate_requires_a_start_and_end() -> None:
+    with pytest.raises(OpcUaExplorerError, match="start and an end"):
+        build_history_request("ns=2;s=Temperature", HistoryConfig(aggregate="maximum"))
+
+
+def test_unknown_aggregate_falls_back_to_raw() -> None:
+    assert HistoryConfig(aggregate="median").normalised().aggregate is None
+
+
+async def test_unsupported_aggregate_is_reported_with_a_hint() -> None:
+    session = _HistorySession([_bad_result()])
+    result = await read_history(
+        session,
+        "ns=2;s=Temperature",
+        HistoryConfig(
+            start=datetime(2026, 11, 18, 8, 0, tzinfo=UTC),
+            end=datetime(2026, 11, 18, 9, 0, tzinfo=UTC),
+            aggregate="average",
+        ),
+    )
+
+    assert result.status == "BadHistoryOperationUnsupported"
+    assert "does not provide aggregate history" in result.detail
+
+
 def test_request_carries_range_cap_and_continuation() -> None:
     start = datetime(2026, 11, 18, 8, 0, tzinfo=UTC)
     end = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)

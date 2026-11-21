@@ -29,6 +29,8 @@ def _result() -> HistoryResult:
 def test_parser_defaults_are_bounded_and_raw() -> None:
     args = cli_history.build_parser().parse_args(["--endpoint", ENDPOINT, "--node", "i=85"])
     assert args.max_values == 1_000
+    assert args.aggregate is None
+    assert args.processing_interval == 0.0
     assert args.json is False and args.csv is False
 
 

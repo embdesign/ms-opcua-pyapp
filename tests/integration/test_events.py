@@ -10,7 +10,7 @@ from asyncua import ua
 
 from opcua_explorer.config import ConnectionSettings, TrustStore
 from opcua_explorer.demo.demo_server import start_demo_server, stop_demo_server
-from opcua_explorer.errors import OpcUaExplorerError
+from opcua_explorer.errors import MonitorNotActiveError, OpcUaExplorerError
 from opcua_explorer.models import (
     AUTHORITY_OPERATOR_DIALOG,
     STATUS_FAILED,
@@ -245,3 +245,58 @@ async def test_node_details_report_the_event_notifier(events_service) -> None:
     plant_attributes = {attribute.attribute: attribute for attribute in plant.attributes}
     assert plant_attributes["EventNotifier"].value == 0
     assert plant_attributes["EventNotifier"].display == "0 (none)"
+
+
+async def test_condition_refresh_publishes_the_refresh_events(events_service) -> None:
+    """ConditionRefresh is one call, and the server's RefreshStart/RefreshEnd prove it arrived."""
+    service, _model = events_service
+    received: list[EventNotification] = []
+    start = await service.start_event_monitor(
+        [SERVER_OBJECT_NODE_ID], EventConfig(publishing_interval_ms=200), emit=received.append
+    )
+    try:
+        result = await service.refresh_event_conditions(reference="test-refresh")
+
+        assert result.status == STATUS_PASSED, result.detail
+        assert result.sent is True
+        assert result.subscription_id == start.subscription_id
+        assert result.object_node_id == "i=2782"
+        assert result.method_node_id == "i=3875"
+        assert result.authorization is not None
+        assert result.authorization.reference == "test-refresh"
+        # The refresh events are the only evidence the request was accepted.
+        assert result.refresh_started is True, result.detail
+        assert result.refresh_ended is True, result.detail
+        assert [event.event_type for event in received if event.event_type_id == "i=2787"] == [
+            "RefreshStartEventType"
+        ]
+        # Refreshing changes nothing: no variable was written and the session stays usable.
+        assert await service.browse_children("i=85")
+    finally:
+        await service.event_monitor_stop()
+
+
+async def test_condition_refresh_without_a_subscription_is_refused(events_service) -> None:
+    service, _model = events_service
+    with pytest.raises(MonitorNotActiveError):
+        await service.refresh_event_conditions()
+
+
+async def test_condition_refresh_reports_a_hidden_refresh_event(events_service) -> None:
+    """A server-side severity filter can hide RefreshStart; that is reported, not claimed."""
+    service, _model = events_service
+    received: list[EventNotification] = []
+    await service.start_event_monitor(
+        [SERVER_OBJECT_NODE_ID],
+        EventConfig(publishing_interval_ms=200, min_severity=10),
+        emit=received.append,
+    )
+    try:
+        result = await service.refresh_event_conditions()
+
+        assert result.status == STATUS_PASSED, result.detail
+        assert result.refresh_started is False
+        assert "no RefreshStart event" in result.detail
+        assert received == []
+    finally:
+        await service.event_monitor_stop()

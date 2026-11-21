@@ -56,6 +56,27 @@ async def test_cli_history_prints_the_raw_values(historized_model, tmp_path, cap
     assert [value["value"] for value in result["values"]] == [21.5, 22.0, 22.5]
 
 
+async def test_cli_history_reports_an_unsupported_aggregate(historized_model, tmp_path, capsys) -> None:
+    code = await asyncio.to_thread(
+        cli_history.main,
+        _argv(
+            tmp_path,
+            historized_model,
+            "--aggregate",
+            "average",
+            "--from",
+            "2000-01-01T00:00:00Z",
+            "--to",
+            "2100-01-01T00:00:00Z",
+        ),
+    )
+
+    assert code == 3
+    output = capsys.readouterr().out
+    assert "BadNotImplemented" in output
+    assert "aggregate history" in output
+
+
 async def test_cli_history_csv_contains_a_header_and_all_rows(historized_model, tmp_path, capsys) -> None:
     code = await asyncio.to_thread(cli_history.main, _argv(tmp_path, historized_model, "--csv"))
 

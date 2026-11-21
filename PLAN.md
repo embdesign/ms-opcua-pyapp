@@ -15,9 +15,9 @@ covered by tests, including the device-independent sequence runner for operator-
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
-| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event (no `Confirm`/`Enable`, never retried) |
+| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event plus one unconfirmed `ConditionRefresh` call on the running subscription (no `Confirm`/`Enable`, never retried) |
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
-| History | Raw `HistoryRead` of one variable with an optional From/To range and a value cap; continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, and a non-historizing node is reported as such instead of as an error |
+| History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below) |
 | Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page; admin-only on `UserRole.Admin` servers |
 | Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
@@ -51,6 +51,7 @@ src/opcua_explorer/
 ├── cli_read.py     opcua-read: headless attribute read (Qt-free)
 ├── cli_monitor.py  opcua-monitor: headless data-change monitor (Qt-free)
 ├── cli_history.py  opcua-history: headless raw-history read (Qt-free)
+├── cli_write.py    opcua-write: headless guarded single write (Qt-free, --confirm)
 ├── cli_sequence.py opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── logging_setup.py log bus and secret redaction
 └── demo/           local demo server
@@ -84,13 +85,15 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 - The server directory is a lookup only: one `FindServers` call per request on a temporary unencrypted channel.
   Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
   no `RegisterServer` and no automatic connection to a found application.
-- Values are point-in-time reads; history is raw only (no processed/aggregate read, no read-at-time, no event
+- Values are point-in-time reads; history is raw or one aggregate (no read-at-time, no event
   history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
-  returned.
-- Events are notifications, not alarm management: sources are subscription-only and the only action is one
-  operator-confirmed `Acknowledge` method call for a selected condition event (`ConditionType` subscription,
-  no `Confirm`/`Enable`/`AddComment`, no retry, no automatic acknowledgement, no `ConditionRefresh`, no event
-  history). Event sources are session state.
+  returned. The History trend chart plots exactly the numbers of one read (no second read, no interpolation);
+  non-numeric values are counted instead of plotted.
+- Events are notifications, not alarm management: sources are subscription-only. There are two condition
+  actions: one operator-confirmed `Acknowledge` method call for a selected condition event, and one
+  `ConditionRefresh` call on the running subscription (no dialog, because it stores nothing; its
+  `RefreshStart`/`RefreshEnd` events are the only evidence). No `Confirm`/`Enable`/`AddComment`, no retry, no
+  automatic acknowledgement, no `ConditionRefresh2`, no event history. Event sources are session state.
 - `EventNotifier` and the other details-only attributes are read for the selected node, not downloaded; the
   JSON/CSV snapshot format is unchanged and the tree does not mark event sources.
 - Server status/diagnostics cover the standard status, summary and capability variables that the server

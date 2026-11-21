@@ -11,7 +11,14 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from ..errors import MonitorNotActiveError
-from ..models import EventConfig, EventSourceInfo, EventStart
+from ..models import (
+    AUTHORITY_OPERATOR_DIALOG,
+    ConditionRefreshResult,
+    EventConfig,
+    EventSourceInfo,
+    EventStart,
+    WriteAuthority,
+)
 from .event_service import LiveEvents
 
 _logger = logging.getLogger(__name__)
@@ -62,6 +69,18 @@ class EventSession:
 
     async def remove(self, handles: Iterable[int]) -> None:
         await self._running().remove(handles)
+
+    async def refresh_conditions(self, *, reference: str = "") -> ConditionRefreshResult:
+        """Ask the server to re-publish the retained conditions of the running subscription.
+
+        The operator pressed the button in the Events tab, so the dialog is the
+        authority; nothing is stored, acknowledged or changed by this call.
+        """
+        events = self._running()
+        authorization = WriteAuthority(
+            AUTHORITY_OPERATOR_DIALOG, reference or f"condition-refresh {events.subscription_id}"
+        )
+        return await events.refresh_conditions(authorization=authorization)
 
     async def stop(self) -> None:
         """Delete the subscription; safe to call when none runs."""

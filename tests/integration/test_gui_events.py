@@ -252,3 +252,75 @@ def test_closing_a_session_cancels_event_work(qapp, tmp_path) -> None:
         for session_service in window.services:
             runner.run_until_complete(session_service.shutdown, timeout=3.0)
         runner.stop()
+
+
+def test_events_tab_refreshes_conditions_without_a_dialog(qapp, tmp_path, monkeypatch) -> None:
+    """ConditionRefresh is one unconfirmed call; the refresh events are the evidence."""
+    port = free_port()
+    server = start_demo_server(port, "--no-updates")
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        connect_window(window, port, qapp)
+        tab = window.events_tab
+        window.show_tab(tab)
+
+        # Nothing to refresh before a subscription exists.
+        assert tab.refresh_conditions_btn.isEnabled() is False
+
+        tab.add_source_btn.click()
+        tab._on_start()
+        deadline = time.monotonic() + 30
+        while not tab._running and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab._running is True, tab.status_label.text()
+        assert tab.refresh_conditions_btn.isEnabled() is True
+
+        # A call that stores nothing must not open any modal dialog.
+        def fail_dialog(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError("ConditionRefresh must not ask for a confirmation")
+
+        monkeypatch.setattr(QMessageBox, "question", fail_dialog)
+        reports: list[str] = []
+        tab.report_ready.connect(reports.append)
+
+        tab.refresh_conditions_btn.click()
+        deadline = time.monotonic() + 30
+        while "ConditionRefresh on subscription" not in tab.status_label.text() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        status = tab.status_label.text()
+        assert "ConditionRefresh on subscription" in status, status
+        assert "RefreshStart and RefreshEnd were published" in status, status
+        assert reports and "ConditionRefresh" in reports[0], reports
+
+        # The refresh events are visible in the log as the server's own evidence.
+        deadline = time.monotonic() + 20
+        seen: list[str] = []
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            seen = [
+                tab.events_table.item(row, 3).text()
+                for row in range(tab.events_table.rowCount())
+                if tab.events_table.item(row, 3) is not None
+            ]
+            if "RefreshEndEventType" in seen:
+                break
+            time.sleep(0.03)
+        assert "RefreshStartEventType" in seen and "RefreshEndEventType" in seen, seen
+
+        tab._on_stop()
+        deadline = time.monotonic() + 20
+        while tab._running and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.refresh_conditions_btn.isEnabled() is False
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from typing import Any
@@ -33,13 +34,19 @@ from asyncua.common.subscription import EventNotificationHandlerAsync
 from ..errors import InvalidNodeIdError, MonitorNotActiveError, OpcUaExplorerError
 from ..models import (
     EVENT_FIELD_CHAR_LIMIT,
+    REFRESH_END_EVENT_TYPE_ID,
+    REFRESH_START_EVENT_TYPE_ID,
+    STATUS_PASSED,
+    ConditionRefreshResult,
     EventConfig,
     EventNotification,
     EventSourceInfo,
     EventStart,
     MonitorStatusEvent,
+    WriteAuthority,
     iso_utc,
 )
+from . import write_service
 from .attributes import status_name
 from .path_support import parse_browse_name
 from .serialize import SerializationContext, serialize_value
@@ -56,6 +63,12 @@ _LIFETIME_COUNT = 10_000
 _MAX_KEEP_ALIVE_COUNT = 20
 #: Events arrive in bursts far more readily than data changes; keep more per publish.
 _MAX_NOTIFICATIONS_PER_PUBLISH = 1_000
+
+#: How long a ``ConditionRefresh`` waits for the server's RefreshStart/RefreshEnd
+#: events after the call returned; the subscription publishes on its own interval.
+REFRESH_OBSERVATION_TIMEOUT_S = 2.0
+#: Poll interval while waiting; the publish loop runs on this same event loop.
+_REFRESH_POLL_INTERVAL_S = 0.05
 
 #: Fields every event subscription selects, so the summary columns always work.
 DEFAULT_EVENT_FIELDS = (
@@ -240,6 +253,10 @@ class LiveEvents:
         self._event_filter: ua.EventFilter | None = None
         self._sources: dict[int, EventSourceInfo] = {}
         self._sequence = 0
+        #: Counters for the refresh evidence; ``refresh_conditions`` compares
+        #: them before and after its single call.
+        self._refresh_started = 0
+        self._refresh_ended = 0
 
     # -- state -------------------------------------------------------------
     @property
@@ -280,6 +297,8 @@ class LiveEvents:
         subscription = await self._client.create_subscription(params, _LiveEventsHandler(self))
         self._subscription = subscription
         self._sources = {}
+        self._refresh_started = 0
+        self._refresh_ended = 0
         _logger.info("Event subscription %s created", self.subscription_id)
 
         result = EventStart(
@@ -350,6 +369,69 @@ class LiveEvents:
         else:
             _logger.info("Event subscription deleted")
 
+    # -- condition refresh -------------------------------------------------
+    async def refresh_conditions(
+        self,
+        *,
+        authorization: WriteAuthority,
+        object_node_id: str = "",
+        observation_timeout_s: float = REFRESH_OBSERVATION_TIMEOUT_S,
+    ) -> ConditionRefreshResult:
+        """Ask the server to re-publish this subscription's retained Conditions.
+
+        One ``ConditionRefresh`` call (see
+        :func:`opcua_explorer.opcua.write_service.refresh_conditions`) followed by
+        a bounded wait for the ``RefreshStart``/``RefreshEnd`` events. The wait is
+        an observation, not a retry: the call itself is sent once either way, and
+        a missing event is reported instead of being turned into a verdict.
+        """
+        if self._subscription is None:
+            raise MonitorNotActiveError("No event subscription is running. Start event monitoring first.")
+        subscription_id = self.subscription_id
+        started_before, ended_before = self._refresh_started, self._refresh_ended
+        started = time.perf_counter()
+        outcome = await write_service.refresh_conditions(
+            self._client,
+            int(subscription_id or 0),
+            object_node_id=object_node_id,
+            authorization=authorization,
+        )
+        observed_ms = await self._await_refresh_events(ended_before, observation_timeout_s)
+
+        result = ConditionRefreshResult(
+            subscription_id=subscription_id,
+            object_node_id=outcome.object_node_id,
+            method_node_id=outcome.method_node_id,
+            status=outcome.status,
+            status_code=outcome.status_code,
+            detail=outcome.detail,
+            sent=outcome.sent,
+            refresh_started=self._refresh_started > started_before,
+            refresh_ended=self._refresh_ended > ended_before,
+            observation_ms=observed_ms,
+            duration_ms=round((time.perf_counter() - started) * 1000.0, 2),
+            authorization=authorization,
+        )
+        if result.status == STATUS_PASSED and not result.refresh_started:
+            hint = (
+                "The server accepted ConditionRefresh but published no RefreshStart event on this "
+                "subscription within "
+                f"{observation_timeout_s:.1f} s; a server-side severity filter can hide it."
+            )
+            result.detail = f"{result.detail} {hint}".strip()
+        return result
+
+    async def _await_refresh_events(self, ended_before: int, timeout_s: float) -> float:
+        """Wait bounded for a *new* RefreshEnd event; returns the observed wait in ms."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        deadline = started + max(0.0, float(timeout_s))
+        while loop.time() < deadline:
+            if self._refresh_ended > ended_before:
+                break
+            await asyncio.sleep(_REFRESH_POLL_INTERVAL_S)
+        return round((loop.time() - started) * 1000.0, 2)
+
     # -- notification handling (called on the asyncio thread) --------------
     def _handle_event(self, event: Any) -> None:
         try:
@@ -359,10 +441,18 @@ class LiveEvents:
             return
         self._sequence += 1
         notification.sequence = self._sequence
+        self._count_refresh_event(notification)
         try:
             self._emit(notification)
         except Exception:  # pragma: no cover - reporter must not raise
             _logger.exception("Delivering an event notification failed")
+
+    def _count_refresh_event(self, notification: EventNotification) -> None:
+        """Record a ``RefreshStart``/``RefreshEnd`` event as refresh evidence."""
+        if notification.event_type_id == REFRESH_START_EVENT_TYPE_ID:
+            self._refresh_started += 1
+        elif notification.event_type_id == REFRESH_END_EVENT_TYPE_ID:
+            self._refresh_ended += 1
 
     def _build_notification(self, event: Any) -> EventNotification:
         fields: dict[str, str] = {}

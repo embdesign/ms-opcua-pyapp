@@ -24,6 +24,8 @@ from typing import Any
 from asyncua import ua
 
 from ..models import (
+    CONDITION_REFRESH_METHOD_ID,
+    CONDITION_TYPE_NODE_ID,
     STATUS_FAILED,
     STATUS_OUTCOME_UNKNOWN,
     STATUS_PASSED,
@@ -784,6 +786,80 @@ async def send_prepared_call(prepared: PreparedCall, *, authorization: WriteAuth
     return outcome
 
 
+async def refresh_conditions(
+    client: Any,
+    subscription_id: int,
+    *,
+    object_node_id: str = "",
+    authorization: WriteAuthority,
+) -> CallOutcome:
+    """Ask the server to re-publish the retained Conditions of one subscription.
+
+    One ``ConditionRefresh`` method call with the SubscriptionId as its only
+    input, sent exactly once. It stores nothing, acknowledges nothing and
+    interrupts nothing, so no confirmation dialog is involved; the authority is
+    still recorded. ``object_node_id`` defaults to the object that owns the
+    method in the standard address space (the ConditionType, ``i=2782``); a
+    server that requires another parent answers with its StatusCode, which is
+    reported verbatim and never retried.
+    """
+    method = ua.NodeId.from_string(CONDITION_REFRESH_METHOD_ID)
+    parent = ua.NodeId.from_string(object_node_id) if object_node_id else ua.NodeId.from_string(
+        CONDITION_TYPE_NODE_ID
+    )
+    outcome = CallOutcome(
+        object_node_id=parent.to_string(),
+        method_node_id=method.to_string(),
+        authorization=authorization,
+    )
+    try:
+        wanted = int(subscription_id)
+    except (TypeError, ValueError):
+        wanted = 0
+    if wanted <= 0:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = "No subscription id is available; ConditionRefresh was not called."
+        return outcome
+
+    outcome.arguments = [f"SubscriptionId={wanted}"]
+    started = time.perf_counter()
+    try:
+        result = await client.get_node(parent).call_method(
+            method, ua.Variant(wanted, ua.VariantType.UInt32)
+        )
+    except asyncio.CancelledError:
+        raise CallCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        # The server answered, so the request did leave; it just refused it.
+        outcome.sent = True
+        outcome.status_code = status_name(exc.code)
+        outcome.detail = (
+            f"ConditionRefresh on subscription {wanted} via {outcome.object_node_id} "
+            f"returned {outcome.status_code}; the server refused the request."
+        )
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = f"ConditionRefresh on subscription {wanted} failed: {type(exc).__name__}: {exc}"
+    else:
+        outcome.sent = True
+        code = result if isinstance(result, ua.StatusCode) else None
+        if code is not None and not code.is_good():
+            outcome.status_code = status_name(code)
+            outcome.detail = (
+                f"ConditionRefresh on subscription {wanted} returned {outcome.status_code}; "
+                "the server refused the request."
+            )
+        else:
+            outcome.status = STATUS_PASSED
+            outcome.status_code = "Good"
+            outcome.output = "no output arguments"
+            outcome.detail = (
+                f"Called {outcome.method_node_id} on {outcome.object_node_id} for subscription {wanted}."
+            )
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
+
+
 async def call_method(
     client: Any,
     object_node_id: str,
@@ -903,6 +979,7 @@ __all__ = [
     "inspect_write",
     "prepare_call",
     "prepare_write",
+    "refresh_conditions",
     "resolve_method_node_id",
     "restore_value",
     "send_prepared_call",

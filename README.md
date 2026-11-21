@@ -11,7 +11,7 @@ Windows and Linux, no Docker.
 > directory lookup, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
-> detail view, server status & diagnostics and raw history reads, functional tests with JSON/HTML reports,
+> detail view, server status & diagnostics and history reads with a trend chart, functional tests with JSON/HTML reports,
 > guarded single-target write/method-call checks with explicit confirmation, an
 > interactive **Write & call** page (confirmed write with read-back and optional verified restore, confirmed method
 > call with the server's argument types),
@@ -42,9 +42,9 @@ session's client.
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType
-fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried) |
+fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried), and **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
-| **History** | Raw **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, and a table of source/server timestamps, StatusCode and value; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
+| **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
 | **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared), call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown) and **node management**: create one `Object` or `Variable` below a parent (the server assigns the NodeId, the new node is read back) or delete one node (one `DeleteNodes`, verified by reading it again). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery) plus optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / verification checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
@@ -166,7 +166,10 @@ uv run opcua-explorer
    `uv run opcua-demo-server --event-interval 1`, add the Server object (`i=2253`) and press **Start events**;
    select a row to see every field the server published. With an event type such as `ConditionType` (`i=2782`) the
    selected condition event can be acknowledged: **Acknowledge condition…** asks for an optional comment, shows the
-   exact target and EventId, and sends one `Acknowledge` method call after confirmation.
+   exact target and EventId, and sends one `Acknowledge` method call after confirmation. **Refresh conditions**
+   asks the server once to publish the conditions it already retains for the running subscription
+   (`ConditionRefresh`, no dialog because it stores and changes nothing); the server's `RefreshStart`/
+   `RefreshEnd` events appear in the log as the evidence that the request arrived.
    The **Server** tab reads `ServerStatus`, the `ServerDiagnostics` summary and the ServerCapabilities limits with
    one batched Read when the session connects or **Refresh** is pressed; it also lists this session's live-monitor
    items. Optional values the server returns as null are shown as *not provided*, never as zero.
@@ -175,7 +178,9 @@ uv run opcua-explorer
    Leave *From*/*To* unchecked for the whole stored range, or tick them to bound it; *Max values* caps the result.
    The server decides which values it keeps and in which order it returns them; the table is sorted oldest-first.
    A variable the server does not historize returns no rows and the StatusCode/`Historizing` hint in the status
-   line — that is a fact about the server, not a client error.
+   line — that is a fact about the server, not a client error. When the values are single numbers, the same result
+   is drawn above the table as a **trend** (time axis when every value has a timestamp, row order otherwise);
+   non-numeric values are counted in the summary instead of being plotted, and nothing is interpolated.
 5. **Export** tab: keep *whole address space*, set *Maximum nodes* to e.g. 500, press **Download**. Progress,
    counters and cancellation are available. The *Export content* group decides whether variable values and node
    descriptions become part of the snapshot (values are off by default), and *Export coverage* lists exactly
@@ -327,14 +332,16 @@ src/opcua_explorer/
 │   ├── node_reader.py      session-bound browse, node-detail and value reads
 │   ├── node_ids.py         NodeId normalisation shared by service and collaborators
 │   ├── session_setup.py    discovery, client construction, security/identity, namespaces
-│   ├── history_service.py  raw HistoryRead: request shape, continuation points, decoding
+│   ├── history_service.py  read-only HistoryRead: raw + aggregate, continuation points, decoding
 │   └── client_service.py the only owner of an asyncua Client
+├── trend.py              numeric trend series and text sparkline (pure, no Qt)
 ├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
 │   ├── session_workspace.py  one session: its service and ten pages
 │   ├── async_runner.py   the only bridge between Qt and asyncio
+│   ├── trend_chart.py    trend widget for one history result
 │   └── tabs/             connection (+ connection_dialogs, server_directory_dialog), browser, export, monitor, events, server, history, write, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
@@ -562,26 +569,31 @@ uv run python scripts/generate_example_comparison.py
 The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
 servers behave identically under load, and it sends no write or method call.
 
-### Headless read, monitor and history: `opcua-read` / `opcua-monitor` / `opcua-history`
+### Headless read, monitor, history and write: `opcua-read` / `opcua-monitor` / `opcua-history` / `opcua-write`
 
-Three Qt-free front ends over the same services as the GUI:
+Four Qt-free front ends over the same services as the GUI:
 
 ```bash
 opcua-read --endpoint opc.tcp://192.168.1.100:4840 --node ns=2;s=Temperature
 opcua-read --endpoint opc.tcp://plc:4840 --node i=85 --attribute DisplayName --json
 opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --seconds 30
 opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --csv
+opcua-write --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --value 42.5 --confirm
 ```
 
 `opcua-read` reads **Value** by default and any attribute shown by the Address space panel with `--attribute`
 (`NodeClass`, `BrowseName`, `DisplayName`, `DataType`, `ValueRank`, `AccessLevel`, …). Exit codes: `0` every read
 was Good, `1` connection/session failure, `2` unusable arguments, `3` at least one Bad status. `opcua-monitor`
 creates one data-change subscription and prints each notification until `--count` or `--seconds`; `--json` prints
-one JSON object per line, and it exits `3` if no notification arrived. `opcua-history` performs one raw
+one JSON object per line, and it exits `3` if no notification arrived. `opcua-history` performs one
 `HistoryRead` for one variable (`--from` / `--to` ISO-8601, `--max-values`) and prints summary + values, a
-versioned JSON document or CSV. All three use the same security flags as `opcua-export` (passwords from
-`--password-env` or a prompt, explicit certificate approval, no downgrade) and none is included in the
-standalone bundles.
+versioned JSON document or CSV; `--aggregate average|minimum|maximum|count` with `--interval MS` requests a
+processed read instead (both `--from` and `--to` are then required, and the server may not support aggregates),
+and `--sparkline` adds a one-line text trend of the numeric values. `opcua-write` always previews (server DataType/ValueRank and the parsed value),
+sends only with `--confirm`, sends exactly one write, reads it back and optionally restores the previous value
+with `--restore`; without `--confirm` it exits `2` and sends nothing. All four use the same security flags as
+`opcua-export` (passwords from `--password-env` or a prompt, explicit certificate approval, no downgrade) and none
+is included in the standalone bundles.
 
 ### Operator sequences: the Sequences tab
 
@@ -774,11 +786,14 @@ The implemented scope is complete; the following are **not** claimed:
   default. This is separate from the session-level **Keep reconnecting when the link drops** toggle (Connection
   tab → *Resilience*, on by default), which retries a dropped link in the background without operator action.
 * **The suite covers one session, one browse root and one variable** — not every node or DataType.
-* **Values are a point-in-time read; history is raw only.** The **History** tab reads stored values with
-  `HistoryRead` (raw modified details) — there is no processed/aggregate read, no read-at-time, no event history
-  and no `HistoryUpdate`. Whether values exist, which ones and their accuracy is entirely the server's historian;
-  the client only bounds the range and the count (1000 by default, 10 000 at most) and follows continuation
-  points up to a fixed cap.
+* **History is a read-only point-in-time view.** The **History** tab reads stored values with `HistoryRead`:
+  raw modified details by default, or one aggregate (average/minimum/maximum/count) with a processing interval
+  when both From and To are set. There is still no read-at-time, no event history and no `HistoryUpdate`. The
+  trend chart draws the numeric values of exactly that one result — no second read, no interpolation and no
+  resampling — and states how many values it could not plot; it is a view of the table, not an analysis.
+  Whether values exist, which ones, whether the server supports aggregates and their accuracy is entirely
+  the server's historian; the client only bounds the range and the count (1000 by default, 10 000 at most) and
+  follows continuation points up to a fixed cap.
 * **Values in NodeSet2 XML are limited** — asyncua's exporter describes value export as limited, so with
   *Include values* on, some fields (for example the `Name` of a method argument) can be lost on re-import. The
   method argument properties themselves are always written, which is what a consumer needs to call the method.
@@ -800,14 +815,17 @@ The implemented scope is complete; the following are **not** claimed:
   `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
   Neither compares behaviour under load, internal limits, or anything that requires a write.
 * **Events are notifications, not alarm management.** The **Events** tab subscribes to a source's `EventNotifier`
-  and shows the selected fields. Its only action is acknowledging one selected condition event: exactly one
-  `Acknowledge` method call, after an explicit confirmation, through the single write path with
-  `operator-dialog` authority. It never calls `Confirm`, `Enable` or `AddComment`, is never retried, and an
-  acknowledgement is not proof that the process condition has gone away. Acknowledging requires a
-  condition-type subscription (`ConditionType` or a subtype such as `AcknowledgeableConditionType`) so the event
-  carries a condition identity and an EventId. There is no `ConditionRefresh`, no event history, no automatic
-  acknowledgement and no change to a condition's enabled state. A source that cannot publish events (no
-  `EventNotifier`, unknown NodeId, unsupported service) is reported per source with its StatusCode. Event
+  and shows the selected fields. It has exactly two condition actions. Acknowledging one selected condition event
+  is exactly one `Acknowledge` method call, after an explicit confirmation, through the single write path with
+  `operator-dialog` authority. **Refresh conditions** is one `ConditionRefresh` call on the running subscription,
+  which asks the server to publish the conditions it already retains again; it needs no confirmation because it
+  stores, acknowledges and changes nothing, and the server's `RefreshStart`/`RefreshEnd` events are reported as
+  the only evidence that it arrived. Neither action ever calls `Confirm`, `Enable` or `AddComment`, both are
+  never retried, and an acknowledgement is not proof that the process condition has gone away. Acknowledging
+  requires a condition-type subscription (`ConditionType` or a subtype such as `AcknowledgeableConditionType`) so
+  the event carries a condition identity and an EventId. There is no `ConditionRefresh2`, no event history, no
+  automatic acknowledgement and no change to a condition's enabled state. A source that cannot publish events
+  (no `EventNotifier`, unknown NodeId, unsupported service) is reported per source with its StatusCode. Event
   sources are session state, not project state: a project does not store them.
 * **`EventNotifier` is read on demand, not downloaded.** The Address space panel reads it for the selected node
   and shows the decoded names (`0 (none)`, `1 (SubscribeToEvents)`, …), but the bounded download and the
