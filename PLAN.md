@@ -48,6 +48,9 @@ src/opcua_explorer/
 ├── compare.py      structural comparison of two address-space snapshots (Qt/asyncua-free)
 ├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli_compare.py  opcua-compare: headless comparison (same services, no Qt)
+├── cli_read.py     opcua-read: headless attribute read (Qt-free)
+├── cli_monitor.py  opcua-monitor: headless data-change monitor (Qt-free)
+├── cli_history.py  opcua-history: headless raw-history read (Qt-free)
 ├── cli_sequence.py opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── logging_setup.py log bus and secret redaction
 └── demo/           local demo server

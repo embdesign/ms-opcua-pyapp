@@ -40,7 +40,7 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py · cli_compare.py · cli_sequence.py  (Qt-free)                 │
+│ cli.py · cli_read.py · cli_monitor.py · cli_history.py · cli_compare.py │
 │ opcua-export · opcua-compare · opcua-run-sequence                    │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
@@ -78,7 +78,9 @@ Rules that keep the layers honest:
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
-* `cli.py`, `cli_compare.py` and `cli_sequence.py` are the Qt-free front ends: each owns its own event loop
+* `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_history.py`, `cli_compare.py` and `cli_sequence.py` are the
+  Qt-free front ends:
+  each owns its own event loop
   through `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They
   must not re-implement traversal, dependency collection, writing, validation, certificate approval, the
   comparison or the sequence engine — the GUI and the CLIs share those objects on purpose.

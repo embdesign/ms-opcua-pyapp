@@ -79,8 +79,61 @@ class CliError(Exception):
 # ---------------------------------------------------------------------------
 
 
-def build_parser() -> argparse.ArgumentParser:
+def add_connection_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the shared connection, security and identity flags."""
     policies = ", ".join(sorted({info.label for info in all_policies()}))
+    connection = parser.add_argument_group("security and identity")
+    connection.add_argument(
+        "--policy",
+        metavar="POLICY",
+        help=f"security policy name or URI (default: None). Names: {policies}",
+    )
+    connection.add_argument("--mode", choices=MODE_NAMES, default="None", help="message security mode")
+    connection.add_argument("--client-certificate", metavar="FILE", help="client certificate (.der or .pem)")
+    connection.add_argument("--client-key", metavar="FILE", help="client private key (.pem)")
+    connection.add_argument(
+        "--key-password-env",
+        metavar="VAR",
+        help=f"environment variable holding the private-key password (default for the GUI: {KEY_PASSWORD_ENV})",
+    )
+    connection.add_argument(
+        "--certificate-identity",
+        action="store_true",
+        help="authenticate with the client certificate instead of anonymously",
+    )
+    connection.add_argument("--user", metavar="NAME", help="user name for user-name authentication")
+    connection.add_argument(
+        "--password-env",
+        metavar="VAR",
+        help=f"environment variable holding the password (default: {PASSWORD_ENV}, else interactive prompt)",
+    )
+    connection.add_argument(
+        "--server-certificate",
+        metavar="FILE",
+        help="approved server certificate (.der/.pem); its SHA-256 must match the advertised certificate",
+    )
+    connection.add_argument(
+        "--trust-server-certificate",
+        action="store_true",
+        help="approve the server certificate advertised by this endpoint and remember it in the trust store",
+    )
+    connection.add_argument(
+        "--trust-store",
+        metavar="FILE",
+        help="trust store file to use instead of the application default",
+    )
+    connection.add_argument("--timeout", type=float, default=10.0, help="request timeout in seconds")
+    connection.add_argument("--connect-timeout", type=float, default=10.0, help="connect timeout in seconds")
+
+
+def add_output_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the shared quiet/verbose flags."""
+    output = parser.add_argument_group("output")
+    output.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
+    output.add_argument("--verbose", "-v", action="store_true", help="debug logging on stderr")
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="opcua-export",
         description=(
@@ -166,52 +219,8 @@ def build_parser() -> argparse.ArgumentParser:
     nodeset.add_argument("--schema", metavar="XSD", help="NodeSet2 XSD file for optional schema validation")
     nodeset.add_argument("--no-pretty", action="store_true", help="write compact XML instead of indented XML")
 
-    connection = parser.add_argument_group("security and identity")
-    connection.add_argument(
-        "--policy",
-        metavar="POLICY",
-        help=f"security policy name or URI (default: None). Names: {policies}",
-    )
-    connection.add_argument("--mode", choices=MODE_NAMES, default="None", help="message security mode")
-    connection.add_argument("--client-certificate", metavar="FILE", help="client certificate (.der or .pem)")
-    connection.add_argument("--client-key", metavar="FILE", help="client private key (.pem)")
-    connection.add_argument(
-        "--key-password-env",
-        metavar="VAR",
-        help=f"environment variable holding the private-key password (default for the GUI: {KEY_PASSWORD_ENV})",
-    )
-    connection.add_argument(
-        "--certificate-identity",
-        action="store_true",
-        help="authenticate with the client certificate instead of anonymously",
-    )
-    connection.add_argument("--user", metavar="NAME", help="user name for user-name authentication")
-    connection.add_argument(
-        "--password-env",
-        metavar="VAR",
-        help=f"environment variable holding the password (default: {PASSWORD_ENV}, else interactive prompt)",
-    )
-    connection.add_argument(
-        "--server-certificate",
-        metavar="FILE",
-        help="approved server certificate (.der/.pem); its SHA-256 must match the advertised certificate",
-    )
-    connection.add_argument(
-        "--trust-server-certificate",
-        action="store_true",
-        help="approve the server certificate advertised by this endpoint and remember it in the trust store",
-    )
-    connection.add_argument(
-        "--trust-store",
-        metavar="FILE",
-        help="trust store file to use instead of the application default",
-    )
-    connection.add_argument("--timeout", type=float, default=10.0, help="request timeout in seconds")
-    connection.add_argument("--connect-timeout", type=float, default=10.0, help="connect timeout in seconds")
-
-    output = parser.add_argument_group("output")
-    output.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
-    output.add_argument("--verbose", "-v", action="store_true", help="debug logging on stderr")
+    add_connection_arguments(parser)
+    add_output_arguments(parser)
     return parser
 
 

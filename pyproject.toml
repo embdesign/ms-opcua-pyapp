@@ -52,6 +52,12 @@ opcua-demo-server = "opcua_explorer.demo.demo_server:main"
 opcua-export = "opcua_explorer.cli:main"
 # Headless comparison of two address spaces (Qt-free).
 opcua-compare = "opcua_explorer.cli_compare:main"
+# Headless read of one or more node attributes (Qt-free).
+opcua-read = "opcua_explorer.cli_read:main"
+# Headless live data-change monitor (Qt-free).
+opcua-monitor = "opcua_explorer.cli_monitor:main"
+# Headless raw-history read (Qt-free).
+opcua-history = "opcua_explorer.cli_history:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 

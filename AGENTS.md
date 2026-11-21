@@ -27,6 +27,9 @@ uvx ruff check src tests scripts           # clean; config lives in pyproject.to
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
 uv run opcua-compare --help                # headless comparison of two servers (Qt-free, read-only)
+uv run opcua-read --help                   # headless attribute read (Qt-free)
+uv run opcua-monitor --help                # headless live data-change monitor (Qt-free)
+uv run opcua-history --help                # headless raw-history read (Qt-free)
 uv run opcua-run-sequence --help           # headless run of a sequence document (Qt-free)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py

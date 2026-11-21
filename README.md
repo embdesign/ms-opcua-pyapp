@@ -562,6 +562,27 @@ uv run python scripts/generate_example_comparison.py
 The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
 servers behave identically under load, and it sends no write or method call.
 
+### Headless read, monitor and history: `opcua-read` / `opcua-monitor` / `opcua-history`
+
+Three Qt-free front ends over the same services as the GUI:
+
+```bash
+opcua-read --endpoint opc.tcp://192.168.1.100:4840 --node ns=2;s=Temperature
+opcua-read --endpoint opc.tcp://plc:4840 --node i=85 --attribute DisplayName --json
+opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --seconds 30
+opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --csv
+```
+
+`opcua-read` reads **Value** by default and any attribute shown by the Address space panel with `--attribute`
+(`NodeClass`, `BrowseName`, `DisplayName`, `DataType`, `ValueRank`, `AccessLevel`, …). Exit codes: `0` every read
+was Good, `1` connection/session failure, `2` unusable arguments, `3` at least one Bad status. `opcua-monitor`
+creates one data-change subscription and prints each notification until `--count` or `--seconds`; `--json` prints
+one JSON object per line, and it exits `3` if no notification arrived. `opcua-history` performs one raw
+`HistoryRead` for one variable (`--from` / `--to` ISO-8601, `--max-values`) and prints summary + values, a
+versioned JSON document or CSV. All three use the same security flags as `opcua-export` (passwords from
+`--password-env` or a prompt, explicit certificate approval, no downgrade) and none is included in the
+standalone bundles.
+
 ### Operator sequences: the Sequences tab
 
 A device that expects an *ordered* workflow (acquire a lock, change a setpoint, read it back, release the lock)

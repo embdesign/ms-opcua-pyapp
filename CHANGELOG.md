@@ -10,6 +10,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Headless `opcua-history` command.** One raw `HistoryRead` for one variable with `--from`/`--to` (ISO-8601),
+  `--max-values`, and text, versioned JSON or CSV output. Exit codes match the other read commands (`3` for a Bad
+  HistoryRead status).
+- **Headless `opcua-read` and `opcua-monitor` commands.** `opcua-read` reads Value (or a named attribute) from one
+  or more nodes with text or versioned JSON output; `opcua-monitor` runs one data-change subscription for a
+  bounded time/count and prints each notification as text or JSON lines. Both reuse the shared connection,
+  identity and certificate-approval helpers, never write, and are Qt-free. The shared connection/output argument
+  groups moved into `cli.add_connection_arguments()` / `add_output_arguments()`.
 - **Server-side event filtering.** `EventConfig` gained `select_fields` (extra EventType properties, with
   `index:Name` support) and `min_severity`; `event_service.build_event_filter()` builds an `ua.EventFilter` with
   the standard fields plus the extras and an optional `Severity >= n` WhereClause, and every source subscribes
