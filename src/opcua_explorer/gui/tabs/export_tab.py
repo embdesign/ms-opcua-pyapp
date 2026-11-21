@@ -31,7 +31,14 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppSettings
-from ...defaults import DEFAULT_MAX_DEPENDENCIES, DEFAULT_MAX_NODES
+from ...defaults import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_DEPENDENCIES,
+    DEFAULT_MAX_NODES,
+    MAX_TRAVERSAL_BATCH_SIZE,
+    MAX_TRAVERSAL_CONCURRENCY,
+)
 from ...errors import InvalidNodeIdError
 from ...exporters import export_csv, export_json
 from ...models import AddressSpace, NamespaceEntry, TraversalConfig, TraversalProgress
@@ -151,11 +158,11 @@ class ExportTab(QWidget):
         self.max_depth_spin.setValue(0)
         self.max_depth_spin.setSpecialValueText("unlimited")
         self.concurrency_spin = QSpinBox()
-        self.concurrency_spin.setRange(1, 32)
-        self.concurrency_spin.setValue(4)
+        self.concurrency_spin.setRange(1, MAX_TRAVERSAL_CONCURRENCY)
+        self.concurrency_spin.setValue(DEFAULT_CONCURRENCY)
         self.batch_size_spin = QSpinBox()
-        self.batch_size_spin.setRange(1, 500)
-        self.batch_size_spin.setValue(50)
+        self.batch_size_spin.setRange(1, MAX_TRAVERSAL_BATCH_SIZE)
+        self.batch_size_spin.setValue(DEFAULT_BATCH_SIZE)
         self.max_refs_spin = QSpinBox()
         self.max_refs_spin.setRange(0, 100_000)
         self.max_refs_spin.setValue(0)

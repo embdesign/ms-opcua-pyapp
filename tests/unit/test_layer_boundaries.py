@@ -150,10 +150,10 @@ def _client_construction_sites() -> dict[str, list[int]]:
     return sites
 
 
-def test_only_client_service_constructs_an_asyncua_client() -> None:
+def test_only_session_setup_constructs_an_asyncua_client() -> None:
     sites = _client_construction_sites()
-    assert set(sites) == {"opcua/client_service.py"}, (
-        "construct the asyncua client only in opcua/client_service.py: " f"{sites}"
+    assert set(sites) == {"opcua/session_setup.py"}, (
+        "construct the asyncua client only in opcua/session_setup.py: " f"{sites}"
     )
 
 

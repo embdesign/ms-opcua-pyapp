@@ -9,6 +9,7 @@ from opcua_explorer.config import TrustStore
 from opcua_explorer.errors import ConnectionFailedError
 from opcua_explorer.gui.tabs.server_directory_dialog import split_uris
 from opcua_explorer.models import DiscoveredServer, ServerDiscoveryResult
+from opcua_explorer.opcua import session_setup
 from opcua_explorer.opcua.client_service import OpcUaService
 
 
@@ -90,7 +91,7 @@ async def test_discover_servers_maps_and_sorts_the_directory_answer(tmp_path, mo
             _description("urn:a", "alpha", urls=["opc.tcp://h:4840", ""]),
         ]
 
-    monkeypatch.setattr(service, "_fetch_find_servers", fake_fetch)
+    monkeypatch.setattr(session_setup, "_fetch_find_servers", fake_fetch)
 
     result = await service.discover_servers("127.0.0.1:4840", server_uris=[" urn:pre ", ""])
 
@@ -114,7 +115,7 @@ async def test_a_refusing_endpoint_becomes_a_connection_error(tmp_path, monkeypa
     async def failing(client, uris):
         raise ua.UaError("BadServiceUnsupported")
 
-    monkeypatch.setattr(service, "_fetch_find_servers", failing)
+    monkeypatch.setattr(session_setup, "_fetch_find_servers", failing)
 
     with pytest.raises(ConnectionFailedError) as excinfo:
         await service.discover_servers("opc.tcp://h:4840")

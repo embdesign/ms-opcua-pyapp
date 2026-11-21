@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from ..defaults import DEFAULT_BATCH_SIZE, DEFAULT_CONCURRENCY, DEFAULT_MAX_NODES
+from ..defaults import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_NODES,
+    MAX_TRAVERSAL_BATCH_SIZE,
+    MAX_TRAVERSAL_CONCURRENCY,
+)
 from .common import ConnectionInfo, NamespaceEntry, iso_utc, utc_now
 
 
@@ -277,8 +283,8 @@ class TraversalConfig:
         return TraversalConfig(
             max_depth=None if self.max_depth is None or self.max_depth < 0 else self.max_depth,
             max_nodes=None if self.max_nodes is None or self.max_nodes <= 0 else self.max_nodes,
-            concurrency=max(1, min(int(self.concurrency), 32)),
-            batch_size=max(1, min(int(self.batch_size), 500)),
+            concurrency=max(1, min(int(self.concurrency), MAX_TRAVERSAL_CONCURRENCY)),
+            batch_size=max(1, min(int(self.batch_size), MAX_TRAVERSAL_BATCH_SIZE)),
             max_references_per_node=max(0, int(self.max_references_per_node)),
             namespace_filter=self.namespace_filter,
             include_values=bool(self.include_values),

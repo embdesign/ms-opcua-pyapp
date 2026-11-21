@@ -50,6 +50,9 @@ Derived design rules:
 │  security.py  browse.py  attributes.py  traversal.py  serialize.py   │
 │  ua_names.py  value_parsing.py  monitor_service.py  nodeset2.py      │
 │  event_service.py  nodeset2_validation.py  check_support.py          │
+│  monitor_session.py  event_session.py  (subscription lifecycle)      │
+│  node_reader.py  node_ids.py  (session-bound browse/read helpers)    │
+│  session_setup.py  (discovery, client construction, connect flow)    │
 │  server_diagnostics.py  history_service.py  test_runner.py           │
 │  guarded_operations.py  write_service.py  type_support.py            │
 │  path_support.py  sequence_runner.py  method_support.py              │
@@ -69,7 +72,8 @@ Rules that keep the layers honest:
   `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt. Each module is import-probed in
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
-* Only `opcua/client_service.py` constructs an `asyncua.Client` — one instance per session.
+* Only `opcua/session_setup.py` constructs an `asyncua.Client` — one instance per session; `OpcUaService`
+  owns the resulting state and delegates discovery/connect to that module.
 * `gui/session_workspace.py` owns one service and its ten pages and injects that session's browser
   selection into the Export and Tests tabs; `gui/main_window.py` is only the tab bar, menus and status bar,
   and never touches a client.
@@ -98,6 +102,9 @@ on_done(result) updates widgets
   failures can never leave an un-awaited coroutine behind.
 * Cancellation is performed inside the loop (`loop.call_soon_threadsafe(task.cancel)`), plus a
   "cancel before the task started" set to close the submission race.
+* Blocking file work uses `AsyncRunner.submit_call()`: the callable runs on the loop's executor and the result is
+  applied by a queued callback. Widget state is captured and applied on the GUI thread (project save/open, log
+  export); the synchronous `save_project` / `load_project` methods stay available for tests.
 * On shutdown the window cancels UI work, then `run_until_complete(service.shutdown)` releases the OPC UA
   session *before* the loop stops.
 
@@ -207,7 +214,8 @@ options=...)`:
 
 ### Server directory (FindServers)
 
-`OpcUaService.discover_servers()` in `opcua/client_service.py` sends one `FindServers` request and returns plain
+`OpcUaService.discover_servers()` in `opcua/client_service.py` (delegating to `opcua/session_setup.py`) sends one
+`FindServers` request and returns plain
 `DiscoveredServer`/`ServerDiscoveryResult` objects; the GUI dialog is
 `gui/tabs/server_directory_dialog.py`, opened from the Connection tab.
 

@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from ..defaults import DEFAULT_PUBLISHING_INTERVAL_MS, DEFAULT_SAMPLING_INTERVAL_MS
+from ..defaults import (
+    DEFAULT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_PUBLISHING_INTERVAL_MS,
+)
 from .common import iso_utc, utc_now
 
 #: A notification value longer than this is truncated before it is sent to the
@@ -46,8 +51,10 @@ class MonitorConfig:
         if deadband_type == "Percent":
             deadband_value = min(100.0, deadband_value)
         return MonitorConfig(
-            publishing_interval_ms=min(60_000.0, max(50.0, float(self.publishing_interval_ms))),
-            sampling_interval_ms=min(60_000.0, max(0.0, float(self.sampling_interval_ms))),
+            publishing_interval_ms=min(
+                MAX_PUBLISHING_INTERVAL_MS, max(MIN_PUBLISHING_INTERVAL_MS, float(self.publishing_interval_ms))
+            ),
+            sampling_interval_ms=min(MAX_PUBLISHING_INTERVAL_MS, max(0.0, float(self.sampling_interval_ms))),
             queue_size=min(1000, max(0, int(self.queue_size))),
             trigger=trigger,
             deadband_type=deadband_type,

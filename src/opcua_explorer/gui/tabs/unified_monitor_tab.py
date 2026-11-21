@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...defaults import MAX_KEEP_ROWS, MIN_KEEP_ROWS
 from ...models import MonitorNotification, iso_utc
 from ..theme import ERROR, mono_font
 from .base import SessionTab
@@ -156,7 +157,7 @@ class UnifiedMonitorTab(SessionTab):
         self.clear_btn = QPushButton("Clear log")
         self.clear_btn.clicked.connect(self._on_clear_notifications)
         self.max_rows_spin = QSpinBox()
-        self.max_rows_spin.setRange(100, 50_000)
+        self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
         self.max_rows_spin.setValue(DEFAULT_MAX_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the merged notification log; the oldest rows are dropped first.")

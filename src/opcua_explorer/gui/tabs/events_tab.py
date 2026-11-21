@@ -39,7 +39,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...defaults import DEFAULT_EVENT_KEEP_ROWS, DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
+from ...defaults import (
+    DEFAULT_EVENT_KEEP_ROWS,
+    DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    MAX_KEEP_ROWS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_EVENT_PUBLISHING_INTERVAL_MS,
+    MIN_KEEP_ROWS,
+)
 from ...errors import InvalidNodeIdError
 from ...models import (
     STATUS_PASSED,
@@ -157,7 +164,7 @@ class EventsTab(SessionTab):
             "A custom event type adds its own properties to the detail view."
         )
         self.publishing_spin = QDoubleSpinBox()
-        self.publishing_spin.setRange(100.0, 60_000.0)
+        self.publishing_spin.setRange(MIN_EVENT_PUBLISHING_INTERVAL_MS, MAX_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setDecimals(0)
         self.publishing_spin.setSingleStep(100.0)
         self.publishing_spin.setValue(DEFAULT_EVENT_PUBLISHING_INTERVAL_MS)
@@ -172,7 +179,7 @@ class EventsTab(SessionTab):
         self.clear_log_btn = QPushButton("Clear events")
         self.clear_log_btn.clicked.connect(self._on_clear_events)
         self.max_rows_spin = QSpinBox()
-        self.max_rows_spin.setRange(100, 50_000)
+        self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
         self.max_rows_spin.setValue(DEFAULT_EVENT_KEEP_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the event log; the oldest rows are dropped first.")

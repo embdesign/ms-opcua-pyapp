@@ -118,10 +118,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Shared bounds for intervals and row caps.** `defaults.py` now owns the publishing/sampling interval bounds, the
+  notification window, the latency sample cap, the traversal concurrency/batch-size clamps and the keep-row limits
+  used by both the models and their spin boxes, so a normalised config and its widget always agree.
 - **Model and tab plumbing split for maintainability.** `models.py` is now the `models/` package (one module
   per feature cluster, with `__init__.py` re-exporting the same public names), the session pages share
   `gui/tabs/base.py`, and the content tabs cache their connection state from `set_connected(...)` instead of
   reading `OpcUaService` from the GUI thread. No public behaviour or persisted format changed.
+- **Project and log file I/O runs on the worker loop.** `AsyncRunner.submit_call()` executes a blocking callable
+  on the loop's executor. *File → Save/Open project* now captures or applies widget state on the GUI thread while
+  the file read/write happens off it; the log export writes in the executor too. The synchronous
+  `save_project` / `load_project` methods remain for tests and callers that need a completed write.
+- **Connection establishment moved out of the façade.** `opcua/session_setup.py` now owns endpoint discovery,
+  FindServers, client construction, security/identity setup and namespace loading; `OpcUaService.connect()` keeps
+  validation, certificate checks and the disconnect-before-open ordering, then assigns the returned state. The
+  single-client construction guard now points at `session_setup.py`.
+- **`client_service` delegates subscription and read state.** The live-monitor and event-subscription lifecycles
+  moved to `opcua/monitor_session.py` / `opcua/event_session.py`, browse/node-detail/value reads to
+  `opcua/node_reader.py`, and NodeId normalisation to `opcua/node_ids.py`; `OpcUaService` keeps every public
+  method and delegates. The three certificate pass-throughs were removed; the Connection tab uses the
+  `TrustStore` and `summarize_certificate()` directly. No behaviour changed.
 - **Test and error-handling hardening.** `AsyncRunner` no longer keeps a cancel marker for an already-finished
   task and now guards its cross-thread bookkeeping with a lock; `SequenceBusyError`, `SequenceAborted` and
   `MetadataUnavailable` derive from `OpcUaExplorerError`; boundary tests pin the single `Client(...)`
@@ -162,6 +178,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Unreadable method metadata is no longer reported as "no arguments".** `read_input_arguments()` returns an
+  empty list only when the `InputArguments` property is genuinely absent (`BadNoMatch`). A failed browse/read or a
+  malformed argument entry now raises `MetadataUnavailable`, which the write/call, guarded-check and sequence
+  surfaces already report as a refusal instead of sending a call with a wrong argument list.
 - **Write & call keeps its layout when the window shrinks.** The page now lives in a scroll area, so its five
   groups keep their natural size and the page scrolls instead of squeezing labels, buttons and line edits.
 - Labelled widgets show their literal ampersand again. Qt draws tab labels and group-box titles with

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from asyncua import ua
+from asyncua.ua.uaerrors import BadNoMatch
 
 from opcua_explorer.models import (
     STATUS_FAILED,
@@ -68,7 +69,7 @@ class _FakeMethod:
 
     async def get_child(self, names: list[str]) -> _FakeProperty:
         if self._arguments is None:
-            raise ua.UaError("BadNoMatch")
+            raise BadNoMatch()
         return _FakeProperty(self._arguments)
 
 

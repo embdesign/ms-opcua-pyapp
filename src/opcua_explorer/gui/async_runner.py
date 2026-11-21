@@ -191,11 +191,30 @@ class AsyncRunner(QObject):
         loop.call_soon_threadsafe(lambda: loop.create_task(self._track(task_key, factory)))
         return TaskHandle(self, task_key)
 
+    def submit_call(
+        self,
+        function: Callable[..., Any],
+        *args: Any,
+        on_done: Callable[[Any], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+        **kwargs: Any,
+    ) -> TaskHandle:
+        """Run a blocking call on the loop's executor, never on the GUI thread.
+
+        Use this for file writes, JSON parsing or other short blocking work that
+        does not belong in a widget slot.
+        """
+
+        async def run() -> Any:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, lambda: function(*args, **kwargs))
+
+        return self.submit(run, on_done=on_done, on_error=on_error)
+
     def cancel(self, key: str) -> None:
         loop = self._loop
         if loop is None:
             return
-
         def _cancel() -> None:
             with self._lock:
                 task = self._tasks.get(key)

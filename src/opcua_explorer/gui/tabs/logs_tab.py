@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...logging_setup import get_log_bus
+from ..async_runner import AsyncRunner
 from ..theme import mono_font
 
 _LEVELS = [
@@ -44,8 +45,10 @@ class _LogBridge(QObject):
 
 
 class LogsTab(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, runner: AsyncRunner | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        #: Optional worker loop for the log export; without it the write is synchronous.
+        self._runner = runner
         self._min_level = logging.INFO
         self._bridge = _LogBridge(self)
         self._bridge.message.connect(self._on_message)
@@ -157,8 +160,25 @@ class LogsTab(QWidget):
         )
         if not path:
             return
+        text = self.console.toPlainText()
+        if self._runner is None:
+            self._write_log(path, text)
+            return
         try:
-            Path(path).write_text(self.console.toPlainText(), encoding="utf-8")
+            self._runner.submit_call(
+                Path(path).write_text,
+                text,
+                encoding="utf-8",
+                on_done=lambda _result: self.console.appendPlainText(f"Log saved to {path}"),
+                on_error=lambda message: self.console.appendPlainText(f"Could not save the log: {message}"),
+            )
+        except RuntimeError:
+            # The worker loop is already stopping (application exit); write directly.
+            self._write_log(path, text)
+
+    def _write_log(self, path: str, text: str) -> None:
+        try:
+            Path(path).write_text(text, encoding="utf-8")
         except OSError as exc:
             self.console.appendPlainText(f"Could not save the log: {exc}")
 

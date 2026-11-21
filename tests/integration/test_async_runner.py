@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 from opcua_explorer.gui.async_runner import AsyncRunner
@@ -32,6 +33,18 @@ def test_cancel_after_completion_leaves_no_stale_marker(qapp) -> None:
 
         assert runner._cancelled_before_start == set()
         assert runner._pending == set()
+    finally:
+        runner.stop()
+
+
+def test_submit_call_runs_blocking_work_off_the_gui_thread(qapp) -> None:
+    runner = AsyncRunner()
+    runner.start()
+    try:
+        seen: list[int] = []
+        runner.submit_call(threading.get_ident, on_done=seen.append)
+        _wait_for(qapp, lambda: bool(seen))
+        assert seen[0] != threading.get_ident()
     finally:
         runner.stop()
 

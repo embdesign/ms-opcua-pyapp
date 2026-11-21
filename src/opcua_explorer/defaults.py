@@ -28,6 +28,21 @@ DEFAULT_LATENCY_SAMPLES = 10
 
 DEFAULT_CONCURRENCY = 4
 DEFAULT_BATCH_SIZE = 50
+#: Hard clamps used by ``TraversalConfig`` and the Export tab.
+MAX_TRAVERSAL_CONCURRENCY = 32
+MAX_TRAVERSAL_BATCH_SIZE = 500
+
+#: Interval bounds shared by MonitorConfig / EventConfig / TestConfig and their tabs.
+MIN_PUBLISHING_INTERVAL_MS = 50.0
+MAX_PUBLISHING_INTERVAL_MS = 60_000.0
+MIN_EVENT_PUBLISHING_INTERVAL_MS = 100.0
+MIN_NOTIFICATION_WAIT_SECONDS = 0.5
+MAX_NOTIFICATION_WAIT_SECONDS = 120.0
+MAX_LATENCY_SAMPLES = 200
+
+#: Bounds of the "keep rows" controls in the monitor, events and unified-monitor tabs.
+MIN_KEEP_ROWS = 100
+MAX_KEEP_ROWS = 50_000
 
 #: MaxAge of an explicit Value read in milliseconds. ``0`` lets the server answer
 #: from a cache; the protocol maximum (uint32) means "come from the device".

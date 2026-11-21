@@ -321,6 +321,11 @@ src/opcua_explorer/
 │   ├── path_support.py   TranslateBrowsePathsToNodeIds (complete, unambiguous matches only)
 │   ├── sequence_runner.py  universal sequence engine (gates, keepalive, dry run)
 │   ├── monitor_service.py  live data-change subscription: monitored items, JSON-safe notifications
+│   ├── monitor_session.py  one session's live-subscription lifecycle
+│   ├── event_session.py    one session's event-subscription lifecycle
+│   ├── node_reader.py      session-bound browse, node-detail and value reads
+│   ├── node_ids.py         NodeId normalisation shared by service and collaborators
+│   ├── session_setup.py    discovery, client construction, security/identity, namespaces
 │   ├── history_service.py  raw HistoryRead: request shape, continuation points, decoding
 │   └── client_service.py the only owner of an asyncua Client
 ├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py

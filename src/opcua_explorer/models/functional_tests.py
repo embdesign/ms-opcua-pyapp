@@ -11,6 +11,11 @@ from ..defaults import (
     DEFAULT_NOTIFICATION_WAIT_SECONDS,
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_LATENCY_SAMPLES,
+    MAX_NOTIFICATION_WAIT_SECONDS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_NOTIFICATION_WAIT_SECONDS,
+    MIN_PUBLISHING_INTERVAL_MS,
 )
 from .common import (
     STATUS_FAILED,
@@ -52,10 +57,14 @@ class TestConfig:
         return TestConfig(
             root_node_id=(self.root_node_id or "i=85").strip(),
             variable_node_id=(self.variable_node_id or "").strip() or None,
-            publishing_interval_ms=min(60_000.0, max(50.0, float(self.publishing_interval_ms))),
-            sampling_interval_ms=min(60_000.0, max(0.0, float(self.sampling_interval_ms))),
-            notification_wait_seconds=min(120.0, max(0.5, float(self.notification_wait_seconds))),
-            latency_samples=min(200, max(1, int(self.latency_samples))),
+            publishing_interval_ms=min(
+                MAX_PUBLISHING_INTERVAL_MS, max(MIN_PUBLISHING_INTERVAL_MS, float(self.publishing_interval_ms))
+            ),
+            sampling_interval_ms=min(MAX_PUBLISHING_INTERVAL_MS, max(0.0, float(self.sampling_interval_ms))),
+            notification_wait_seconds=min(
+                MAX_NOTIFICATION_WAIT_SECONDS, max(MIN_NOTIFICATION_WAIT_SECONDS, float(self.notification_wait_seconds))
+            ),
+            latency_samples=min(MAX_LATENCY_SAMPLES, max(1, int(self.latency_samples))),
             max_browse_nodes=min(5000, max(1, int(self.max_browse_nodes))),
             include_channel_recovery=bool(self.include_channel_recovery),
             request_timeout=min(300.0, max(0.5, float(self.request_timeout))),

@@ -602,7 +602,11 @@ class ConnectionTab(QWidget):
                 self._show_error("The server did not provide a certificate for the selected secure endpoint.")
                 return
             summary = summarize_certificate(endpoint.certificate_der)
-            if not self._service.certificate_is_trusted(endpoint.certificate_der):
+            fingerprint = summary.sha256 or ""
+            if not fingerprint:
+                self._show_error("The server certificate could not be fingerprinted.")
+                return
+            if not self._service.trust_store.is_trusted(fingerprint):
                 known = self._service.trust_store.get(summary.sha256 or "")
                 approved = CertificateReviewDialog.ask(
                     self,
@@ -616,8 +620,8 @@ class ConnectionTab(QWidget):
                     set_chip_state(self.status_chip, "disconnected")
                     self.status_chip.setText("Disconnected (certificate not approved)")
                     return
-                self._service.approve_certificate(
-                    endpoint.certificate_der,
+                self._service.trust_store.add(
+                    fingerprint,
                     subject=summary.subject,
                     endpoint_url=endpoint.endpoint_url,
                     not_after=summary.not_after,

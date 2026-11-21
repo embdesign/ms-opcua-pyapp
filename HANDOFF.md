@@ -78,7 +78,7 @@ aggregate, at-time or event-history helper — see `docs/api-verification.md`.
 
 **Server directory (FindServers) — delivered.** `OpcUaService.discover_servers()` sends one `FindServers` request
 on a temporary `SecurityPolicyNone` channel (the same channel-level pattern as GetEndpoints, inside
-`client_service.py` only) and maps the answer into `DiscoveredServer`/`ServerDiscoveryResult`. The Connection tab
+`session_setup.py` only) and maps the answer into `DiscoveredServer`/`ServerDiscoveryResult`. The Connection tab
 opens `gui/tabs/server_directory_dialog.py` (**Find servers…**), which filters by application-URI prefix, lists
 name/URI/type/discovery URL and puts the selected URL into the endpoint field. `FindServersOnNetwork` is
 deliberately not offered (asyncua's server answers `BadUserAccessDenied`; no verified multicast path). Demo server
@@ -158,7 +158,7 @@ bundles are built now (GUI, export, compare).
 
 - One asyncio loop in a worker thread; `gui/async_runner.py` is the only Qt↔asyncio bridge and widgets never
   `await`. Results reach the GUI as plain dataclasses through queued signals.
-- One `asyncua.Client` per session, created only by `opcua/client_service.py`; `gui/session_workspace.py` owns a
+- One `asyncua.Client` per session, created only by `opcua/session_setup.py`; `gui/session_workspace.py` owns a
   session's state and pages, `gui/main_window.py` stays a passive shell. Cross-tab dependencies are injected by
   the workspace (`selection_provider`), never fetched through `MainWindow` compatibility properties.
 - Safety invariants stay intact: `opcua/security.py:select_endpoint()` raises instead of downgrading, only
@@ -186,7 +186,8 @@ bundles are built now (GUI, export, compare).
   into it. Secrets are read from `--password-env` or an interactive prompt, never from argv.
 - UI shell: `gui/main_window.py` (sessions, menus, status bar, shared “All monitors”, “Compare” and
   “Logs & reports”). One session = `gui/session_workspace.py` + its ten pages under `gui/tabs/`.
-- Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` is the only owner of an
+- Async boundary: `gui/async_runner.py` only. OPC UA work: `opcua/client_service.py` owns the session state and
+  `opcua/session_setup.py` is the only owner of an
   `asyncua.Client`.
 - Pure layers (no asyncua, no Qt): `models/`, `config.py`, `defaults.py`, `project.py`,
   `formatting.py`, `operator_text.py`, `sequence_document.py`, `compare.py`, `exporters/`, `reporting.py`.

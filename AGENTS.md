@@ -63,12 +63,16 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt.
   `exporters/` uses `formatting.py`, never `opcua/`.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
-- Only `opcua/client_service.py` constructs an `asyncua.Client`; one instance per session. The two
+- Only `opcua/session_setup.py` constructs an `asyncua.Client`; one instance per session. The two
   session-less services (GetEndpoints discovery and the FindServers directory) use a short-lived client on a
   temporary `SecurityPolicyNone` channel **inside that module** and close it again — no other module may create
-  a client.
+  a client. `OpcUaService` keeps the client/session state and delegates discovery/connect to it.
+- Subscription lifecycles live in `opcua/monitor_session.py` and `opcua/event_session.py`; browse/read operations
+  live in `opcua/node_reader.py`; NodeId normalisation lives in `opcua/node_ids.py`. `OpcUaService` keeps the
+  public methods and delegates. Put new operations in the collaborator, not in the façade.
 - Only `gui/async_runner.py` bridges asyncio and Qt. Widgets never `await`; all OPC UA work runs on the single
-  worker loop and results are plain dataclasses delivered through queued signals.
+  worker loop and results are plain dataclasses delivered through queued signals. Blocking file work (project
+  documents, log export) goes through `AsyncRunner.submit_call()`, never a widget slot.
 - Session pages inherit `gui/tabs/base.py::TabRuntime` / `SessionTab` for `_set_status`, `_submit`,
   `_cancel_tasks` and `shutdown`. A page caches `_connected` / `_endpoint_url` from `set_connected(...)` and must
   not read `OpcUaService` state from the GUI thread; only `ConnectionTab` (which owns the lifecycle) does.

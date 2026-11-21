@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import AppSettings, TrustStore
 from ..opcua.client_service import OpcUaService
-from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectError, ProjectFile
+from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectFile
 from .async_runner import AsyncRunner
 from .session_workspace import SessionWorkspace
 from .tabs import CompareTab, LogsTab, UnifiedMonitorTab
@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_current_tab_changed)
         self.setCentralWidget(self.tabs)
 
-        self.logs_tab = LogsTab()
+        self.logs_tab = LogsTab(self._runner)
         self.unified_monitor_tab = UnifiedMonitorTab()
         #: Read-only comparison of two sessions; it owns no client of its own.
         self.compare_tab = CompareTab(self._runner, self._settings)
@@ -397,11 +397,20 @@ class MainWindow(QMainWindow):
             return
         if not path.lower().endswith(".json"):
             path += PROJECT_SUFFIX
+        project = self.project_state()
         try:
-            self.save_project(path)
-        except (ProjectError, OSError) as exc:
+            self._runner.submit_call(
+                project.save,
+                path,
+                on_done=lambda _result: self._project_saved(path, len(project.sessions)),
+                on_error=lambda message: QMessageBox.warning(self, "Save project", message),
+            )
+        except RuntimeError as exc:
             QMessageBox.warning(self, "Save project", str(exc))
-            return
+
+    def _project_saved(self, path: str, sessions: int) -> None:
+        self.logs_tab.append_report(f"Project saved: {path} ({sessions} session(s)).")
+        self.statusBar().showMessage(f"Project saved to {path}.", 8000)
         self._remember_project_path(path)
 
     def _on_open_project(self) -> None:
@@ -412,10 +421,16 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            project = ProjectFile.load(path)
-        except ProjectError as exc:
+            self._runner.submit_call(
+                ProjectFile.load,
+                path,
+                on_done=lambda project: self._open_loaded_project(project, path),
+                on_error=lambda message: QMessageBox.warning(self, "Open project", message),
+            )
+        except RuntimeError as exc:
             QMessageBox.warning(self, "Open project", str(exc))
-            return
+
+    def _open_loaded_project(self, project: ProjectFile, path: str) -> None:
         if any(workspace.service.is_connected for workspace in self.workspaces):
             answer = QMessageBox.question(
                 self,

@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from ..defaults import DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
+from ..defaults import (
+    DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_EVENT_PUBLISHING_INTERVAL_MS,
+)
 from .common import iso_utc, utc_now
 
 #: One event field longer than this is shortened before it reaches the GUI or a
@@ -34,7 +38,10 @@ class EventConfig:
 
     def normalised(self) -> EventConfig:
         return EventConfig(
-            publishing_interval_ms=min(60_000.0, max(100.0, float(self.publishing_interval_ms))),
+            publishing_interval_ms=min(
+                MAX_PUBLISHING_INTERVAL_MS,
+                max(MIN_EVENT_PUBLISHING_INTERVAL_MS, float(self.publishing_interval_ms)),
+            ),
             queue_size=min(1000, max(0, int(self.queue_size))),
             event_type_node_id=str(self.event_type_node_id or "").strip(),
         )

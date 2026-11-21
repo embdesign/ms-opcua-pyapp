@@ -43,6 +43,11 @@ from ...defaults import (
     DEFAULT_NOTIFICATION_WAIT_SECONDS,
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_LATENCY_SAMPLES,
+    MAX_NOTIFICATION_WAIT_SECONDS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_NOTIFICATION_WAIT_SECONDS,
+    MIN_PUBLISHING_INTERVAL_MS,
 )
 from ...errors import InvalidNodeIdError
 from ...models import (
@@ -166,25 +171,25 @@ class TestsTab(QWidget):
         timing_box = QGroupBox("Timing && sampling")
         timing_layout = QFormLayout(timing_box)
         self.publishing_spin = QDoubleSpinBox()
-        self.publishing_spin.setRange(50.0, 60_000.0)
+        self.publishing_spin.setRange(MIN_PUBLISHING_INTERVAL_MS, MAX_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setDecimals(0)
         self.publishing_spin.setSingleStep(100.0)
         self.publishing_spin.setValue(DEFAULT_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setSuffix(" ms")
         self.sampling_spin = QDoubleSpinBox()
-        self.sampling_spin.setRange(0.0, 60_000.0)
+        self.sampling_spin.setRange(0.0, MAX_PUBLISHING_INTERVAL_MS)
         self.sampling_spin.setDecimals(0)
         self.sampling_spin.setSingleStep(50.0)
         self.sampling_spin.setValue(DEFAULT_SAMPLING_INTERVAL_MS)
         self.sampling_spin.setSuffix(" ms")
         self.window_spin = QDoubleSpinBox()
-        self.window_spin.setRange(0.5, 120.0)
+        self.window_spin.setRange(MIN_NOTIFICATION_WAIT_SECONDS, MAX_NOTIFICATION_WAIT_SECONDS)
         self.window_spin.setDecimals(1)
         self.window_spin.setSingleStep(0.5)
         self.window_spin.setValue(DEFAULT_NOTIFICATION_WAIT_SECONDS)
         self.window_spin.setSuffix(" s")
         self.latency_spin = QSpinBox()
-        self.latency_spin.setRange(1, 200)
+        self.latency_spin.setRange(1, MAX_LATENCY_SAMPLES)
         self.latency_spin.setValue(DEFAULT_LATENCY_SAMPLES)
         timing_layout.addRow("Publishing interval:", self.publishing_spin)
         timing_layout.addRow("Sampling interval:", self.sampling_spin)

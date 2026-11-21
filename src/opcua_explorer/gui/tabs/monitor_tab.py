@@ -40,6 +40,10 @@ from ...defaults import (
     DEFAULT_MONITOR_KEEP_ROWS,
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_KEEP_ROWS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_KEEP_ROWS,
+    MIN_PUBLISHING_INTERVAL_MS,
 )
 from ...errors import InvalidNodeIdError
 from ...models import (
@@ -138,14 +142,14 @@ class MonitorTab(SessionTab):
 
         controls = QHBoxLayout()
         self.publishing_spin = QDoubleSpinBox()
-        self.publishing_spin.setRange(50.0, 60_000.0)
+        self.publishing_spin.setRange(MIN_PUBLISHING_INTERVAL_MS, MAX_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setDecimals(0)
         self.publishing_spin.setSingleStep(100.0)
         self.publishing_spin.setValue(DEFAULT_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setSuffix(" ms")
         self.publishing_spin.setToolTip("Requested publishing interval of the subscription.")
         self.sampling_spin = QDoubleSpinBox()
-        self.sampling_spin.setRange(0.0, 60_000.0)
+        self.sampling_spin.setRange(0.0, MAX_PUBLISHING_INTERVAL_MS)
         self.sampling_spin.setDecimals(0)
         self.sampling_spin.setSingleStep(100.0)
         self.sampling_spin.setValue(DEFAULT_SAMPLING_INTERVAL_MS)
@@ -163,7 +167,7 @@ class MonitorTab(SessionTab):
         self.clear_log_btn = QPushButton("Clear notifications")
         self.clear_log_btn.clicked.connect(self._on_clear_notifications)
         self.max_rows_spin = QSpinBox()
-        self.max_rows_spin.setRange(100, 50_000)
+        self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
         self.max_rows_spin.setValue(DEFAULT_MAX_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the notification table; the oldest rows are dropped first.")
