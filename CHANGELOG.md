@@ -10,6 +10,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The client certificate is checked before connecting.** Only the *server* certificate was parsed so far, so
+  an expired client certificate, a missing application URI in `subjectAltName` or a private key that does not
+  belong to the certificate only appeared as the server's `BadSecurityChecksFailed`. `security.check_client_
+  certificate()` (local parsing, no session) now reports those as problems and a certificate expiring within
+  30 days as a warning; the Connection tab runs it on **Connect** through `AsyncRunner.submit_call()` and asks
+  *Connect anyway?* with the text from `operator_text.client_certificate_warning`, keeping the findings next to
+  the certificate fields. It never blocks silently and never changes what is sent — the server's StatusCode
+  stays the verdict — and the CLIs print the same findings on stderr for `--client-certificate`/`--client-key`.
+- **Export the Live monitor and Events tables.** *Export log…* on both pages writes the rows the table holds as
+  a versioned JSON document (`format`/`format_version`, endpoint, rows) or as CSV, through the new pure
+  `exporters/observation_log.py` (`write_observation_log()`); the same rows are written by
+  `opcua-monitor --output FILE` and `opcua-events --output FILE`. It is the bounded table (`Keep rows`), not a
+  recording: nothing is buffered beyond the table and nothing is re-read from the server for the export.
 - **Create the client certificate locally, from the Connection page or headlessly.** Secured setup needed a
   certificate file that a first-time user usually does not have. **Client certificate && private key → Create
   certificate…** now writes either a **self-signed** client certificate or a **certificate signing request** for a

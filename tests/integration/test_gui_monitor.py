@@ -407,3 +407,57 @@ def test_monitor_tab_applies_filter_server_mode_and_intervals(qapp, tmp_path) ->
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_monitor_tab_exports_the_rows_it_shows(qapp, tmp_path, monkeypatch) -> None:
+    """The export writes the bound table (CSV or JSON); the server is not asked again."""
+    from datetime import UTC, datetime
+
+    from PySide6.QtWidgets import QFileDialog
+
+    from opcua_explorer.models import MonitorNotification
+
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        tab = window.monitor_tab
+        window.show_tab(tab)
+        assert tab.export_log_btn.isEnabled() is False
+
+        moment = datetime(2026, 11, 22, 10, 0, tzinfo=UTC)
+        for sequence, value in enumerate((21.5, 22.0), start=1):
+            tab._on_notification(
+                MonitorNotification(
+                    sequence=sequence,
+                    node_id="ns=2;s=Temperature",
+                    value=value,
+                    value_text=str(value),
+                    variant_type="Double",
+                    received_at=moment,
+                )
+            )
+        qapp.processEvents()
+        assert tab.notifications_table.rowCount() == 2
+        assert tab.export_log_btn.isEnabled() is True
+
+        target = tmp_path / "log.csv"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), "CSV (*.csv)"))
+        tab.export_log_btn.click()
+        deadline = time.monotonic() + 20
+        while "Exported" not in tab.status_label.text() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        assert target.exists(), tab.status_label.text()
+        rows = target.read_text(encoding="utf-8-sig").splitlines()
+        assert rows[0].startswith("received_at_utc,")
+        assert len(rows) == 3  # header + the two notifications the table held
+        assert "Exported 2 notification(s)" in tab.status_label.text()
+        # Exporting is a local file write: still no session.
+        assert service.is_connected is False
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()

@@ -333,6 +333,34 @@ def client_certificate_confirmation(
     return "\n".join(lines)
 
 
+def client_certificate_warning(
+    *,
+    endpoint_url: str,
+    subject: str,
+    not_after: str | None,
+    problems: list[str],
+) -> str:
+    """Confirmation body shown when the selected client certificate has local problems.
+
+    Nothing is changed by connecting: the operator is only told what was found on
+    this computer before the server refuses the certificate.
+    """
+    lines = [f"Endpoint: {endpoint_url}", "", f"Client certificate: {subject or '(unparsed)'}"]
+    if not_after:
+        lines.append(f"Valid until: {not_after}")
+    lines.append("")
+    lines.extend(f"- {problem}" for problem in problems)
+    lines.extend(
+        [
+            "",
+            "These are local findings; the server has not been contacted yet. Continue anyway? The "
+            "certificate is sent unchanged, nothing is trusted or replaced, and the server's own answer "
+            "(usually a Bad StatusCode) is reported if it refuses it.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def connection_diagnostics_text(
     *,
     discovery: DiscoveryResult | None = None,

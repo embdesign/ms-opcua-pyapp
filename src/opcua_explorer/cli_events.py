@@ -48,6 +48,7 @@ from .cli import (
 from .config import TrustStore
 from .defaults import DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
 from .errors import OpcUaExplorerError
+from .exporters.observation_log import write_observation_log
 from .models import (
     CONDITION_ACTIONS,
     STATUS_PASSED,
@@ -127,6 +128,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after N events; 0 = run for --seconds (default: 0)",
     )
     parser.add_argument("--json", action="store_true", help="print one JSON object per event")
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="also write the received events to FILE when the run ends (.csv or versioned JSON)",
+    )
 
     condition = parser.add_argument_group("condition actions")
     condition.add_argument(
@@ -268,6 +274,7 @@ async def _run(args: argparse.Namespace) -> int:
     ).normalised()
 
     received = 0
+    collected: list[EventNotification] = []
     refresh_result: ConditionRefreshResult | None = None
     condition_plan = _condition_plan(args)
     condition_code = EXIT_OK
@@ -279,6 +286,7 @@ async def _run(args: argparse.Namespace) -> int:
             print(f"subscription: {payload.status} {detail}".rstrip(), file=sys.stderr, flush=True)
             return
         received += 1
+        collected.append(payload)
         if args.json:
             print(json.dumps(payload.to_dict(), ensure_ascii=False, default=str), flush=True)
         else:
@@ -316,6 +324,14 @@ async def _run(args: argparse.Namespace) -> int:
             await service.shutdown()
 
     progress.note(f"Received {received} event(s)")
+    if args.output:
+        written = write_observation_log(
+            args.output,
+            kind="events",
+            payloads=collected,
+            endpoint_url=settings.endpoint_url,
+        )
+        progress.note(f"{len(collected)} event(s) written to {written}")
     # A run that asked for a condition action is judged by that action as well: the
     # events themselves are the subscription's own output and may legitimately be
     # empty (a server publishes on its own interval).

@@ -73,6 +73,9 @@ Rules that keep the layers honest:
   `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt. Each module is import-probed in
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
+  `exporters/observation_log.py` owns the monitor and event log documents (`format`/`format_version`) and
+  their CSV columns, shared by the two tabs' *Export log…* buttons and the `--output` flags of
+  `opcua-monitor`/`opcua-events`, so each log has exactly one document format.
 * Only `opcua/session_setup.py` constructs an `asyncua.Client` — one instance per session; `OpcUaService`
   owns the resulting state and delegates discovery/connect to that module.
 * `gui/session_workspace.py` owns one service and its ten pages, orders them by the on-site workflow
@@ -334,7 +337,13 @@ silently. The result is a `models.CertificateFiles` with the paths, the subject,
 (the certificate, or the request for a CSR) and the validity of a self-signed certificate.
 
 The Connection tab runs the generator through `AsyncRunner.submit_call()` (RSA key generation is blocking work),
-fills the certificate/key fields when it succeeds, and shows the summary next to them. It sends nothing, installs
+fills the certificate/key fields when it succeeds, and shows the summary next to them.
+The same executor runs `security.check_client_certificate()` on **Connect**: it parses the selected pair
+locally (validity window, application URI in `subjectAltName`, key that belongs to the certificate) and a
+problem becomes an explicit *Connect anyway?* confirmation built by
+`operator_text.client_certificate_warning`. It never blocks silently and never changes what is sent; the
+server's own StatusCode stays the verdict. The CLIs print the same findings through
+`cli._note_client_certificate()`. It sends nothing, installs
 nothing and touches neither the trust store nor a session; `opcua-certificate` (`cli_certificate.py`) is the same
 call without a window. The confirmation text lives in `operator_text.client_certificate_confirmation` and states
 the unencrypted key, the missing CA and the fact that nothing is trusted.

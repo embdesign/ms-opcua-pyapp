@@ -37,6 +37,7 @@ from .cli import (
 from .config import TrustStore
 from .defaults import DEFAULT_PUBLISHING_INTERVAL_MS, DEFAULT_SAMPLING_INTERVAL_MS
 from .errors import OpcUaExplorerError
+from .exporters.observation_log import write_observation_log
 from .formatting import flatten_for_csv
 from .models import MonitorConfig, MonitorNotification, MonitorStatusEvent
 from .opcua.client_service import OpcUaService
@@ -93,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after N notifications; 0 = run for --seconds (default: 0)",
     )
     parser.add_argument("--json", action="store_true", help="print one JSON object per notification")
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="also write the received notifications to FILE when the run ends (.csv or versioned JSON)",
+    )
 
     add_connection_arguments(parser)
     add_output_arguments(parser)
@@ -119,11 +125,13 @@ async def _run(args: argparse.Namespace) -> int:
     ).normalised()
 
     received = 0
+    collected: list[MonitorNotification] = []
 
     def emit(payload: Any) -> None:
         nonlocal received
         if isinstance(payload, MonitorNotification):
             received += 1
+            collected.append(payload)
             if args.json:
                 print(json.dumps(payload.to_dict(), ensure_ascii=False, default=str), flush=True)
             else:
@@ -157,6 +165,14 @@ async def _run(args: argparse.Namespace) -> int:
             await service.shutdown()
 
     progress.note(f"Received {received} notification(s)")
+    if args.output:
+        written = write_observation_log(
+            args.output,
+            kind="monitor",
+            payloads=collected,
+            endpoint_url=settings.endpoint_url,
+        )
+        progress.note(f"{len(collected)} notification(s) written to {written}")
     return EXIT_OK if received > 0 else EXIT_INVALID_OUTPUT
 
 

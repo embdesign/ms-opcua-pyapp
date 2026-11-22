@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -25,6 +26,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -50,6 +52,7 @@ from ...defaults import (
     MIN_KEEP_ROWS,
 )
 from ...errors import InvalidNodeIdError
+from ...exporters.observation_log import write_observation_log
 from ...models import (
     CONDITION_ACTION_LABELS,
     CONDITION_ACTIONS,
@@ -192,6 +195,13 @@ class EventsTab(SessionTab):
         self.stop_btn.clicked.connect(self._on_stop)
         self.clear_log_btn = QPushButton("Clear events")
         self.clear_log_btn.clicked.connect(self._on_clear_events)
+        self.export_log_btn = QPushButton("Export log…")
+        self.export_log_btn.setToolTip(
+            "Write the event rows currently in the table as a versioned JSON document or CSV. "
+            "It is exactly what the table holds (Keep rows), not everything ever received."
+        )
+        self.export_log_btn.clicked.connect(self._on_export_log)
+        self.export_log_btn.setEnabled(False)
         self.max_rows_spin = QSpinBox()
         self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
@@ -211,6 +221,7 @@ class EventsTab(SessionTab):
         controls.addWidget(self.stop_btn)
         controls.addSpacing(12)
         controls.addWidget(self.clear_log_btn)
+        controls.addWidget(self.export_log_btn)
         controls.addWidget(QLabel("Keep rows:"))
         controls.addWidget(self.max_rows_spin)
         controls.addSpacing(12)
@@ -726,6 +737,57 @@ class EventsTab(SessionTab):
         self._update_condition_buttons()
         self._update_counters()
 
+    def _on_export_log(self) -> None:
+        """Write the rows the event table currently shows; nothing is re-read."""
+        payloads = self._event_payloads()
+        if not payloads:
+            self._set_status("There is no event to export.", error=True)
+            return
+        path, selected = QFileDialog.getSaveFileName(
+            self,
+            "Export event log",
+            str(Path.home() / "opcua-event-log.json"),
+            "JSON document (*.json);;CSV (*.csv)",
+        )
+        if not path:
+            self._set_status("Exporting the event log was cancelled.")
+            return
+        if not Path(path).suffix:
+            path += ".csv" if "CSV" in selected else ".json"
+        self._set_status(f"Writing {len(payloads)} event(s) to {path}…")
+
+        def done(written: Any) -> None:
+            if self._closed:
+                return
+            text = (
+                f"Exported {len(payloads)} event(s) to {written}; "
+                "the table keeps its bounded rows only."
+            )
+            self._set_status(text)
+            self.report_ready.emit(f"Event log exported: {text}")
+
+        self._runner.submit_call(
+            write_observation_log,
+            path,
+            kind="events",
+            payloads=payloads,
+            endpoint_url=self._endpoint_url,
+            on_done=done,
+            on_error=lambda message: self._set_status(
+                f"Exporting the event log failed: {message}", error=True
+            ),
+        )
+
+    def _event_payloads(self) -> list[EventNotification]:
+        payloads: list[EventNotification] = []
+        table = self.events_table
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            payload = item.data(EVENT_PAYLOAD) if item is not None else None
+            if isinstance(payload, EventNotification):
+                payloads.append(payload)
+        return payloads
+
     def _on_max_rows_changed(self, value: int) -> None:
         table = self.events_table
         while table.rowCount() > int(value):
@@ -945,6 +1007,7 @@ class EventsTab(SessionTab):
 
     def _update_counters(self) -> None:
         sources = self.sources_table.rowCount()
+        self.export_log_btn.setEnabled(self.events_table.rowCount() > 0)
         parts = [f"{self._total_events} event(s)", f"{sources} source(s)"]
         if self._subscription_id is not None:
             parts.append(f"subscription {self._subscription_id}")

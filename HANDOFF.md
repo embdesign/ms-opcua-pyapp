@@ -27,7 +27,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-832 tests pass (609 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+853 tests pass (625 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -212,8 +212,8 @@ Latest run: 2026-11-22 (release 0.1.2), Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **609 passed** |
-| Full suite | `uv run pytest -q` | **832 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **625 passed** |
+| Full suite | `uv run pytest -q` | **853 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -227,7 +227,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 832 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 853 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **128 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

@@ -19,7 +19,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 832 tests (609 unit + 223 integration). See
+> suite has 853 tests (625 unit + 228 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -38,12 +38,11 @@ session's client.
 
 | Page | Capability |
 |---|---|
-| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key — or **create** one locally (**Create certificate…**: a self-signed certificate or a signing request, with this application URI as subjectAltName) — configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
+| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key — or **create** one locally (**Create certificate…**: a self-signed certificate or a signing request, with this application URI as subjectAltName) and let **Connect** check the selected pair locally first (expired/not-yet-valid, missing application URI, key that does not belong) — configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
-| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
-| **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType
-fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be sent to the condition's own methods — **Acknowledge…**, **Confirm…**, **Enable…**, **Disable…** and **Add comment…** — each one operator-confirmed method call on that event's EventId, sent once and never retried; **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
+| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, bounded row retention, and **Export log…** (the rows the table holds, as a versioned JSON document or CSV — no second read) |
+| **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be sent to the condition's own methods — **Acknowledge…**, **Confirm…**, **Enable…**, **Disable…** and **Add comment…** — each one operator-confirmed method call on that event's EventId, sent once and never retried; **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived; **Export log…** writes the event rows the table holds as a versioned JSON document or CSV |
 | **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
 | **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared), call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown) and **node management**: create one `Object` or `Variable` below a parent (the server assigns the NodeId, the new node is read back) or delete one node (one `DeleteNodes`, verified by reading it again). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery) plus optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
@@ -376,7 +375,7 @@ src/opcua_explorer/
 │   ├── history_service.py  read-only HistoryRead: raw + aggregate, continuation points, decoding
 │   └── client_service.py the only owner of an asyncua Client
 ├── trend.py              numeric trend series for history and live values, text sparkline (pure, no Qt)
-├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py
+├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py, observation_log.py
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
@@ -619,6 +618,8 @@ operator or a script needs, so nothing the tool can do is GUI-only:
 opcua-read --endpoint opc.tcp://192.168.1.100:4840 --node ns=2;s=Temperature
 opcua-read --endpoint opc.tcp://plc:4840 --node i=85 --attribute DisplayName --json
 opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --seconds 30
+opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --count 100 \
+              --output temperature-log.csv
 opcua-events --endpoint opc.tcp://plc:4840 --seconds 30 --refresh --json
 opcua-events --endpoint opc.tcp://plc:4840 --acknowledge 0102ff --condition ns=2;s=Pump --confirm
 opcua-events --endpoint opc.tcp://plc:4840 --condition-action comment --eventid 0102ff \
@@ -638,7 +639,8 @@ opcua-certificate --application-uri urn:example:opcua:client --common-name line1
 (`NodeClass`, `BrowseName`, `DisplayName`, `DataType`, `ValueRank`, `AccessLevel`, …). Exit codes: `0` every read
 was Good, `1` connection/session failure, `2` unusable arguments, `3` at least one Bad status. `opcua-monitor`
 creates one data-change subscription and prints each notification until `--count` or `--seconds`; `--json` prints
-one JSON object per line, and it exits `3` if no notification arrived. `opcua-history` performs one
+one JSON object per line, and it exits `3` if no notification arrived. `--output FILE` writes the same rows as one
+versioned document (`.json`) or CSV (`.csv`) when the run ends. `opcua-history` performs one
 `HistoryRead` for one variable (`--from` / `--to` ISO-8601, `--max-values`) and prints summary + values, a
 versioned JSON document or CSV; `--aggregate average|minimum|maximum|count` with `--interval MS` requests a
 processed read instead (both `--from` and `--to` are then required, and the server may not support aggregates),
@@ -793,7 +795,7 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 uv sync
 uv run pytest -q                          # unit + integration (starts a local demo server)
 uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
-uv run pytest tests/unit -q               # fast, no network (609 tests, ~8 s)
+uv run pytest tests/unit -q               # fast, no network (625 tests, ~8 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
@@ -948,6 +950,15 @@ The implemented scope is complete; the following are **not** claimed:
   on any server and never connects; a server accepts the result only if its administrator added it. A signing
   request has no lifetime until a CA issues from it, so the client reports the request's SHA-256 and says so
   instead of presenting it as a certificate.
+  The selected pair is also checked locally on **Connect** (expired, not yet valid, missing
+  application URI in `subjectAltName`, key that does not belong to the certificate); that check is a
+  warning with an explicit *Connect anyway?* question, never a silent block, and the server's own answer
+  stays the verdict. `opcua-monitor`/`opcua-events` print the same findings on stderr.
+* **An exported log is the bounded table, not a recording.** *Export log…* (and `--output` on
+  `opcua-monitor`/`opcua-events`) writes the rows a table currently holds — after *Keep rows* has already
+  dropped older ones — as a versioned JSON document (`format`/`format_version`, endpoint, rows) or as CSV.
+  It is a snapshot of what arrived during that session, not a historian: nothing is buffered beyond the
+  table, and nothing is re-read from the server for the export.
 * **Node management is one node per request and admin-only in practice.** The **Write & call** page can create one
   `Object`/`Variable` below a parent (server-assigned NodeId, read back) or delete one node (references deleted
   with it, verified by reading it again). There is no batch creation, no reference editing (`AddReferences`), no

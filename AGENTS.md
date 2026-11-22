@@ -20,9 +20,9 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 832 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 853 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 609 passed, ~8 s
+uv run pytest tests/unit -q                # fast subset, 625 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -69,7 +69,10 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   public name, so callers keep using `from opcua_explorer.models import ...`. The package, `config.py`,
   `defaults.py`, `project.py`, `formatting.py`, `operator_text.py`,
   `sequence_document.py`, `exporters/`, `reporting.py`, `compare.py`, `trend.py` import neither asyncua nor Qt.
-  `exporters/` uses `formatting.py`, never `opcua/`.
+  `exporters/` uses `formatting.py`, never `opcua/`. `exporters/observation_log.py` owns the monitor and
+  event log documents (`format`/`format_version`) and their CSV columns; the GUI buttons and the
+  `--output` flags of `opcua-monitor`/`opcua-events` all write through `write_observation_log()`, which
+  takes the rows it is given and never reads a server.
 - Numeric defaults live once in `defaults.py`; do not re-introduce literals in models, project state or tabs.
 - Only `opcua/session_setup.py` constructs an `asyncua.Client`; one instance per session. The two
   session-less services (GetEndpoints discovery and the FindServers directory) use a short-lived client on a

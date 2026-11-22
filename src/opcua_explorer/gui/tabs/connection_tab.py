@@ -41,13 +41,18 @@ from ...models import ConnectionInfo, DiscoveryResult
 from ...opcua.client_service import OpcUaService
 from ...opcua.security import (
     all_policies,
+    check_client_certificate,
     is_secure,
     policy_from_uri,
     security_warnings,
     select_endpoint,
     summarize_certificate,
 )
-from ...operator_text import client_certificate_confirmation, connection_diagnostics_text
+from ...operator_text import (
+    client_certificate_confirmation,
+    client_certificate_warning,
+    connection_diagnostics_text,
+)
 from ..async_runner import AsyncRunner, TaskHandle
 from ..tab_notice import TabNotice
 from ..theme import mono_font, set_chip_state
@@ -80,6 +85,8 @@ class ConnectionTab(QWidget):
         self._state_handle: TaskHandle | None = None
         #: Handle of a running certificate creation, so a closing tab can drop its result.
         self._certificate_handle: TaskHandle | None = None
+        #: Handle of the pre-connect client-certificate check.
+        self._cert_check_handle: TaskHandle | None = None
         #: Set by :meth:`shutdown`; a late result must not touch deleted widgets.
         self._closed = False
         self._pending: ConnectionSettings | None = None
@@ -682,10 +689,74 @@ class ConnectionTab(QWidget):
         self._start_discovery(connect_after=False)
 
     def _on_connect(self) -> None:
-        self._start_discovery(connect_after=True)
-
-    def _start_discovery(self, *, connect_after: bool) -> None:
+        """Check the selected client certificate locally, then discover and connect."""
         settings = self._collect_settings()
+        problems = settings.validate(require_server_certificate=False)
+        if problems:
+            self._show_error(" ".join(problems))
+            return
+        if not settings.client_certificate_path:
+            self._start_discovery(connect_after=True, settings=settings)
+            return
+        # Parsing the pair is file work, so it runs off the GUI thread like every
+        # other file operation of this window.
+        self._set_busy(True, "Checking the client certificate…")
+        self._cert_check_handle = self._runner.submit_call(
+            check_client_certificate,
+            settings.client_certificate_path,
+            settings.client_private_key_path,
+            password=settings.private_key_password or "",
+            application_uri=self._application_uri,
+            on_done=self._on_client_certificate_checked,
+            on_error=self._on_client_certificate_check_failed,
+        )
+
+    def _on_client_certificate_checked(self, check: Any) -> None:
+        if self._closed:
+            return
+        self._cert_check_handle = None
+        self._set_busy_controls_idle()
+        self._show_certificate_note(check)
+        settings = self._collect_settings()
+        if not check.ok:
+            answer = QMessageBox.warning(
+                self,
+                "Client certificate problem",
+                client_certificate_warning(
+                    endpoint_url=settings.endpoint_url,
+                    subject=check.subject,
+                    not_after=check.not_after,
+                    problems=check.problems,
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                set_chip_state(self.status_chip, "disconnected")
+                self.status_chip.setText("Connect cancelled")
+                return
+        self._start_discovery(connect_after=True, settings=settings)
+
+    def _on_client_certificate_check_failed(self, message: str) -> None:
+        if self._closed:
+            return
+        self._cert_check_handle = None
+        self._set_busy_controls_idle()
+        self._show_error(f"The client certificate could not be checked: {message}")
+
+    def _show_certificate_note(self, check: Any) -> None:
+        """Show what was parsed about the selected client certificate, next to its fields."""
+        if not check.certificate_path:
+            self.cert_result_label.hide()
+            return
+        prefix = "\u26a0 " if check.problems else ""
+        self.cert_result_label.setText(prefix + check.summary_text())
+        self.cert_result_label.show()
+
+    def _start_discovery(
+        self, *, connect_after: bool, settings: ConnectionSettings | None = None
+    ) -> None:
+        settings = settings or self._collect_settings()
         problems = settings.validate(require_server_certificate=False)
         if problems:
             self._show_error(" ".join(problems))
@@ -1072,3 +1143,6 @@ class ConnectionTab(QWidget):
         if self._certificate_handle is not None:
             self._certificate_handle.cancel()
             self._certificate_handle = None
+        if self._cert_check_handle is not None:
+            self._cert_check_handle.cancel()
+            self._cert_check_handle = None

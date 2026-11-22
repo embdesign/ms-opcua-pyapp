@@ -292,3 +292,63 @@ def test_connection_tab_creates_a_client_certificate_off_the_gui_thread(qapp, tm
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
+
+
+def test_connect_warns_about_a_client_certificate_problem(qapp, tmp_path, monkeypatch) -> None:
+    """A certificate that lacks the application URI is reported before the server is asked."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from PySide6.QtWidgets import QMessageBox
+
+    from opcua_explorer.gui.tabs.client_certificate_dialog import ClientCertificateDialog
+    from opcua_explorer.models import CertificateSpec
+
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        tab = window.connection_tab
+        window.show_tab(tab)
+        tab.url_edit.setText("opc.tcp://127.0.0.1:1")
+        folder = tmp_path / "certs"
+
+        # A certificate for a *different* application URI: asyncua would reject it.
+        monkeypatch.setattr(
+            ClientCertificateDialog,
+            "ask",
+            classmethod(
+                lambda cls, parent, **kwargs: CertificateSpec(
+                    mode="self-signed",
+                    common_name="line1-client",
+                    application_uri="urn:someone-else:client",
+                    output_dir=str(folder),
+                ).normalised()
+            ),
+        )
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        tab.create_cert_btn.click()
+        deadline = time.monotonic() + 30
+        while not tab.cert_edit.text() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.cert_edit.text()
+
+        # Connecting runs the local check first; declining sends nothing at all.
+        monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.No)
+        tab.connect_btn.click()
+        deadline = time.monotonic() + 20
+        while "cancel" not in tab.status_chip.text().lower() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        assert "cancelled" in tab.status_chip.text().lower(), tab.status_chip.text()
+        assert service.is_connected is False
+        assert not (tmp_path / "trust.json").exists()
+        # The finding is kept next to the certificate fields for the operator.
+        note = tab.cert_result_label.text()
+        assert "subjectAltName" in note
+        assert note.startswith("⚠")
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()

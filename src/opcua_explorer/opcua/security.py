@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import logging
 import socket
-from dataclasses import dataclass
-from datetime import UTC
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from asyncua import ua
 from asyncua.crypto import security_policies as sp
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 
 from ..errors import EndpointNotAdvertisedError
 from ..models import EndpointInfo, iso_utc
@@ -281,6 +282,191 @@ def summarize_certificate(der: bytes | None) -> CertificateSummary:
         )
     except Exception as exc:
         return CertificateSummary(sha256=sha256, parse_error=f"Certificate could not be parsed: {exc}")
+
+
+@dataclass(slots=True)
+class ClientCertificateCheck:
+    """What can be decided locally about the client certificate and key before connecting.
+
+    Nothing here talks to a server: the files are parsed on this computer, so an
+    expired certificate, a missing application URI or a key that does not belong to
+    the certificate is reported *before* the connection attempt, where it would
+    otherwise only appear as the server's ``BadSecurityChecksFailed``.
+    """
+
+    certificate_path: str = ""
+    key_path: str = ""
+    ok: bool = True
+    subject: str = ""
+    issuer: str = ""
+    fingerprint_sha256: str = ""
+    not_before: str | None = None
+    not_after: str | None = None
+    days_left: int | None = None
+    #: ``None`` when no application URI was supplied or the certificate could not be read.
+    application_uri_present: bool | None = None
+    #: ``None`` when no key was given or it could not be read.
+    key_matches: bool | None = None
+    problems: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def summary_text(self) -> str:
+        """One operator-facing line for the Connection page."""
+        if not self.certificate_path:
+            return "No client certificate selected."
+        if self.problems:
+            return " ".join(self.problems)
+        parts = [f"Client certificate {self.subject or '(unparsed)'}"]
+        if self.not_after:
+            validity = f"valid until {self.not_after}"
+            if self.days_left is not None:
+                validity = f"{validity} ({self.days_left} day(s) left)"
+            parts.append(validity)
+        if self.application_uri_present is True:
+            parts.append("application URI is in subjectAltName")
+        if self.key_matches is True:
+            parts.append("private key matches")
+        text = "; ".join(parts) + "."
+        if self.warnings:
+            text = f"{text} {' '.join(self.warnings)}"
+        return text
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "certificate_path": self.certificate_path,
+            "key_path": self.key_path,
+            "ok": self.ok,
+            "subject": self.subject,
+            "issuer": self.issuer,
+            "fingerprint_sha256": self.fingerprint_sha256,
+            "not_before": self.not_before,
+            "not_after": self.not_after,
+            "days_left": self.days_left,
+            "application_uri_present": self.application_uri_present,
+            "key_matches": self.key_matches,
+            "problems": list(self.problems),
+            "warnings": list(self.warnings),
+        }
+
+
+def _load_certificate_file(path: Path) -> x509.Certificate:
+    """Read a client certificate as PEM or DER, like the connection settings do."""
+    data = path.read_bytes()
+    if b"-----BEGIN" in data:
+        return x509.load_pem_x509_certificate(data)
+    return x509.load_der_x509_certificate(data)
+
+
+def _public_key_bytes(public_key: Any) -> bytes:
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+
+def check_client_certificate(
+    certificate_path: str | None,
+    private_key_path: str | None = None,
+    *,
+    password: str = "",
+    application_uri: str = "",
+    now: datetime | None = None,
+    expiring_days: int = 30,
+) -> ClientCertificateCheck:
+    """Parse the configured client certificate/key on this computer; never raises.
+
+    A missing file, an unreadable key, an expired or not-yet-valid certificate, a
+    missing application URI in ``subjectAltName`` and a key that does not belong to
+    the certificate are reported as ``problems``; a certificate that expires within
+    ``expiring_days`` is only a ``warning``.
+    """
+    check = ClientCertificateCheck(
+        certificate_path=str(certificate_path or ""), key_path=str(private_key_path or "")
+    )
+    if not certificate_path:
+        return check
+    moment = (now or _now()).astimezone(UTC)
+
+    try:
+        certificate = _load_certificate_file(Path(certificate_path))
+    except FileNotFoundError:
+        check.problems.append(f"The client certificate {certificate_path} does not exist.")
+        check.ok = False
+        return check
+    except Exception as exc:
+        check.problems.append(f"The client certificate {certificate_path} could not be read: {exc}")
+        check.ok = False
+        return check
+
+    der = certificate.public_bytes(serialization.Encoding.DER)
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(der)
+    check.fingerprint_sha256 = digest.finalize().hex()
+    check.subject = certificate.subject.rfc4514_string()
+    check.issuer = certificate.issuer.rfc4514_string()
+    not_before = getattr(certificate, "not_valid_before_utc", None) or certificate.not_valid_before.replace(
+        tzinfo=UTC
+    )
+    not_after = getattr(certificate, "not_valid_after_utc", None) or certificate.not_valid_after.replace(
+        tzinfo=UTC
+    )
+    check.not_before = iso_utc(not_before)
+    check.not_after = iso_utc(not_after)
+    check.days_left = max(0, (not_after - moment).days)
+
+    if not_after <= moment:
+        check.problems.append(
+            f"The client certificate expired on {check.not_after}; a server will reject it."
+        )
+    elif not_before > moment:
+        check.problems.append(
+            f"The client certificate is not valid before {check.not_before}; a server will reject it."
+        )
+    elif check.days_left <= expiring_days:
+        check.warnings.append(f"It expires in {check.days_left} day(s) — renew it before then.")
+
+    if application_uri:
+        try:
+            san = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            uris = tuple(san.get_values_for_type(x509.UniformResourceIdentifier))
+        except x509.ExtensionNotFound:
+            uris = ()
+        check.application_uri_present = application_uri in uris
+        if not check.application_uri_present:
+            check.problems.append(
+                f"The client certificate does not contain {application_uri} as a subjectAltName URI; "
+                "asyncua rejects such a certificate before connecting."
+            )
+
+    if private_key_path:
+        try:
+            key_data = Path(private_key_path).read_bytes()
+            private_key = serialization.load_pem_private_key(
+                key_data, password=password.encode("utf-8") if password else None
+            )
+        except FileNotFoundError:
+            check.problems.append(f"The private key {private_key_path} does not exist.")
+        except TypeError:
+            check.problems.append(
+                f"The private key {private_key_path} is encrypted; enter its password or choose another key."
+            )
+        except ValueError:
+            check.problems.append(
+                f"The private key {private_key_path} could not be read; the password may be wrong."
+            )
+        except Exception as exc:
+            check.problems.append(f"The private key {private_key_path} could not be read: {exc}")
+        else:
+            check.key_matches = _public_key_bytes(private_key.public_key()) == _public_key_bytes(
+                certificate.public_key()
+            )
+            if not check.key_matches:
+                check.problems.append(
+                    f"The private key {private_key_path} does not belong to this certificate."
+                )
+
+    check.ok = not check.problems
+    return check
 
 
 def endpoint_to_info(endpoint: ua.EndpointDescription) -> EndpointInfo:

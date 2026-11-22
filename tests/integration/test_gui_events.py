@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from PySide6.QtWidgets import QInputDialog, QMessageBox
@@ -351,3 +352,52 @@ def test_events_tab_refreshes_conditions_without_a_dialog(qapp, tmp_path, monkey
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_events_tab_exports_the_rows_it_shows(qapp, tmp_path, monkeypatch) -> None:
+    """The event export is a versioned document of the bounded table, not a second read."""
+    import json
+
+    from PySide6.QtWidgets import QFileDialog
+
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        tab = window.events_tab
+        window.show_tab(tab)
+        assert tab.export_log_btn.isEnabled() is False
+
+        tab._on_event(
+            EventNotification(
+                sequence=1,
+                event_type="BaseEventType",
+                source_node="i=2253",
+                severity=300,
+                message="pump stopped",
+                received_at=datetime(2026, 11, 22, 10, 0, tzinfo=UTC),
+            )
+        )
+        qapp.processEvents()
+        assert tab.export_log_btn.isEnabled() is True
+
+        target = tmp_path / "events.json"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), "JSON (*.json)"))
+        tab.export_log_btn.click()
+        deadline = time.monotonic() + 20
+        while "Exported" not in tab.status_label.text() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        assert target.exists(), tab.status_label.text()
+        document = json.loads(target.read_text(encoding="utf-8"))
+        assert document["format"] == "opcua-explorer-event-log"
+        assert document["format_version"] == 1
+        assert document["count"] == 1
+        assert document["events"][0]["message"] == "pump stopped"
+        assert "Exported 1 event(s)" in tab.status_label.text()
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()

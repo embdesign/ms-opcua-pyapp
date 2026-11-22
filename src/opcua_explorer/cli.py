@@ -51,6 +51,7 @@ from .opcua.nodeset2 import NodeSet2Config, NodeSet2Result
 from .opcua.security import (
     MODE_NAMES,
     all_policies,
+    check_client_certificate,
     policy_from_label,
     policy_from_uri,
     summarize_certificate,
@@ -403,6 +404,25 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _note_client_certificate(settings: ConnectionSettings, progress: ProgressPrinter) -> None:
+    """Report local problems with ``--client-certificate``/``--client-key`` before connecting.
+
+    A warning, not a refusal: the operator may know that the server accepts the
+    certificate anyway, and the server's own StatusCode is the verdict.
+    """
+    if not settings.client_certificate_path:
+        return
+    check = check_client_certificate(
+        settings.client_certificate_path,
+        settings.client_private_key_path,
+        password=settings.private_key_password or "",
+    )
+    for problem in check.problems:
+        progress.note(f"client certificate: {problem}")
+    for warning in check.warnings:
+        progress.note(f"client certificate: {warning}")
+
+
 async def approve_server_certificate(
     service: OpcUaService,
     settings: ConnectionSettings,
@@ -416,6 +436,7 @@ async def approve_server_certificate(
     store, be approved for this run with ``--trust-server-certificate``, or be
     supplied with ``--server-certificate`` and match what the server advertises.
     """
+    _note_client_certificate(settings, progress)
     discovery = await service.discover(
         settings.endpoint_url,
         request_timeout=settings.request_timeout,

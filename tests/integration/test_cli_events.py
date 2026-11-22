@@ -185,3 +185,29 @@ async def test_cli_events_reaches_the_other_condition_methods(event_model, tmp_p
     assert comment.Value.Text == "seen it"
     assert "Add comment on" in captured.err
     assert "changes no condition state" in captured.err
+
+
+async def test_cli_events_writes_the_same_events_to_a_file(event_model, tmp_path, capsys) -> None:
+    """``--output`` is the versioned document of the events the run printed."""
+    target = tmp_path / "events.csv"
+
+    code = await asyncio.to_thread(
+        cli_events.main,
+        _argv(
+            event_model.endpoint,
+            tmp_path,
+            "--count",
+            "2",
+            "--seconds",
+            "15",
+            "--output",
+            str(target),
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+    rows = target.read_text(encoding="utf-8-sig").splitlines()
+    assert rows[0].startswith("received_at_utc,")
+    assert "condition_node_id" in rows[0]
+    assert len(rows) >= 3  # header + the two events counted above

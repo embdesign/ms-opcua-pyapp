@@ -8,14 +8,14 @@ covered by tests, including the device-independent sequence runner for operator-
 
 | Area | Delivered |
 |---|---|
-| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, **local client-certificate creation** (self-signed or CSR, application URI as subjectAltName, unencrypted key with mode 600, never overwrites), explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
+| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, **local client-certificate creation** (self-signed or CSR, application URI as subjectAltName, unencrypted key with mode 600, never overwrites), and a local pre-connect check of the selected pair (expiry, application URI, key match) that warns instead of blocking, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
 | Address space | Lazy tree from Root/Objects or any NodeId with a browse filter (reference type, direction, include subtypes, `NodeClassMask`), attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
-| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, a trend chart of the selected node built from the notifications that arrived (receive-time axis, non-numeric values counted, bounded buffer that names what it dropped), pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
-| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, the five condition methods of the selected event (one confirmed `Acknowledge`, `Confirm`, `Enable`, `Disable` or `AddComment` call each, sent once) and one unconfirmed `ConditionRefresh` call on the running subscription (never retried) |
+| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log with `Export log…` (versioned JSON/CSV of the rows held), a trend chart of the selected node built from the notifications that arrived (receive-time axis, non-numeric values counted, bounded buffer that names what it dropped), pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
+| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail and `Export log…` (versioned JSON/CSV of the rows held), add/remove sources while running, per-source StatusCode reporting, the five condition methods of the selected event (one confirmed `Acknowledge`, `Confirm`, `Enable`, `Disable` or `AddComment` call each, sent once) and one unconfirmed `ConditionRefresh` call on the running subscription (never retried) |
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
 | History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below); the same suite runs headlessly through `opcua-check` and writes the same JSON/HTML report |
@@ -66,8 +66,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 832 passed, ~8–15 min
-uv run pytest tests/unit -q       # 609 passed, ~8 s
+uv run pytest -q                  # 853 passed, ~8–15 min
+uv run pytest tests/unit -q       # 625 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -80,6 +80,13 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 - Node management is one node per request, never a batch: no child check before a delete, no undo, no reference
   editing, and servers usually restrict it to administrators.
+- Certificate creation is local only: one self-signed certificate or one signing request plus an unencrypted
+  private key (mode 600). No CA, no GDS registration, no trust-list push and nothing installed on a server.
+  The pre-connect check reports what is wrong locally (expiry, missing application URI, key mismatch) but
+  never refuses a connection on its own: the server's StatusCode remains the verdict.
+- Exported monitor and event logs are snapshots of the bounded tables (`Keep rows`), not recordings: the GUI
+  buttons and `opcua-monitor`/`opcua-events --output` write the rows a front end holds, in the same versioned
+  JSON or CSV, and never re-read the server for the export.
 - Browse filters (reference type, direction, subtypes, `NodeClassMask`) are requests; the tree is a navigation
   aid and an export always uses the unfiltered hierarchical traversal.
 - A value read's `IndexRange`, `MaxAge` and `TimestampsToReturn` are requests: the NumericRange is validated
