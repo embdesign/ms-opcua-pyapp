@@ -19,7 +19,8 @@ locally, and `dist/` and `build/` are already ignored by `.gitignore`.
 `opcua-demo-server` is **not** bundled. It is a development aid that starts an
 in-process demo server; use `uv run opcua-demo-server` from a checkout.
 
-`opcua-run-sequence`, `opcua-read`, `opcua-monitor`, `opcua-history` and `opcua-write` are also **not** bundled
+`opcua-run-sequence`, `opcua-read`, `opcua-monitor`, `opcua-history`, `opcua-write` and
+`opcua-certificate` are also **not** bundled
 yet: they run from a `uv` checkout (`uv run <command> --help`).
 Adding more specs is deliberately left until a build has been verified on both CI platforms.
 
@@ -144,3 +145,9 @@ QT_QPA_PLATFORM=offscreen ./dist/pyinstaller/opcua-explorer/opcua-explorer &   #
 
 The workflows run exactly these checks, plus a 15-second "the GUI did not exit
 during start-up" check on Linux.
+
+`cryptography` (client-certificate creation) is a **runtime** dependency since the
+certificate feature, so the GUI bundle contains its OpenSSL backing library.
+PyInstaller's own hooks collect it; the bundle smoke test must keep covering
+*Create certificate…*, because a missing hook would make that button report an
+import error instead of writing files.

@@ -62,14 +62,14 @@ Derived design rules:
 ┌───────────────▼──────────────────────────────────────────────────────┐
 │ models/ · config.py · defaults.py · project.py · logging_setup.py    │
 │ formatting.py · operator_text.py · exporters/ · reporting.py         │
-│ sequence_document.py                                                 │
+│ sequence_document.py · certificate_creation.py                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 Rules that keep the layers honest:
 
 * `models/` (one module per feature cluster, re-exported from `__init__.py`), `config.py`, `defaults.py`,
-  `project.py`, `formatting.py`, `operator_text.py`, `sequence_document.py`,
+  `project.py`, `formatting.py`, `operator_text.py`, `sequence_document.py`, `certificate_creation.py`,
   `exporters/`, `reporting.py`, `compare.py` import neither asyncua nor Qt. Each module is import-probed in
   its own subprocess by `tests/unit/test_layer_boundaries.py`, so a stray import names the offending module.
 * `exporters/` uses `formatting.py`, never `opcua/` (a unit test enforces this boundary).
@@ -81,7 +81,8 @@ Rules that keep the layers honest:
   `gui/main_window.py` is only the tab bar, menus and status bar, and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
 * `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_events.py`, `cli_history.py`, `cli_write.py`,
-  `cli_check.py`, `cli_status.py`, `cli_nodes.py`, `cli_directory.py`, `cli_compare.py` and
+  `cli_check.py`, `cli_status.py`, `cli_nodes.py`, `cli_directory.py`, `cli_certificate.py`,
+  `cli_compare.py` and
   `cli_sequence.py` are the Qt-free front ends:
   each owns its own event loop
   through `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They
@@ -312,6 +313,31 @@ targets are restored as pending rows, and `TestsState` has no `allow_writes` fie
 `set_security(..., server_certificate=None)` is deliberately avoided: asyncua would then fetch and install the
 server certificate itself, bypassing the approval step. Passing the approved DER bytes is the only path that
 skips that fetch (verified in `asyncua/client/client.py`).
+
+### Client certificate creation (local, no session)
+
+Secure-connection setup needs a client certificate whose `subjectAltName` contains the application URI, and a
+first-time user usually has neither a certificate nor a CA. `certificate_creation.py` (pure: `cryptography` only,
+no asyncua, no Qt) writes one of two things, resolved from a `models.CertificateSpec`:
+
+* **self-signed** — `CertificateBuilder` with `subject == issuer`, the URI as `UniformResourceIdentifier` SAN,
+  `BasicConstraints(ca=False)`, `KeyUsage` (digitalSignature/contentCommitment/keyEncipherment) and
+  `ExtendedKeyUsage(clientAuth)`, valid from `now − 1 day` (clock skew) for the requested number of days;
+* **CSR** — `CertificateSigningRequestBuilder` with the same subject, SAN and EKU, for a CA/GDS to issue from.
+
+The private key is RSA (2048/3072/4096), written as unencrypted PKCS#8 PEM with mode `0600`; the folder is created
+with mode `0700` when it is new. `planned_paths()` returns exactly the two paths the generator writes, so the
+dialog's "these files will be written" note and the confirmation text cannot drift from the result.
+`create_certificate()` refuses (before writing anything) a common name that is empty, an application URI that is
+not one, and any target file that already exists unless `overwrite` is set — an existing key is never replaced
+silently. The result is a `models.CertificateFiles` with the paths, the subject, the SHA-256 **of what it wrote**
+(the certificate, or the request for a CSR) and the validity of a self-signed certificate.
+
+The Connection tab runs the generator through `AsyncRunner.submit_call()` (RSA key generation is blocking work),
+fills the certificate/key fields when it succeeds, and shows the summary next to them. It sends nothing, installs
+nothing and touches neither the trust store nor a session; `opcua-certificate` (`cli_certificate.py`) is the same
+call without a window. The confirmation text lives in `operator_text.client_certificate_confirmation` and states
+the unencrypted key, the missing CA and the fact that nothing is trusted.
 
 ### Link loss and resumption
 

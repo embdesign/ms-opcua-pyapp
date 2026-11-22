@@ -290,6 +290,49 @@ def condition_refresh_text(*, subscription_id: int | None, object_node_id: str) 
     )
 
 
+def client_certificate_confirmation(
+    *,
+    mode: str,
+    common_name: str,
+    application_uri: str,
+    validity_days: int,
+    key_size: int,
+    files: list[str],
+) -> str:
+    """Confirmation body for creating one local client certificate or signing request."""
+    is_request = mode == "csr"
+    lines = [
+        "These files will be written on this computer:",
+        *[f"  {path}" for path in files],
+        "",
+        f"Subject: CN={common_name}",
+        f"Application URI (subjectAltName): {application_uri}",
+        f"Key: RSA {key_size} bit, written unencrypted as PEM with file mode 600",
+    ]
+    if is_request:
+        lines.append("Validity: decided by the CA that issues from this request, not by this client.")
+    else:
+        lines.append(f"Validity: {validity_days} day(s) from today (self-signed, no CA).")
+    lines.extend(
+        [
+            "",
+            "Nothing is sent to a server, nothing is installed and no certificate is trusted: this only "
+            "creates local files. The private key is unencrypted, so treat it like a password.",
+        ]
+    )
+    if is_request:
+        lines.append(
+            "Send the .csr file to the CA; this client cannot issue a certificate and does not "
+            "pretend the request is one."
+        )
+    else:
+        lines.append(
+            "A self-signed certificate is only accepted by servers whose administrators trust it, so hand "
+            "the certificate (or its SHA-256) to the server's operator."
+        )
+    return "\n".join(lines)
+
+
 def connection_diagnostics_text(
     *,
     discovery: DiscoveryResult | None = None,

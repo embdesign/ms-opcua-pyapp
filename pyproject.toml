@@ -25,6 +25,9 @@ dependencies = [
     # thousand QTreeWidgetItem rows (Shiboken refcount regression). 6.11.3 is verified by the
     # reproducer in tests/integration/test_pyside_stability.py - do not upgrade without it.
     "PySide6==6.11.3",
+    # Creates the client certificate / signing request (Connection tab, opcua-certificate).
+    # A runtime dependency on purpose: without it a first-time user cannot connect securely.
+    "cryptography==50.0.2",
 ]
 
 [project.optional-dependencies]
@@ -40,9 +43,6 @@ dev = [
     # Module-scoped `qapp` and free-port demo servers make loadscope safe.
     "pytest-xdist>=3.6",
     "lxml>=5.0",
-    # tests/support.py creates throw-away certificates; do not rely on asyncua's
-    # transitive dependency for it.
-    "cryptography>=50",
 ]
 
 [project.scripts]
@@ -70,6 +70,8 @@ opcua-status = "opcua_explorer.cli_status:main"
 opcua-nodes = "opcua_explorer.cli_nodes:main"
 # Headless FindServers directory lookup (Qt-free, no session).
 opcua-directory = "opcua_explorer.cli_directory:main"
+# Headless client certificate / signing request creation (Qt-free, local files only).
+opcua-certificate = "opcua_explorer.cli_certificate:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 

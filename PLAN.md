@@ -8,7 +8,7 @@ covered by tests, including the device-independent sequence runner for operator-
 
 | Area | Delivered |
 |---|---|
-| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
+| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, **local client-certificate creation** (self-signed or CSR, application URI as subjectAltName, unencrypted key with mode 600, never overwrites), explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
 | Address space | Lazy tree from Root/Objects or any NodeId with a browse filter (reference type, direction, include subtypes, `NodeClassMask`), attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
@@ -46,6 +46,7 @@ src/opcua_explorer/
 ├── operator_text.py safety confirmation and diagnostics text (Qt-free)
 ├── reporting.py    JSON/HTML reports
 ├── compare.py      structural comparison of two address-space snapshots (Qt/asyncua-free)
+├── certificate_creation.py  local client certificate / signing request (pure, no Qt/asyncua)
 ├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli_compare.py  opcua-compare: headless comparison (same services, no Qt)
 ├── cli_read.py     opcua-read: headless attribute read (Qt-free)
@@ -53,6 +54,7 @@ src/opcua_explorer/
 ├── cli_history.py  opcua-history: headless raw-history read (Qt-free)
 ├── cli_write.py    opcua-write: headless guarded single write (Qt-free, --confirm)
 ├── cli_sequence.py opcua-run-sequence: headless run of a sequence document (Qt-free)
+├── cli_certificate.py  opcua-certificate: local certificate / CSR creation (Qt-free)
 ├── logging_setup.py log bus and secret redaction
 └── demo/           local demo server
 ```
@@ -64,8 +66,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 814 passed, ~8–15 min
-uv run pytest tests/unit -q       # 592 passed, ~8 s
+uv run pytest -q                  # 832 passed, ~8–15 min
+uv run pytest tests/unit -q       # 609 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export

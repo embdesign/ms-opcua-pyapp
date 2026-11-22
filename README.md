@@ -19,7 +19,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 814 tests (592 unit + 222 integration). See
+> suite has 832 tests (609 unit + 223 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -38,7 +38,7 @@ session's client.
 
 | Page | Capability |
 |---|---|
-| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
+| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key — or **create** one locally (**Create certificate…**: a self-signed certificate or a signing request, with this application URI as subjectAltName) — configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
@@ -105,7 +105,8 @@ pip install -e .
 opcua-explorer
 ```
 
-Pinned runtime dependencies (`pyproject.toml`): `asyncua==2.1.0`, `PySide6==6.11.3`; `uv.lock` pins the full
+Pinned runtime dependencies (`pyproject.toml`): `asyncua==2.1.0`, `PySide6==6.11.3`, `cryptography==50.0.2` (client-certificate
+creation, see [Creating a client certificate](#5a-creating-a-client-certificate)); `uv.lock` pins the full
 resolved set. The asyncua API used by this project was verified against the installed package — see
 [docs/api-verification.md](docs/api-verification.md).
 
@@ -305,8 +306,29 @@ uv run opcua-demo-server --cert server.der --key server.pem
 The server then advertises only `Basic256Sha256 / SignAndEncrypt`. To connect you also need a **client**
 certificate whose subjectAltName contains the application URI shown in the Connection tab
 (`urn:<hostname>:OPCUAExplorer:Client`) — see [docs/troubleshooting.md](docs/troubleshooting.md).
-Generate it the same way with that URI and pass the `.der`/`.pem` files in the *Client certificate & private key*
-group.
+
+### 5a. Creating a client certificate
+
+You do not need a CA to start: **Client certificate && private key → Create certificate…** writes the two files
+below the folder you choose, with the application URI as a `subjectAltName` URI (asyncua rejects a certificate
+without it):
+
+* **Self-signed certificate** — a `*-client-cert.pem` plus its `*-client-key.pem`. Hand the certificate (or its
+  SHA-256, which the tab shows) to the server's operator and add it to that server's trust list; a server that has
+  not been told about it will reject it.
+* **Certificate signing request (CSR)** — a `*-client.csr.pem` plus the same kind of key, for a CA or GDS that
+  issues certificates for your application. The client cannot issue one and does not pretend the request is one.
+
+The dialog names the exact files, the key size, the validity and what is *not* done: nothing is installed on a
+server, nothing is trusted, no certificate is approved and no connection is opened. The private key is written
+unencrypted as PKCS#8 PEM with file mode `600`, so treat it like a password; the tab states that before it writes.
+An existing file is never replaced — choose another name or folder (the CLI has an explicit `--overwrite`).
+The same operation is available headlessly:
+
+```bash
+opcua-certificate --application-uri urn:example:opcua:client --common-name line1-client \
+                  --output-dir ~/certs [--mode csr] [--validity-days 365] [--key-size 2048] [--json]
+```
 
 ## 6. Project layout
 
@@ -321,9 +343,11 @@ src/opcua_explorer/
 ├── logging_setup.py      log bus + mandatory secret redaction
 ├── reporting.py          JSON and self-contained HTML test reports
 ├── compare.py            structural comparison of two address-space snapshots (Qt/asyncua-free)
+├── certificate_creation.py  local client certificate / signing request (pure, no Qt/asyncua)
 ├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli.py                opcua-export: headless NodeSet2 export (Qt-free, same services as the GUI)
 ├── cli_compare.py        opcua-compare: headless comparison of two servers (Qt-free)
+├── cli_certificate.py    opcua-certificate: headless client certificate / CSR creation (Qt-free)
 ├── cli_sequence.py       opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── opcua/
 │   ├── ua_names.py       shared NodeClass / StatusCode / VariantType names
@@ -606,6 +630,8 @@ opcua-status --endpoint opc.tcp://plc:4840 --json
 opcua-nodes --endpoint opc.tcp://plc:4840 --create Variable --parent ns=2;s=Line1 --name Setpoint \
             --data-type i=11 --value 21.5 --confirm
 opcua-directory --discovery-url opc.tcp://192.168.1.10:4840 --json
+opcua-certificate --application-uri urn:example:opcua:client --common-name line1-client \
+                  --output-dir ~/certs
 ```
 
 `opcua-read` reads **Value** by default and any attribute shown by the Address space panel with `--attribute`
@@ -636,9 +662,12 @@ ServerStatus/ServerDiagnostics snapshot as the Server tab (`--limits-only` for j
 `opcua-nodes` performs **one** structural change per invocation — `--create` (server-assigned NodeId, read back) or
 `--delete` (verified by reading the node again), or `--attribute DisplayName|Description` — and never without
 `--confirm`. `opcua-directory` asks a discovery endpoint (LDS/GDS or any server) with one `FindServers` call and
-prints what it advertises; it opens no session and contacts no found server. All nine use the same security flags
-as `opcua-export` (passwords from `--password-env` or a prompt, explicit certificate approval, no downgrade) and
-none is included in the standalone bundles.
+prints what it advertises; it opens no session and contacts no found server. `opcua-certificate` writes a client
+certificate or a signing request locally (see [Creating a client certificate](#5a-creating-a-client-certificate)):
+no endpoint, no session, no confirmation needed, and an existing file is only replaced with `--overwrite`
+(exit `3` when the files exist, `2` when the request is unusable). All the commands that talk to a server use the
+same security flags as `opcua-export` (passwords from `--password-env` or a prompt, explicit certificate approval,
+no downgrade), and none of them is included in the standalone bundles.
 
 ### Operator sequences: the Sequences tab
 
@@ -764,7 +793,7 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 uv sync
 uv run pytest -q                          # unit + integration (starts a local demo server)
 uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
-uv run pytest tests/unit -q               # fast, no network (592 tests, ~8 s)
+uv run pytest tests/unit -q               # fast, no network (609 tests, ~8 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
@@ -912,6 +941,13 @@ The implemented scope is complete; the following are **not** claimed:
   administrators only — asyncua's demo server answers `BadUserAccessDenied` for its `demo` user — so a refusal is
   the expected answer, not a defect. There is no write of `WriteMask`, `AccessLevel`, `DataType`, `Historizing`
   or any other structural attribute.
+* **Certificate creation is a local convenience, not a PKI.** *Create certificate…* (and `opcua-certificate`)
+  writes a self-signed client certificate or a signing request with this application's URI as its only
+  subjectAltName, plus an **unencrypted** PKCS#8 private key (file mode `600`). It does not run a CA, does not
+  issue anything for another application, does not register with a GDS, does not install or trust a certificate
+  on any server and never connects; a server accepts the result only if its administrator added it. A signing
+  request has no lifetime until a CA issues from it, so the client reports the request's SHA-256 and says so
+  instead of presenting it as a certificate.
 * **Node management is one node per request and admin-only in practice.** The **Write & call** page can create one
   `Object`/`Variable` below a parent (server-assigned NodeId, read back) or delete one node (references deleted
   with it, verified by reading it again). There is no batch creation, no reference editing (`AddReferences`), no

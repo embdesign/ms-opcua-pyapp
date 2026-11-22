@@ -227,3 +227,68 @@ def test_two_sessions_to_the_same_server_are_independent(qapp, tmp_path, monkeyp
             runner.run_until_complete(session_service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_connection_tab_creates_a_client_certificate_off_the_gui_thread(qapp, tmp_path, monkeypatch) -> None:
+    """Creating a certificate is one confirmed local operation, never a server call."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from PySide6.QtWidgets import QMessageBox
+
+    from opcua_explorer.gui.tabs.client_certificate_dialog import ClientCertificateDialog
+    from opcua_explorer.models import CertificateSpec
+
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        tab = window.connection_tab
+        window.show_tab(tab)
+        folder = tmp_path / "certs"
+
+        # The dialog only collects the request; the tab confirms and writes it.
+        monkeypatch.setattr(
+            ClientCertificateDialog,
+            "ask",
+            classmethod(
+                lambda cls, parent, **kwargs: CertificateSpec(
+                    mode="self-signed",
+                    common_name="line1-client",
+                    application_uri=service.application_uri,
+                    output_dir=str(folder),
+                ).normalised()
+            ),
+        )
+
+        # Declining the confirmation writes nothing.
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+        tab.create_cert_btn.click()
+        qapp.processEvents()
+        assert list(folder.glob("*.pem")) == []
+        assert "cancelled" in tab.cert_result_label.text().lower()
+
+        # Confirming writes the pair and fills both fields.
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+        tab.create_cert_btn.click()
+        deadline = time.monotonic() + 30
+        while not tab.cert_edit.text() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        assert tab.cert_edit.text(), tab.error_label.text()
+        assert tab.key_edit.text()
+        assert tab.cert_edit.text().endswith("-client-cert.pem")
+        assert tab.key_edit.text().endswith("-client-key.pem")
+        assert folder.joinpath(tab.cert_edit.text().rsplit("/", 1)[-1]).exists()
+        # The outcome is stated next to the fields, including the fingerprint.
+        result = tab.cert_result_label.text()
+        assert "SHA-256" in result
+        assert "Self-signed client certificate" in result
+        assert tab.create_cert_btn.isEnabled() is True
+        # A local file was written: no session, no discovery, nothing trusted.
+        assert service.is_connected is False
+        assert not (tmp_path / "trust.json").exists()
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()

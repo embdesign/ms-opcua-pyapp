@@ -54,6 +54,16 @@ MAX_LIVE_TREND_POINTS = 5_000
 DEFAULT_READ_MAX_AGE_MS = 0
 MAX_READ_MAX_AGE_MS = 4_294_967_295
 
+#: Client-certificate creation (Connection tab *Create certificate…*,
+#: ``opcua-certificate``). The key sizes the generator offers and the validity
+#: range it accepts; a certificate this client issues for itself is a local
+#: convenience, not a PKI decision.
+CERTIFICATE_KEY_SIZES = (2048, 3072, 4096)
+MIN_CERTIFICATE_KEY_SIZE = CERTIFICATE_KEY_SIZES[0]
+MAX_CERTIFICATE_KEY_SIZE = CERTIFICATE_KEY_SIZES[-1]
+DEFAULT_CERTIFICATE_VALIDITY_DAYS = 365
+MAX_CERTIFICATE_VALIDITY_DAYS = 3650
+
 #: Rows kept per difference bucket by the address-space comparison; the counts
 #: stay complete, only the listed rows stop.
 DEFAULT_MAX_COMPARISON_DIFFERENCES = 2_000

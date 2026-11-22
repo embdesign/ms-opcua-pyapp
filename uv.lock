@@ -257,6 +257,7 @@ version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "asyncua" },
+    { name = "cryptography" },
     { name = "pyside6" },
 ]
 
@@ -267,7 +268,6 @@ validation = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "cryptography" },
     { name = "lxml" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -277,6 +277,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncua", specifier = "==2.1.0" },
+    { name = "cryptography", specifier = "==50.0.2" },
     { name = "lxml", marker = "extra == 'validation'", specifier = ">=5.0" },
     { name = "pyside6", specifier = "==6.11.3" },
 ]
@@ -284,7 +285,6 @@ provides-extras = ["validation"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "cryptography", specifier = ">=50" },
     { name = "lxml", specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-asyncio", specifier = ">=1.0" },

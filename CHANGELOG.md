@@ -10,6 +10,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Create the client certificate locally, from the Connection page or headlessly.** Secured setup needed a
+  certificate file that a first-time user usually does not have. **Client certificate && private key → Create
+  certificate…** now writes either a **self-signed** client certificate or a **certificate signing request** for a
+  CA, together with its private key: the new pure `certificate_creation.py` (`cryptography` only — now a runtime
+  dependency) puts this application's URI into `subjectAltName` (asyncua rejects a certificate without it), sets
+  `clientAuth` EKU and `BasicConstraints(ca=False)`, and reports the SHA-256 **of the file it wrote**. The dialog
+  and `operator_text.client_certificate_confirmation` state what is *not* done: nothing is installed on a server,
+  nothing is trusted, no CA is run, no session is opened; the key is unencrypted PKCS#8 PEM with mode `600`, and
+  existing files are never replaced silently. The tab runs the generator through `AsyncRunner.submit_call()` and
+  fills the certificate/key fields. The same operation is `opcua-certificate --application-uri … --common-name …
+  --output-dir … [--mode csr] [--validity-days N] [--key-size 2048|3072|4096] [--overwrite] [--json]` (Qt-free,
+  exit `0` written / `2` unusable request / `3` files exist).
+
+### Added
+
 - **The five condition methods of a selected event, not only Acknowledge.** One condition event can now be sent
   to its own `Acknowledge`, `Confirm`, `Enable`, `Disable` and `AddComment` methods from the Events tab
   (**Acknowledge…**, **Confirm…**, **Enable…**, **Disable…**, **Add comment…**). All five take the same

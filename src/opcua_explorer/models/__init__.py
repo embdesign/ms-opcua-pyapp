@@ -16,6 +16,7 @@ in one module per feature cluster:
 * ``functional_tests`` - ``TestConfig`` / ``TestRun`` and the check vocabulary
 * ``monitor`` - live data-change subscription records
 * ``events`` - event subscription records
+* ``certificates`` - local client-certificate creation request and result
 * ``history`` - raw history read records
 * ``server_status`` - read-only server diagnostics snapshot
 * ``sequences`` - operator-written sequence documents and run results
@@ -23,6 +24,11 @@ in one module per feature cluster:
 
 from __future__ import annotations
 
+from .certificates import (
+    CERTIFICATE_MODES,
+    CertificateFiles,
+    CertificateSpec,
+)
 from .common import (
     STATUS_CANCELLED,
     STATUS_FAILED,
@@ -140,12 +146,15 @@ __all__ = [
     "BROWSE_NODE_CLASSES",
     "BROWSE_REFERENCE_TYPES",
     "BrowseOptions",
+    "CERTIFICATE_MODES",
     "CONDITION_ACTION_LABELS",
     "CONDITION_ACTION_METHODS",
     "CONDITION_ACTIONS",
     "CONDITION_REFRESH_METHOD_ID",
     "CONDITION_TYPE_NODE_ID",
     "CREATABLE_NODE_CLASSES",
+    "CertificateFiles",
+    "CertificateSpec",
     "ChildEntry",
     "ConditionRefreshResult",
     "ConnectionInfo",

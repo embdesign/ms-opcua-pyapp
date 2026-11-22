@@ -35,6 +35,7 @@ _PURE_MODULES = (
     "opcua_explorer.reporting",
     "opcua_explorer.compare",
     "opcua_explorer.trend",
+    "opcua_explorer.certificate_creation",
     "opcua_explorer.exporters",
 )
 

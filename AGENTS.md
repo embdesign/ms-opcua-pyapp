@@ -6,8 +6,8 @@ Read this before changing code. It records only facts verified in this tree.
 ## Project facts
 
 - Python **3.11–3.13**, managed with **uv** + `pyproject.toml` (hatchling, `src/` layout).
-- Runtime dependencies are pinned: `asyncua==2.1.0`, `PySide6==6.11.3`. Optional extra `validation` = `lxml`.
-  Dev group: `pytest`, `pytest-asyncio`, `pytest-xdist`, `lxml`, `cryptography`.
+- Runtime dependencies are pinned: `asyncua==2.1.0`, `PySide6==6.11.3`, `cryptography==50.0.2`. Optional extra `validation` = `lxml`.
+  Dev group: `pytest`, `pytest-asyncio`, `pytest-xdist`, `lxml`.
 - Desktop OPC UA client: discovery/security/identity, lazy browser, bounded address-space download,
   JSON/CSV/NodeSet2 export, headless NodeSet2 export (`opcua-export`), live monitoring, read-only functional
   checks, guarded single-target write/method call, JSON/HTML reports, address-space comparison (`opcua-compare`
@@ -20,9 +20,9 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 814 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 832 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 592 passed, ~8 s
+uv run pytest tests/unit -q                # fast subset, 609 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -35,8 +35,7 @@ uv run opcua-write --help                  # headless guarded single write (Qt-f
 uv run opcua-check --help                  # headless functional checks + Reports tab suite (Qt-free)
 uv run opcua-status --help                 # headless ServerStatus/diagnostics read (Qt-free, read-only)
 uv run opcua-nodes --help                  # headless single-node create/delete/attribute write (needs --confirm)
-uv run opcua-directory --help              # headless FindServers directory lookup (Qt-free, no session)
-uv run opcua-run-sequence --help           # headless run of a sequence document (Qt-free)
+uv run opcua-directory --help              # headless FindServers directory lookup (Qt-free, no session)uv run opcua-certificate --help           # headless client certificate / CSR creation (Qt-free, local files)uv run opcua-run-sequence --help           # headless run of a sequence document (Qt-free)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py
 uv run python scripts/generate_example_report.py
@@ -250,7 +249,7 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   `not_comparable` bucket. Do not make it read, connect, or import asyncua/Qt; the front end does that.
 - `cli.py` (`opcua-export`), `cli_compare.py` (`opcua-compare`), `cli_read.py`, `cli_monitor.py`,
   `cli_events.py`, `cli_history.py`, `cli_write.py`, `cli_check.py`, `cli_status.py`, `cli_nodes.py`,
-  `cli_directory.py` and `cli_sequence.py` (`opcua-run-sequence`)
+  `cli_directory.py`, `cli_certificate.py` and `cli_sequence.py` (`opcua-run-sequence`)
   are Qt-free front ends, not second implementations: they must keep calling `OpcUaService.download()` /
   `export_nodeset2()` / `compare_address_spaces()` / `run_sequence()` and print the existing summary texts.
   `cli_compare.py` and `cli_sequence.py` import the connection, traversal and certificate-approval helpers from

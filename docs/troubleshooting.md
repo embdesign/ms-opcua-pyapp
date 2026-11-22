@@ -46,7 +46,12 @@ This is the most common obstacle. Both sides need a certificate that contains th
 
 * The client certificate must contain `urn:<hostname>:OPCUAExplorer:Client` as a `subjectAltName` URI. The exact
   URI your client will use is displayed on the Connection tab (it is derived from the local hostname).
-* Generate a matching certificate with asyncua:
+* **Create the certificate in the app:** *Client certificate && private key → Create certificate…* writes a
+  self-signed certificate (or a signing request for a CA) with that URI as `subjectAltName`, plus its key. Nothing
+  is installed on the server and nothing is trusted, so add the certificate to the server's trust list afterwards
+  (see below). The same operation is `uv run opcua-certificate --application-uri <uri> --common-name <name>
+  --output-dir <folder>`.
+* A certificate made by another tool works too, as long as it contains the URI. asyncua can also create one:
 
 ```python
 import asyncio, socket

@@ -34,7 +34,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...config import AppSettings, ConnectionProfile, ConnectionSettings
+from ...certificate_creation import CertificateCreationError, create_certificate, planned_paths
+from ...config import AppSettings, ConnectionProfile, ConnectionSettings, config_dir
 from ...errors import EndpointNotAdvertisedError
 from ...models import ConnectionInfo, DiscoveryResult
 from ...opcua.client_service import OpcUaService
@@ -46,10 +47,11 @@ from ...opcua.security import (
     select_endpoint,
     summarize_certificate,
 )
-from ...operator_text import connection_diagnostics_text
+from ...operator_text import client_certificate_confirmation, connection_diagnostics_text
 from ..async_runner import AsyncRunner, TaskHandle
 from ..tab_notice import TabNotice
 from ..theme import mono_font, set_chip_state
+from .client_certificate_dialog import ClientCertificateDialog
 from .connection_dialogs import CertificateReviewDialog, TrustStoreDialog
 from .server_directory_dialog import ServerDirectoryDialog
 
@@ -76,6 +78,10 @@ class ConnectionTab(QWidget):
         self._settings = settings
         self._handle: TaskHandle | None = None
         self._state_handle: TaskHandle | None = None
+        #: Handle of a running certificate creation, so a closing tab can drop its result.
+        self._certificate_handle: TaskHandle | None = None
+        #: Set by :meth:`shutdown`; a late result must not touch deleted widgets.
+        self._closed = False
         self._pending: ConnectionSettings | None = None
         self._connect_after_discovery = False
         self._discovery: DiscoveryResult | None = None
@@ -278,7 +284,22 @@ class ConnectionTab(QWidget):
 
         cert_layout.addWidget(QLabel("Key password:"), 2, 0)
         cert_layout.addWidget(self.key_password_edit, 2, 1, 1, 2)
+
+        self.create_cert_btn = QPushButton("Create certificate…")
+        self.create_cert_btn.setToolTip(
+            "Creates a self-signed client certificate or a certificate signing request on this computer, "
+            "with this application URI as subjectAltName. Nothing is installed on a server."
+        )
+        self.create_cert_btn.clicked.connect(self._on_create_certificate)
+        cert_layout.addWidget(self.create_cert_btn, 3, 0, 1, 3)
         layout.addWidget(cert_box)
+
+        self.cert_result_label = QLabel()
+        self.cert_result_label.setObjectName("hintLabel")
+        self.cert_result_label.setWordWrap(True)
+        self.cert_result_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.cert_result_label.hide()
+        layout.addWidget(self.cert_result_label)
 
         uri_note = QLabel(
             "The client certificate must contain this application URI as a subjectAltName URI, "
@@ -424,6 +445,80 @@ class ConnectionTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select file", str(Path.home()), filter_text)
         if path:
             target.setText(path)
+
+    # -- client certificate creation ---------------------------------------
+    def _on_create_certificate(self) -> None:
+        """Create a self-signed certificate or a CSR locally, after a confirmation."""
+        default_folder = str(config_dir() / "client-certificate")
+        spec = ClientCertificateDialog.ask(
+            self,
+            common_name="opcua-explorer-client",
+            application_uri=self._application_uri,
+            output_dir=default_folder,
+        )
+        if spec is None:
+            return
+        try:
+            main_file, key_file = planned_paths(spec)
+        except CertificateCreationError as exc:
+            self._show_error(str(exc))
+            return
+        text = client_certificate_confirmation(
+            mode=spec.mode,
+            common_name=spec.common_name,
+            application_uri=spec.application_uri,
+            validity_days=spec.validity_days,
+            key_size=spec.key_size,
+            files=[str(main_file), str(key_file)],
+        )
+        answer = QMessageBox.question(
+            self,
+            "Create client certificate",
+            text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            self._set_certificate_result("Certificate creation was cancelled; nothing was written.")
+            return
+
+        self.create_cert_btn.setEnabled(False)
+        self.cert_result_label.hide()
+        # RSA key generation and two file writes are short blocking work: they run
+        # on the worker loop's executor, never on the GUI thread.
+        self._certificate_handle = self._runner.submit_call(
+            create_certificate,
+            spec,
+            on_done=self._on_certificate_created,
+            on_error=self._on_certificate_failed,
+        )
+
+    def _on_certificate_created(self, files: Any) -> None:
+        if self._closed:
+            return
+        self._certificate_handle = None
+        self.create_cert_btn.setEnabled(True)
+        if files.certificate_path:
+            self.cert_edit.setText(files.certificate_path)
+            self.key_edit.setText(files.key_path)
+        else:
+            # A CSR is not a certificate: the key is set, the certificate field is
+            # left alone until the CA issued one from the request.
+            self.key_edit.setText(files.key_path)
+        self._set_certificate_result(files.summary_text())
+        self.error_label.hide()
+
+    def _on_certificate_failed(self, message: str) -> None:
+        if self._closed:
+            return
+        self._certificate_handle = None
+        self.create_cert_btn.setEnabled(True)
+        self._show_error(f"Creating the client certificate failed: {message}")
+
+    def _set_certificate_result(self, text: str) -> None:
+        """Show the outcome (paths and SHA-256) next to the certificate fields."""
+        self.cert_result_label.setText(text)
+        self.cert_result_label.show()
 
     def _copy_text(self, text: str) -> None:
         from PySide6.QtWidgets import QApplication
@@ -970,6 +1065,10 @@ class ConnectionTab(QWidget):
 
     # -- shutdown ----------------------------------------------------------
     def shutdown(self) -> None:
+        self._closed = True
         self._state_timer.stop()
         if self._handle is not None:
             self._handle.cancel()
+        if self._certificate_handle is not None:
+            self._certificate_handle.cancel()
+            self._certificate_handle = None
