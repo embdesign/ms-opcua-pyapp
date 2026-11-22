@@ -67,6 +67,20 @@ def test_monitor_tab_streams_notifications_and_stops(qapp, tmp_path) -> None:
         qapp.processEvents()
         assert tab.details_view.toPlainText().startswith("Latest value for ns=2;s=Temperature")
 
+        # The same selection draws the numbers this tab already received: one series
+        # for one node, on the client's receive-time axis.
+        deadline = time.monotonic() + 20
+        while tab.trend_chart.series.is_empty and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        series = tab.trend_chart.series
+        assert series.is_empty is False, tab.trend_summary_label.text()
+        assert series.time_based is True
+        # Temperature publishes numbers only, so every notification became a point.
+        assert 0 < len(series.points) <= int(tab.items_table.item(0, 5).text())
+        assert "numeric value(s)" in tab.trend_summary_label.text()
+        assert "receive time" in tab.trend_summary_label.text()
+
         # Pausing freezes the notification log but keeps the in-place value current.
         tab.pause_btn.setChecked(True)
         paused_rows = tab.notifications_table.rowCount()
@@ -107,6 +121,51 @@ def test_monitor_tab_streams_notifications_and_stops(qapp, tmp_path) -> None:
 
         # The session survives stopping the subscription.
         assert "stopped" in tab.status_label.text().lower()
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)
+
+
+def test_monitor_trend_counts_non_numeric_values_and_clears_with_the_log(qapp, tmp_path) -> None:
+    """The live trend plots numbers only; a text value is counted, and clearing drops it."""
+    port = free_port()
+    server = start_demo_server(port)
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        connect_window(window, port, qapp)
+        tab = window.monitor_tab
+        window.show_tab(tab)
+
+        tab.node_edit.setText("ns=2;s=Recipe")
+        tab.add_btn.click()
+        tab.publishing_spin.setValue(200)
+        tab.sampling_spin.setValue(100)
+        tab._on_start()
+
+        deadline = time.monotonic() + 30
+        while tab.notifications_table.rowCount() == 0 and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert tab.notifications_table.rowCount() > 0, tab.status_label.text()
+
+        # Recipe is a String: the chart stays empty and says how many values it skipped.
+        tab.items_table.selectRow(0)
+        qapp.processEvents()
+        assert tab.trend_chart.series.is_empty is True
+        summary = tab.trend_summary_label.text()
+        assert "no numeric value received yet" in summary
+        assert "non-numeric value(s) not plotted" in summary
+
+        # Clearing the log clears the chart with it: one view of the same values.
+        tab.clear_log_btn.click()
+        qapp.processEvents()
+        assert tab.trend_chart.series.is_empty is True
+        assert tab.trend_summary_label.text().startswith("Select a monitored item")
     finally:
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)

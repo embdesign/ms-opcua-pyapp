@@ -14,7 +14,7 @@ covered by tests, including the device-independent sequence runner for operator-
 | Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
-| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
+| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, a trend chart of the selected node built from the notifications that arrived (receive-time axis, non-numeric values counted, bounded buffer that names what it dropped), pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
 | Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event plus one unconfirmed `ConditionRefresh` call on the running subscription (no `Confirm`/`Enable`, never retried) |
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
 | History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
@@ -64,8 +64,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 796 passed, ~8–15 min
-uv run pytest tests/unit -q       # 583 passed, ~8 s
+uv run pytest -q                  # 800 passed, ~8–15 min
+uv run pytest tests/unit -q       # 586 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -103,6 +103,9 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 - Data-change filters and intervals are requests: the server decides whether a deadband is honoured and which
   interval it uses. Filters are fixed for the lifetime of a subscription; intervals and the monitoring mode can
   be changed while it runs. The demo server accepts filters but does not implement deadband suppression.
+- The Live monitor's trend is a view of the notifications that tab received, not a second subscription or a
+  query: the x axis is the client's receive time, non-numeric values are counted instead of plotted, and the
+  buffer follows *Keep rows* (5 000 points at most) and names how many older points it dropped.
 - The functional suite covers one session, one browse root and one variable.
 - Writes and method calls are single-target, opt-in and never repeated; no batch write, restore-all,
   scan or stress mode.

@@ -1,9 +1,9 @@
-"""Numeric trend extraction for a HistoryRead result (pure, Qt- and asyncua-free).
+"""Numeric trend extraction for history values and live notifications (pure, no Qt/asyncua).
 
-The History tab shows a table and a chart of the same values. This module turns a
-list of :class:`~opcua_explorer.models.ValueSnapshot` into the numeric series the
-chart draws, and records what it had to skip, so the picture can never claim more
-than the data says:
+The History tab shows a table and a chart of the same values; the Live monitor
+draws the values its subscription delivers. This module turns either source into
+the numeric series the chart draws, and records what it had to skip, so the
+picture can never claim more than the data says:
 
 * a value that is not a single number (a structure, an array, a string that does
   not parse, a bad StatusCode) is skipped and counted, never coerced to zero;
@@ -11,8 +11,9 @@ than the data says:
 * when any point lacks a timestamp, the x axis falls back to the row number
   instead of inventing times (``time_based`` says which one the chart used).
 
-Nothing here reads, writes, subscribes or connects; the server's timestamps and
-order are taken as they arrived.
+Nothing here reads, writes, subscribes or connects and nothing is smoothed,
+interpolated or resampled; the timestamps and the order are the ones the server
+(or, for a live notification, the client) already produced.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .models import ValueSnapshot, iso_utc
+from .models import MonitorNotification, ValueSnapshot, iso_utc
 
 #: StatusCode prefix that marks a value the server could not deliver.
 _BAD_STATUS_PREFIX = ("Bad", "Uncertain")
@@ -167,6 +168,44 @@ def sparkline(series: TrendSeries, *, width: int = SPARK_WIDTH) -> str:
     )
 
 
+def _live_timestamp(notification: MonitorNotification) -> datetime | None:
+    """The time the client can vouch for: when it received the notification."""
+    if notification.received_at is not None:
+        return notification.received_at
+    return _parse_timestamp(notification.source_timestamp) or _parse_timestamp(
+        notification.server_timestamp
+    )
+
+
+def append_live_point(series: TrendSeries, notification: MonitorNotification) -> bool:
+    """Add one live notification to ``series``; ``True`` when it was plotted.
+
+    The same rules as a history row apply: a value that is not a single number is
+    counted in ``skipped`` instead of being coerced, a boolean is ``0.0``/``1.0``,
+    and a non-Good StatusCode keeps the value and is counted. The x axis is the
+    client's receive time, because a live notification may arrive without a
+    source timestamp and mixing the two clocks would draw a shape the server
+    never produced. Order is the arrival order — nothing is sorted.
+    """
+    row = len(series.points) + series.skipped + 1
+    number = _as_number(notification.value)
+    if number is None:
+        series.skipped += 1
+        return False
+    status = str(notification.status or "Good")
+    point = TrendPoint(
+        row=row, value=number, timestamp=_live_timestamp(notification), status=status
+    )
+    series.points.append(point)
+    if is_bad_status(status):
+        series.bad_status += 1
+    if len(series.points) == 1:
+        series.time_based = point.timestamp is not None
+    elif point.timestamp is None:
+        series.time_based = False
+    return True
+
+
 def build_trend_series(snapshots: Iterable[ValueSnapshot]) -> TrendSeries:
     """Extract the plottable numbers of a history result, oldest row first."""
     series = TrendSeries()
@@ -195,6 +234,7 @@ __all__ = [
     "SPARK_WIDTH",
     "TrendPoint",
     "TrendSeries",
+    "append_live_point",
     "build_trend_series",
     "is_bad_status",
     "sparkline",

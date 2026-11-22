@@ -11,14 +11,15 @@ Windows and Linux, no Docker.
 > directory lookup, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
-> detail view, server status & diagnostics and history reads with a trend chart, functional tests with JSON/HTML reports,
-> guarded single-target write/method-call checks with explicit confirmation, an
+> detail view, server status & diagnostics, history reads with a trend chart, a live trend of the selected monitored
+> node, functional tests with JSON/HTML reports, guarded single-target write/method-call checks with explicit
+> confirmation, an
 > interactive **Write & call** page (confirmed write with read-back and optional verified restore, confirmed method
 > call with the server's argument types),
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 796 tests (583 unit + 213 integration). See
+> suite has 800 tests (586 unit + 214 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -40,7 +41,7 @@ session's client.
 | **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
-| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
+| **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType
 fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried), and **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
 | **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
@@ -162,7 +163,10 @@ uv run opcua-explorer
    publishing/sampling interval and press **Start monitoring**. Optionally choose a **Trigger** and an absolute or
    percent **Deadband** before starting; the filter is sent as a `DataChangeFilter` and the server applies it. The
    left table keeps **one row per node and overwrites it with the latest value, StatusCode, source timestamp and
-   notification count**; the right table is an append-only notification log. Select a monitored item or a log row
+   notification count**; the right table is an append-only notification log. Select a monitored item and the
+   **trend chart** under the item table draws the numbers that item produced, in arrival order on the client's
+   receive-time axis (non-numeric values are counted in the caption, older points beyond *Keep rows* are named as
+   not drawn). Select a monitored item or a log row
    to see the full payload. **Add node** subscribes further nodes into the same subscription while it runs,
    **Pause** freezes the log but keeps the latest values updating, **Apply intervals** modifies the running
    subscription (`ModifySubscription`/`ModifyMonitoredItems`, the server may revise), and **Server mode** applies
@@ -345,14 +349,14 @@ src/opcua_explorer/
 │   ├── session_setup.py    discovery, client construction, security/identity, namespaces
 │   ├── history_service.py  read-only HistoryRead: raw + aggregate, continuation points, decoding
 │   └── client_service.py the only owner of an asyncua Client
-├── trend.py              numeric trend series and text sparkline (pure, no Qt)
+├── trend.py              numeric trend series for history and live values, text sparkline (pure, no Qt)
 ├── exporters/            json_exporter.py, csv_exporter.py, json_loader.py
 ├── gui/
 │   ├── app.py            entry point and orderly Qt/asyncio shutdown
 │   ├── main_window.py    window shell: session tabs, menus, status bar, shared tabs
 │   ├── session_workspace.py  one session: its service and ten pages, in workflow order
 │   ├── async_runner.py   the only bridge between Qt and asyncio
-│   ├── trend_chart.py    trend widget for one history result
+│   ├── trend_chart.py    trend widget for one numeric series (history or live)
 │   └── tabs/             connection (+ connection_dialogs, server_directory_dialog), browser, export, monitor, events, server, history, write, tests, sequences, logs, unified monitor, compare
 └── demo/demo_server.py   local demo server with a graph-shaped model
 tests/unit, tests/integration
@@ -753,7 +757,7 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 uv sync
 uv run pytest -q                          # unit + integration (starts a local demo server)
 uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
-uv run pytest tests/unit -q               # fast, no network (583 tests, ~8 s)
+uv run pytest tests/unit -q               # fast, no network (586 tests, ~8 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
@@ -908,6 +912,14 @@ The implemented scope is complete; the following are **not** claimed:
   not implement deadband suppression. The publishing/sampling intervals are requests; the server may revise them
   and the UI reports the revised publishing interval. A filter is fixed at start — changing it recreates the
   subscription — while intervals and the monitoring mode can be changed while it runs.
+* **The live trend is a view of the notifications this tab already received.** Selecting a monitored item draws
+  its numbers in arrival order on the client's receive time (a notification may arrive without a source
+  timestamp, and mixing the two clocks would draw a shape the server never produced). The chart keeps the newest
+  *Keep rows* points (5 000 at most), says how many older points it dropped, counts values that are not a single
+  number (arrays, structures, text that does not parse) instead of plotting them, and marks a non-Good
+  StatusCode. **Clear notifications** drops the chart together with the log, because it is the same set of
+  values; **Pause** freezes the log only, so the chart keeps following the values that arrive. Nothing is
+  smoothed, interpolated or resampled, and there is no second read — use the History tab for stored values.
 * Downloads reflect what the session was allowed to browse: access-denied nodes, timeouts and disconnects are
   reported (`inaccessible_nodes`) instead of being hidden.
 

@@ -1,13 +1,17 @@
 """Live monitor tab: data-change subscriptions for explicitly added nodes.
 
 Nothing is subscribed implicitly. The operator adds NodeIds, starts one
-subscription, and sees the notifications as they arrive. Two views are kept:
+subscription, and sees the notifications as they arrive. Three views are kept:
 
 * the monitored-item table shows the **latest value per node in place** (one row
-  per node, overwritten on every notification), and
+  per node, overwritten on every notification),
 * the notification table is an append-only log with a bounded number of rows,
   because a diagnostics client must not grow without bound while a fast-changing
-  variable publishes.
+  variable publishes, and
+* the trend chart draws the received numbers of the **selected** monitored item.
+  It is a view of the values this tab already received (no second read, no
+  interpolation); non-numeric values are counted, and the buffer is bounded and
+  says so.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ import json
 import logging
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -41,6 +45,7 @@ from ...defaults import (
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
     MAX_KEEP_ROWS,
+    MAX_LIVE_TREND_POINTS,
     MAX_PUBLISHING_INTERVAL_MS,
     MIN_KEEP_ROWS,
     MIN_PUBLISHING_INTERVAL_MS,
@@ -59,9 +64,11 @@ from ...models import (
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...project import MonitorState
+from ...trend import TrendSeries, append_live_point
 from ..async_runner import AsyncRunner
 from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
+from ..trend_chart import TrendChart
 from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
@@ -73,10 +80,13 @@ NOTIFICATION_PAYLOAD = Qt.UserRole + 3
 DEFAULT_MAX_ROWS = DEFAULT_MONITOR_KEEP_ROWS
 _VALUE_CELL_CHARS = 300
 _LATEST_CELL_CHARS = 120
+#: The chart is redrawn at most this often, so a fast variable cannot make the
+#: paint cost follow the notification rate.
+_TREND_REFRESH_MS = 250
 
 
 class MonitorTab(SessionTab):
-    """One subscription, a monitored-item list and a bounded live notification table."""
+    """One subscription, a monitored-item list, a bounded log and a live trend."""
 
     #: Emitted on the GUI thread for every notification delivered to this tab.
     notification_received = Signal(object)
@@ -101,6 +111,17 @@ class MonitorTab(SessionTab):
         self._monitoring_mode = "Reporting"
         #: node_id -> last notification, used by the in-place value columns.
         self._latest: dict[str, MonitorNotification] = {}
+        #: node_id -> numeric points received since the log was last cleared.
+        self._trends: dict[str, TrendSeries] = {}
+        #: node_id -> points that no longer fit the bounded trend buffer.
+        self._trend_dropped: dict[str, int] = {}
+        #: The monitored item whose values the chart draws (``None`` = nothing selected).
+        self._trend_node: str | None = None
+
+        self._trend_timer = QTimer(self)
+        self._trend_timer.setSingleShot(True)
+        self._trend_timer.setInterval(_TREND_REFRESH_MS)
+        self._trend_timer.timeout.connect(self._refresh_trend)
 
         self._build_ui()
         self.set_connected(False)
@@ -118,9 +139,10 @@ class MonitorTab(SessionTab):
             TabNotice(
                 "One data-change subscription on the nodes you add; the server decides the effective rates.",
                 "One data-change subscription on nodes you add explicitly. The left table keeps one row per node "
-                "and overwrites it with the latest value; the notification list is an append-only log. The server "
-                "decides the effective publishing and sampling rate. Nothing is written to the server and nothing "
-                "is exported from this tab.",
+                "and overwrites it with the latest value; the chart below draws the numbers received for the "
+                "selected item; the notification list is an append-only log. The server decides the effective "
+                "publishing and sampling rate. Nothing is written to the server and nothing is exported from "
+                "this tab.",
             )
         )
 
@@ -260,7 +282,28 @@ class MonitorTab(SessionTab):
         self.items_table.itemSelectionChanged.connect(self._update_controls)
         self.items_table.itemSelectionChanged.connect(self._on_item_selected)
         self.items_table.setMinimumWidth(460)
-        left_layout.addWidget(self.items_table, 1)
+
+        # The trend draws the selected monitored item, so it sits under the list
+        # rather than next to the notification log: one node, one series.
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.addWidget(self.items_table)
+        trend_box = QWidget()
+        trend_layout = QVBoxLayout(trend_box)
+        trend_layout.setContentsMargins(0, 0, 0, 0)
+        self.trend_summary_label = QLabel("Select a monitored item to plot its received values.")
+        self.trend_summary_label.setObjectName("hintLabel")
+        self.trend_summary_label.setWordWrap(True)
+        self.trend_chart = TrendChart()
+        self.trend_chart.setToolTip(
+            "Numbers received for the selected monitored item, in arrival order. The x axis is the "
+            "client's receive time; arrays, structures and unparsable values are counted, not plotted."
+        )
+        trend_layout.addWidget(self.trend_summary_label)
+        trend_layout.addWidget(self.trend_chart, 1)
+        left_splitter.addWidget(trend_box)
+        left_splitter.setStretchFactor(0, 3)
+        left_splitter.setStretchFactor(1, 2)
+        left_layout.addWidget(left_splitter, 1)
         splitter.addWidget(left)
 
         right = QWidget()
@@ -327,6 +370,7 @@ class MonitorTab(SessionTab):
             self._total_notifications = 0
             self._dropped = 0
             self._latest.clear()
+            self._clear_trends()
             self._set_status("Not connected. Use the Connection tab to open a session.")
             self._update_counters()
             self.items_changed.emit()
@@ -334,6 +378,7 @@ class MonitorTab(SessionTab):
 
     def shutdown(self) -> None:
         """Stop receiving notifications; the service deletes the subscription on shutdown."""
+        self._trend_timer.stop()
         self._detach_listener()
         super().shutdown()
 
@@ -420,7 +465,12 @@ class MonitorTab(SessionTab):
         for row in sorted(rows, reverse=True):
             item = self.items_table.item(row, 0)
             if item is not None:
-                self._latest.pop(str(item.data(ITEM_NODE_ID)), None)
+                node_id = str(item.data(ITEM_NODE_ID))
+                self._latest.pop(node_id, None)
+                self._trends.pop(node_id, None)
+                self._trend_dropped.pop(node_id, None)
+                if node_id == self._trend_node:
+                    self._set_trend_node(None)
             self.items_table.removeRow(row)
         self._set_status(f"Removed {len(rows)} monitored item(s) from the list.")
         self._update_controls()
@@ -433,6 +483,7 @@ class MonitorTab(SessionTab):
             return
         self.items_table.setRowCount(0)
         self._latest.clear()
+        self._clear_trends()
         self._update_controls()
         self._update_counters()
         self.items_changed.emit()
@@ -771,6 +822,7 @@ class MonitorTab(SessionTab):
         self.notification_received.emit(notification)
         # The per-node row is updated even while paused: pause freezes the log only.
         self._update_item_latest(notification)
+        self._record_trend_point(notification)
         if self._paused:
             self._dropped += 1
             self._update_counters()
@@ -821,6 +873,84 @@ class MonitorTab(SessionTab):
             f"Server reported subscription status {event.status}{detail}.",
             error=event.status != "Good",
         )
+
+    # -- live trend --------------------------------------------------------
+    def _trend_limit(self) -> int:
+        """Points kept per node: the "keep rows" bound, capped so one repaint stays cheap."""
+        return min(int(self.max_rows_spin.value()), MAX_LIVE_TREND_POINTS)
+
+    def _record_trend_point(self, notification: MonitorNotification) -> None:
+        """Keep the numeric value of one notification for the chart.
+
+        This runs even while the notification log is paused — pause freezes the log,
+        not the values that arrive — and it keeps the same bound as the log, so the
+        chart can never hold more points than the operator allowed for the table.
+        """
+        series = self._trends.get(notification.node_id)
+        if series is None:
+            series = TrendSeries()
+            self._trends[notification.node_id] = series
+        append_live_point(series, notification)
+        overflow = len(series.points) - self._trend_limit()
+        if overflow > 0:
+            del series.points[:overflow]
+            self._trend_dropped[notification.node_id] = (
+                self._trend_dropped.get(notification.node_id, 0) + overflow
+            )
+        if notification.node_id == self._trend_node:
+            # Coalesce the redraw, so the paint cost does not follow the notification rate.
+            self._trend_timer.start()
+
+    def _trim_trends(self) -> None:
+        """Drop the oldest points after the "keep rows" bound shrank."""
+        limit = self._trend_limit()
+        for node_id, series in self._trends.items():
+            overflow = len(series.points) - limit
+            if overflow > 0:
+                del series.points[:overflow]
+                self._trend_dropped[node_id] = self._trend_dropped.get(node_id, 0) + overflow
+
+    def _clear_trends(self) -> None:
+        self._trend_timer.stop()
+        self._trends.clear()
+        self._trend_dropped.clear()
+        self._set_trend_node(None)
+
+    def _set_trend_node(self, node_id: str | None) -> None:
+        """Plot ``node_id`` (``None`` = nothing selected); no node is picked silently."""
+        self._trend_node = node_id
+        self._refresh_trend()
+
+    def _refresh_trend(self) -> None:
+        """Draw the selected node's received numbers; nothing is invented for the rest."""
+        node_id = self._trend_node
+        if node_id is None:
+            message = "Select a monitored item to plot its received values."
+            self.trend_chart.clear(message)
+            self.trend_summary_label.setText(message)
+            return
+        series = self._trends.get(node_id) or TrendSeries()
+        dropped = self._trend_dropped.get(node_id, 0)
+        if series.is_empty:
+            self.trend_chart.set_series(
+                series,
+                message=f"No numeric value received for {node_id} yet. Values that are not a single "
+                "number (arrays, structures, text that does not parse) are counted, not plotted.",
+            )
+            summary = f"{node_id}: no numeric value received yet."
+            if series.skipped:
+                summary = f"{summary} {series.skipped} non-numeric value(s) not plotted."
+            self.trend_summary_label.setText(summary)
+            return
+        self.trend_chart.set_series(series, title=node_id)
+        parts = [f"{node_id} — {series.summary_text()}"]
+        if dropped:
+            parts.append(
+                f"The chart keeps the newest {len(series.points)} value(s); "
+                f"{dropped} older one(s) are not plotted."
+            )
+        parts.append("The x axis is the client's receive time.")
+        self.trend_summary_label.setText(" ".join(parts))
 
     def _update_item_latest(self, notification: MonitorNotification) -> None:
         """Overwrite the monitored-item row for this node with the newest value."""
@@ -887,23 +1017,31 @@ class MonitorTab(SessionTab):
         self.details_view.clear()
         self._total_notifications = 0
         self._dropped = 0
+        # The chart is a view of the values this log would have listed, so both
+        # are cleared together instead of leaving a shape without its rows.
+        self._clear_trends()
         self._update_counters()
 
     def _on_max_rows_changed(self, value: int) -> None:
         table = self.notifications_table
         while table.rowCount() > int(value):
             table.removeRow(0)
+        self._trim_trends()
+        self._refresh_trend()
         self._update_counters()
 
     def _on_item_selected(self) -> None:
-        """Show the last value of the selected monitored item."""
+        """Show the last value and the trend of the selected monitored item."""
         rows = {index.row() for index in self.items_table.selectedIndexes()}
         if len(rows) != 1:
+            self._set_trend_node(None)
             return
         item = self.items_table.item(min(rows), 0)
         node_id = str(item.data(ITEM_NODE_ID)) if item is not None and item.data(ITEM_NODE_ID) else ""
         if not node_id:
+            self._set_trend_node(None)
             return
+        self._set_trend_node(node_id)
         notification = self._latest.get(node_id)
         if notification is None:
             self.details_view.setPlainText(f"{node_id}\nNo notification received yet.")

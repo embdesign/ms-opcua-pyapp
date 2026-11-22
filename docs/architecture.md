@@ -124,8 +124,15 @@ A subscription outlives the coroutine that created it, so the monitor uses a sec
 * `AsyncRunner.listen(key, slot)` keeps the slot registered after the submitting task's `done` callback has been
   consumed; the tab calls `unlisten()` when it stops monitoring or shuts down.
 * `monitor_remove()` deletes single monitored items; stopping or disconnecting deletes the subscription, so no
-  server-side state is left behind. The GUI keeps two views: a per-node row that is overwritten in place (latest
-  value, StatusCode, source timestamp, count) and a bounded append-only notification log.
+  server-side state is left behind. The GUI keeps three views: a per-node row that is overwritten in place (latest
+  value, StatusCode, source timestamp, count), a bounded append-only notification log, and a trend chart of the
+  **selected** node. The chart is fed by `trend.append_live_point()` as each notification arrives, so it is a view
+  of what this tab already received: no second read, no sorting, no interpolation, and the x axis is the client's
+  receive time (a live notification may arrive without a source timestamp). Its buffer follows the *Keep rows*
+  bound but never exceeds `defaults.MAX_LIVE_TREND_POINTS`, keeps the newest points, and the caption names how
+  many older points are not drawn; non-numeric values are counted instead of plotted. Redraws are coalesced by a
+  250 ms timer so the paint cost does not follow the notification rate, and *Clear notifications* drops the chart
+  with the log because it is the same set of values.
 * A `DataChangeFilter` (trigger and absolute/percent deadband) is built once in `build_data_change_filter()`.
   asyncua's `subscribe_data_change()` has no filter parameter, so a filtered subscription builds
   `ua.MonitoredItemCreateRequest` objects with its own client handles and calls the public
@@ -206,7 +213,8 @@ The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) per
   decides `time_based` from the timestamps; `gui/trend_chart.py` paints the series and nothing else. It never
   reads, subscribes, interpolates or resamples, so the picture cannot show values the server did not return.
   `opcua-history --sparkline` prints the same series as one line of block characters (bucketed by average when
-  it is longer than the line).
+  it is longer than the line). The same widget draws the Live monitor's series, which the same module builds
+  from the notifications that tab received (`append_live_point`).
 
 ### Value read options
 
@@ -643,8 +651,8 @@ opening a project never loads or runs a sequence.
 
 ## 12. Deliberate limitations
 
-* History is raw or one aggregate only: no read-at-time, no event history and no `HistoryUpdate`; no trend chart;
-  a point-in-time read remains the value path everywhere else.
+* History is raw or one aggregate only: no read-at-time, no event history and no `HistoryUpdate`; a
+  point-in-time read remains the value path everywhere else.
 * Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
   opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.
 * The test suite covers one session, one browse root and one variable.

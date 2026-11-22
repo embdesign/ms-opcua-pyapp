@@ -44,6 +44,11 @@ MAX_LATENCY_SAMPLES = 200
 MIN_KEEP_ROWS = 100
 MAX_KEEP_ROWS = 50_000
 
+#: Numeric points the Live monitor's trend keeps per node. The chart follows the
+#: "keep rows" bound but never repaints more than this many points, so a fast
+#: variable cannot turn one refresh into a 50 000-point redraw.
+MAX_LIVE_TREND_POINTS = 5_000
+
 #: MaxAge of an explicit Value read in milliseconds. ``0`` lets the server answer
 #: from a cache; the protocol maximum (uint32) means "come from the device".
 DEFAULT_READ_MAX_AGE_MS = 0

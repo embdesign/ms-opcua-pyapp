@@ -8,6 +8,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Live trend on the Live monitor.** Selecting a monitored item now draws its numbers in a chart under the item
+  table (`gui/trend_chart.py`, the same widget the History tab uses; the new pure `trend.append_live_point()`
+  fills the series as notifications arrive). It is a view of what that tab already received — no second read, no
+  sorting, no interpolation — plotted on the client's **receive-time** axis, because a live notification may
+  arrive without a source timestamp and mixing the two clocks would draw a shape the server never produced.
+  Values that are not a single number (arrays, structures, text that does not parse) are counted in the caption
+  instead of plotted, a non-Good StatusCode keeps its value and is marked, the buffer follows *Keep rows* but is
+  capped by `defaults.MAX_LIVE_TREND_POINTS` (5 000) and the caption names how many older points are not drawn.
+  Redraws are coalesced by a 250 ms timer so the paint cost cannot follow the notification rate; **Pause** freezes
+  the log only (the chart keeps following the arriving values) and **Clear notifications** drops the chart with
+  the log, because it is the same set of values.
+
 ## [0.1.2] - 2026-11-22
 
 ### Added

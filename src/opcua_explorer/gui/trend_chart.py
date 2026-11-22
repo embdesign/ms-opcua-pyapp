@@ -1,10 +1,11 @@
-"""Trend chart for a history read: one polyline over time or row order.
+"""Trend chart: one polyline over time or row order.
 
 The widget owns no data source and no subscription: it paints a
-:class:`~opcua_explorer.trend.TrendSeries` that the History tab builds from the
-values the server already returned. Values are drawn in the order they were
-shown; a point whose StatusCode is not Good is marked, and nothing is smoothed,
-interpolated or extrapolated.
+:class:`~opcua_explorer.trend.TrendSeries` that the caller builds — the History
+tab from the values one history read returned, the Live monitor from the
+notifications its subscription delivered. Values are drawn in the order they
+reached the caller; a point whose StatusCode is not Good is marked, and nothing
+is smoothed, interpolated or extrapolated.
 """
 
 from __future__ import annotations

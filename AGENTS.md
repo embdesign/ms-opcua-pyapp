@@ -20,9 +20,9 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 796 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 800 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 583 passed, ~8 s
+uv run pytest tests/unit -q                # fast subset, 586 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -176,11 +176,15 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   (`i=2782`), and a refusal is reported with its StatusCode.
 - Writes are typed from the server by `opcua/type_support.py` (built-ins, enumerations, structures) and targets
   may be addressed by browse path through `opcua/path_support.py` (complete, unambiguous matches only).
-- The History tab's trend chart is a **view of one HistoryRead result**: `trend.py` (`build_trend_series` →
+- Trend charts are **views of values the client already has**, never a second query: `trend.py`
+  (`build_trend_series` for one `HistoryRead`, `append_live_point` for live notifications →
   `TrendSeries`/`TrendPoint`, `sparkline`) extracts the single numbers and counts what it skipped (arrays,
   structures, unparsable text), and `gui/trend_chart.py` only paints that series. It must never read, subscribe,
   interpolate or resample; `time_based` decides whether the x axis is time or row order, so a point without a
-  timestamp falls back to row order instead of inventing a time.
+  timestamp falls back to row order instead of inventing a time. The Live monitor's chart plots the selected
+  node on the client's **receive** time, keeps the `Keep rows` bound (capped by
+  `defaults.MAX_LIVE_TREND_POINTS`), names the older points it dropped, and is cleared with the log because it
+  is the same set of values; redraws are coalesced, never driven by the notification rate.
 - `opcua/sequence_runner.py` is device-neutral: it never names a lock, a vendor or a method. A sequence document
   (`sequence_document.py`) owns the preconditions, the gate and the body. Mechanical rules that must stay:
   `gate.off` in `finally`, `gate.verify` before the body, one run per session, no retry, and

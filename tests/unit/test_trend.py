@@ -6,13 +6,39 @@ plotted, what is skipped and which axis the series uses.
 
 from __future__ import annotations
 
-from opcua_explorer.models import ValueSnapshot
-from opcua_explorer.trend import SPARK_CHARS, build_trend_series, is_bad_status, sparkline
+from datetime import UTC, datetime
+
+from opcua_explorer.models import MonitorNotification, ValueSnapshot
+from opcua_explorer.trend import (
+    SPARK_CHARS,
+    TrendSeries,
+    append_live_point,
+    build_trend_series,
+    is_bad_status,
+    sparkline,
+)
 
 
 def _snapshot(value: object, *, source: str | None = None, server: str | None = None, status: str = "Good"):
     return ValueSnapshot(
         value=value, status=status, source_timestamp=source, server_timestamp=server
+    )
+
+
+def _notification(
+    value: object,
+    *,
+    received: datetime | None = datetime(2026, 11, 22, 10, 0, 0, tzinfo=UTC),
+    status: str = "Good",
+    source: str | None = None,
+) -> MonitorNotification:
+    return MonitorNotification(
+        sequence=1,
+        node_id="ns=2;s=Temperature",
+        value=value,
+        status=status,
+        source_timestamp=source,
+        received_at=received,
     )
 
 
@@ -126,3 +152,47 @@ def test_sparkline_buckets_a_long_series_to_the_requested_width() -> None:
     text = sparkline(series, width=10)
     assert text[0] == SPARK_CHARS[0]
     assert text[-1] == SPARK_CHARS[-1]
+
+
+def test_live_points_use_the_receive_time_and_count_what_is_not_a_number() -> None:
+    first = datetime(2026, 11, 22, 10, 0, 0, tzinfo=UTC)
+    series = TrendSeries()
+
+    assert append_live_point(series, _notification(21.5, received=first)) is True
+    assert append_live_point(series, _notification("not a number")) is False
+    assert append_live_point(series, _notification(True)) is True
+
+    assert [point.value for point in series.points] == [21.5, 1.0]
+    # Row numbers keep the gaps, so a skipped notification stays visible.
+    assert [point.row for point in series.points] == [1, 3]
+    assert series.skipped == 1
+    assert series.time_based is True
+    assert series.start == first
+    assert series.summary_text().startswith("Trend of 2 numeric value(s) by time")
+
+
+def test_live_points_skip_arrays_and_structures_and_keep_a_bad_status() -> None:
+    series = TrendSeries()
+
+    assert append_live_point(series, _notification([1.0, 2.0])) is False
+    assert append_live_point(series, _notification({"$type": "ExtensionObject"})) is False
+    assert append_live_point(series, _notification(None)) is False
+    assert append_live_point(series, _notification(3.5, status="BadNoData")) is True
+
+    assert [point.value for point in series.points] == [3.5]
+    assert series.skipped == 3
+    assert series.bad_status == 1
+
+
+def test_live_points_fall_back_to_the_source_timestamp_without_a_receive_time() -> None:
+    series = TrendSeries()
+
+    assert append_live_point(
+        series, _notification(1.0, received=None, source="2026-11-22T10:00:05.000Z")
+    )
+    assert series.time_based is True
+
+    # No clock at all: the series falls back to row order instead of inventing one.
+    untimed = TrendSeries()
+    assert append_live_point(untimed, _notification(2.0, received=None)) is True
+    assert untimed.time_based is False
