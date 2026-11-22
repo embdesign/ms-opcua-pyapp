@@ -1,6 +1,6 @@
 # Task Handoff — OPC UA Explorer (`ms-opcua-pyapp`)
 
-Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.1, package
+Project repository `ms-opcua-pyapp`, distribution `opcua-explorer`, application version 0.1.2, package
 `opcua_explorer`. This file records the current state, the rules a future change must respect, and what is still
 unverified. It is not a change log. Do not commit without the operator's authorization; make out-of-tree
 backups before bulk edits.
@@ -207,7 +207,7 @@ bundles are built now (GUI, export, compare).
 
 ## Verification
 
-Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
+Latest run: 2026-11-22 (release 0.1.2), Python 3.11.2, Linux, PySide6 6.11.3.
 
 | Check | Command | Result |
 |---|---|---|
@@ -217,7 +217,7 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
-| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 111 — deliberate boundaries, see *Known issues* |
+| Broad handlers | `grep -rn "except Exception" src \| wc -l` | 128 — deliberate boundaries, see *Known issues* |
 
 The optional `lxml` extra (`uv sync --extra validation`) was not exercised separately (`lxml` is already
 installed through the dev group); `examples/` matches the current formats and is regenerated whenever a format

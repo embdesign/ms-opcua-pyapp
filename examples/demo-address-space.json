@@ -3,9 +3,9 @@
   "format_version": 2,
   "generator": {
     "name": "opcua-explorer",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
-  "generated_at_utc": "2026-11-22T10:50:47.871Z",
+  "generated_at_utc": "2026-11-22T11:15:35.315Z",
   "source": {
     "endpoint_url": "opc.tcp://127.0.0.1:4840",
     "connection": {
@@ -20,7 +20,7 @@
       "server_application_uri": "urn:opcua-explorer:demo:server",
       "product_uri": "urn:opcua-explorer:demo:server",
       "manufacturer_name": "opcua-explorer",
-      "software_version": "0.1.1",
+      "software_version": "0.1.2",
       "build_number": "1",
       "server_certificate_sha256": null,
       "namespaces": [
@@ -41,7 +41,7 @@
           "uri": "urn:opcua-explorer:demo:extra"
         }
       ],
-      "connected_at_utc": "2026-11-22T10:50:47.457Z"
+      "connected_at_utc": "2026-11-22T11:15:34.817Z"
     },
     "download_roots": [
       "i=85"
@@ -101,9 +101,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.41,
-    "started_at_utc": "2026-11-22T10:50:47.457Z",
-    "finished_at_utc": "2026-11-22T10:50:47.867Z"
+    "duration_seconds": 0.495,
+    "started_at_utc": "2026-11-22T11:15:34.817Z",
+    "finished_at_utc": "2026-11-22T11:15:35.313Z"
   },
   "nodes": {
     "i=11192": {

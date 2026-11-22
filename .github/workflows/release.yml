@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag such as v0.1.1 to build both platform bundles and attach them to a
+# Push a tag such as v0.1.2 to build both platform bundles and attach them to a
 # GitHub Release. The tag must match `version` in pyproject.toml.
 
 on:

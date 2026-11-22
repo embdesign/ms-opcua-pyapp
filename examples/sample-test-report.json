@@ -2,9 +2,9 @@
   "format": "opcua-functional-test-report",
   "format_version": 1,
   "disclaimer": "Functional and interoperability checks - not official OPC UA certification.",
-  "generated_at_utc": "2026-11-16T12:27:05.595Z",
+  "generated_at_utc": "2026-11-22T11:15:40.546Z",
   "environment": {
-    "application": "opcua-explorer 0.1.1",
+    "application": "opcua-explorer 0.1.2",
     "asyncua": "2.1.0",
     "pyside6": "6.11.3",
     "python": "3.11.2",
@@ -25,7 +25,7 @@
       "server_application_uri": "urn:opcua-explorer:demo:server",
       "product_uri": "urn:opcua-explorer:demo:server",
       "manufacturer_name": "opcua-explorer",
-      "software_version": "0.1.1",
+      "software_version": "0.1.2",
       "build_number": "1",
       "server_certificate_sha256": null,
       "namespaces": [
@@ -46,7 +46,7 @@
           "uri": "urn:opcua-explorer:demo:extra"
         }
       ],
-      "connected_at_utc": "2026-11-16T12:27:04.567Z"
+      "connected_at_utc": "2026-11-22T11:15:39.493Z"
     }
   },
   "configuration": {
@@ -64,9 +64,9 @@
     "method_calls": []
   },
   "timing": {
-    "started_at_utc": "2026-11-16T12:27:04.571Z",
-    "finished_at_utc": "2026-11-16T12:27:05.595Z",
-    "duration_seconds": 1.024
+    "started_at_utc": "2026-11-22T11:15:39.513Z",
+    "finished_at_utc": "2026-11-22T11:15:40.546Z",
+    "duration_seconds": 1.033
   },
   "summary": {
     "total": 11,
@@ -74,9 +74,9 @@
     "failed": 0,
     "skipped": 1,
     "cancelled": false,
-    "duration_seconds": 1.024,
-    "started_at_utc": "2026-11-16T12:27:04.571Z",
-    "finished_at_utc": "2026-11-16T12:27:05.595Z"
+    "duration_seconds": 1.033,
+    "started_at_utc": "2026-11-22T11:15:39.513Z",
+    "finished_at_utc": "2026-11-22T11:15:40.546Z"
   },
   "results": [
     {
@@ -85,7 +85,7 @@
       "category": "connection",
       "status": "passed",
       "detail": "1 endpoint(s); active configuration is advertised.",
-      "started_at_utc": "2026-11-16T12:27:04.571Z",
+      "started_at_utc": "2026-11-22T11:15:39.513Z",
       "duration_ms": 4.9,
       "status_codes": [],
       "data": {
@@ -119,7 +119,7 @@
       "category": "connection",
       "status": "passed",
       "detail": "Session active (identity: anonymous); session timeout 600000 ms.",
-      "started_at_utc": "2026-11-16T12:27:04.576Z",
+      "started_at_utc": "2026-11-22T11:15:39.518Z",
       "duration_ms": 0.0,
       "status_codes": [],
       "data": {
@@ -138,8 +138,8 @@
       "category": "connection",
       "status": "passed",
       "detail": "4 namespace(s); namespace 0 present.",
-      "started_at_utc": "2026-11-16T12:27:04.576Z",
-      "duration_ms": 0.7,
+      "started_at_utc": "2026-11-22T11:15:39.518Z",
+      "duration_ms": 1.4,
       "status_codes": [],
       "data": {
         "count": 4,
@@ -160,8 +160,8 @@
       "category": "browse",
       "status": "passed",
       "detail": "Browsing i=85 succeeded (6 child reference(s)).",
-      "started_at_utc": "2026-11-16T12:27:04.577Z",
-      "duration_ms": 2.4,
+      "started_at_utc": "2026-11-22T11:15:39.519Z",
+      "duration_ms": 4.4,
       "status_codes": [
         {
           "operation": "Browse",
@@ -191,8 +191,8 @@
       "category": "browse",
       "status": "passed",
       "detail": "Browsing ns=2;s=Temperature succeeded (0 child reference(s)).",
-      "started_at_utc": "2026-11-16T12:27:04.579Z",
-      "duration_ms": 0.4,
+      "started_at_utc": "2026-11-22T11:15:39.523Z",
+      "duration_ms": 0.8,
       "status_codes": [
         {
           "operation": "Browse",
@@ -214,8 +214,8 @@
       "category": "read",
       "status": "passed",
       "detail": "Core attributes read successfully from ns=2;s=Temperature.",
-      "started_at_utc": "2026-11-16T12:27:04.580Z",
-      "duration_ms": 1.0,
+      "started_at_utc": "2026-11-22T11:15:39.524Z",
+      "duration_ms": 2.9,
       "status_codes": [
         {
           "operation": "Read NodeClass",
@@ -272,8 +272,8 @@
       "category": "read",
       "status": "passed",
       "detail": "Value read with status Good (Double).",
-      "started_at_utc": "2026-11-16T12:27:04.581Z",
-      "duration_ms": 0.4,
+      "started_at_utc": "2026-11-22T11:15:39.527Z",
+      "duration_ms": 0.7,
       "status_codes": [
         {
           "operation": "Read Value",
@@ -286,8 +286,8 @@
         "status": "Good",
         "variant_type": "Double",
         "encoding": "json",
-        "source_timestamp": "2026-11-16T12:27:04.548Z",
-        "server_timestamp": "2026-11-16T12:27:04.548Z",
+        "source_timestamp": "2026-11-22T11:15:39.453Z",
+        "server_timestamp": "2026-11-22T11:15:39.453Z",
         "value_preview": "21.5"
       },
       "notes": [],
@@ -299,8 +299,8 @@
       "category": "subscription",
       "status": "passed",
       "detail": "Subscription 78 created (publishing interval 500.0 ms).",
-      "started_at_utc": "2026-11-16T12:27:04.581Z",
-      "duration_ms": 2.0,
+      "started_at_utc": "2026-11-22T11:15:39.528Z",
+      "duration_ms": 1.9,
       "status_codes": [],
       "data": {
         "subscription_id": 78,
@@ -318,8 +318,8 @@
       "category": "subscription",
       "status": "passed",
       "detail": "2 notification(s) received, 1 value change(s) observed.",
-      "started_at_utc": "2026-11-16T12:27:04.583Z",
-      "duration_ms": 1003.1,
+      "started_at_utc": "2026-11-22T11:15:39.530Z",
+      "duration_ms": 1003.8,
       "status_codes": [
         {
           "operation": "DataChange",
@@ -362,9 +362,9 @@
       "name": "Bounded read latency",
       "category": "latency",
       "status": "passed",
-      "detail": "10 read(s): median 0.34 ms, min 0.26 ms, max 1.29 ms.",
-      "started_at_utc": "2026-11-16T12:27:05.586Z",
-      "duration_ms": 5.0,
+      "detail": "10 read(s): median 0.67 ms, min 0.57 ms, max 0.95 ms.",
+      "started_at_utc": "2026-11-22T11:15:40.534Z",
+      "duration_ms": 7.1,
       "status_codes": [
         {
           "operation": "Read",
@@ -377,20 +377,20 @@
         "read_attribute": "Value",
         "samples": 10,
         "samples_ms": [
-          0.36,
-          0.32,
-          0.26,
-          0.26,
-          0.45,
-          0.28,
-          0.27,
-          1.29,
-          0.78,
-          0.72
+          0.92,
+          0.69,
+          0.6,
+          0.69,
+          0.66,
+          0.57,
+          0.95,
+          0.68,
+          0.61,
+          0.62
         ],
-        "min_ms": 0.26,
-        "median_ms": 0.34,
-        "max_ms": 1.29,
+        "min_ms": 0.57,
+        "median_ms": 0.67,
+        "max_ms": 0.95,
         "statuses": [
           "Good"
         ]
@@ -404,7 +404,7 @@
       "category": "resilience",
       "status": "skipped",
       "detail": "Opt-in check: it closes the secure channel and reconnects, which interrupts active subscriptions. Enable 'include connection-interruption check' to run it.",
-      "started_at_utc": "2026-11-16T12:27:05.591Z",
+      "started_at_utc": "2026-11-22T11:15:40.541Z",
       "duration_ms": 0.0,
       "status_codes": [],
       "data": {},

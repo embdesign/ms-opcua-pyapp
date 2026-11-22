@@ -1,7 +1,7 @@
 {
   "format": "opcua-nodeset2-export",
   "format_version": 1,
-  "generated_at_utc": "2026-11-22T10:50:59.160Z",
+  "generated_at_utc": "2026-11-22T11:15:52.045Z",
   "path": "demo-nodeset2.xml",
   "configuration": {
     "include_values": false,
@@ -863,6 +863,6 @@
     "validation": "not-validated",
     "schema_validation": "not-requested",
     "bytes_written": 12350,
-    "duration_seconds": 0.19
+    "duration_seconds": 0.288
   }
 }
