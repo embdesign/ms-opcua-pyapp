@@ -77,6 +77,9 @@ class SequencesTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._settings = settings
         self._sequence: Sequence | None = None
         self._path: Path | None = None
@@ -245,8 +248,10 @@ class SequencesTab(QWidget):
         return container
 
     # -- connection state ---------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
         self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self._refresh_actions()
 
     def _refresh_actions(self) -> None:
@@ -347,7 +352,7 @@ class SequencesTab(QWidget):
         if sequence is None:
             self._show_error("Load a sequence document first.")
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._show_error("Connect to a server before running a sequence.")
             return
 
@@ -383,7 +388,7 @@ class SequencesTab(QWidget):
         if sequence is None or not sequence.gate.off:
             self._show_error("The loaded sequence defines no gate release steps.")
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._show_error("Connect to a server before releasing a gate.")
             return
         self._clear_results()
@@ -516,6 +521,18 @@ class SequencesTab(QWidget):
     def _show_error(self, message: str) -> None:
         self.status_label.setText(message)
         QMessageBox.warning(self, "Sequences", message)
+
+    # -- shutdown ------------------------------------------------------------
+    def shutdown(self) -> None:
+        """Cancel a run in flight; the runner releases its gate from ``finally``.
+
+        Closing the session must not leave a sequence on the worker loop, where its
+        completion callback would target a widget that is about to be deleted.
+        """
+        if self._handle is not None:
+            self._handle.cancel()
+            self._handle = None
+        self._task_key = None
 
     # -- project state -------------------------------------------------------
     def sequence_state(self) -> SequenceState:

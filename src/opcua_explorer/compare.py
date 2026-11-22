@@ -45,7 +45,8 @@ _logger = logging.getLogger(__name__)
 
 TOLERANCE_FUNCTIONAL = "functional"
 TOLERANCE_STRICT = "strict"
-TOLERANCES = (TOLERANCE_FUNCTIONAL, TOLERANCE_STRICT)
+TOLERANCE_DEVICE = "device"
+TOLERANCES = (TOLERANCE_FUNCTIONAL, TOLERANCE_STRICT, TOLERANCE_DEVICE)
 
 KIND_MISSING_IN_CANDIDATE = "missing_in_candidate"
 KIND_EXTRA_IN_CANDIDATE = "extra_in_candidate"
@@ -61,7 +62,8 @@ KIND_LABELS = {
 }
 
 COMPARISON_FORMAT = "opcua-comparison"
-COMPARISON_FORMAT_VERSION = 1
+#: Version 2 adds ``reference_edges_not_compared`` and ``device_attributes_compared``.
+COMPARISON_FORMAT_VERSION = 2
 
 #: Carried in every result: a comparison is evidence, not a certificate.
 COMPARISON_LIMITATION_NOTE = (
@@ -164,7 +166,13 @@ class ComparisonConfig:
     * ``functional`` — node class, data type, value rank, array dimensions,
       access level, user access level and type definition;
     * ``strict`` — additionally display name and description (text that servers
-      may localise, so it is not part of "functional" equivalence).
+      may localise, so it is not part of "functional" equivalence);
+    * ``device`` — additionally the device attributes: write masks, event
+      notifier, historizing, sampling interval, abstract/symmetric flags, data
+      type definition, access restrictions, role permissions and a method's
+      executable flags. They are only comparable when both snapshots were
+      downloaded with ``TraversalConfig.include_device_attributes``; otherwise
+      the result says so instead of pretending the devices match.
     """
 
     tolerance: str = TOLERANCE_FUNCTIONAL
@@ -199,7 +207,13 @@ class ComparisonConfig:
 
     @property
     def strict(self) -> bool:
-        return self.tolerance == TOLERANCE_STRICT
+        """True when display name and description are part of the comparison."""
+        return self.tolerance in (TOLERANCE_STRICT, TOLERANCE_DEVICE)
+
+    @property
+    def device(self) -> bool:
+        """True when the device attributes are part of the comparison."""
+        return self.tolerance == TOLERANCE_DEVICE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -290,6 +304,11 @@ class ComparisonResult:
     changed: list[NodeDifference] = field(default_factory=list)
     not_comparable: list[NodeDifference] = field(default_factory=list)
     reference_differences: list[ReferenceDifference] = field(default_factory=list)
+    #: Reference edges with an endpoint outside that download; not compared.
+    reference_edges_not_compared: int = 0
+    #: True only when the device tolerance ran with both snapshots carrying the
+    #: device attributes. False also means "this comparison did not look at them".
+    device_attributes_compared: bool = False
     namespace_differences: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     truncated_differences: int = 0
@@ -350,6 +369,8 @@ class ComparisonResult:
                 "truncated": self.truncated_differences,
             },
             "reference_differences": len(self.reference_differences),
+            "reference_edges_not_compared": self.reference_edges_not_compared,
+            "device_attributes_compared": self.device_attributes_compared,
             "namespace_differences": list(self.namespace_differences),
             "warnings": list(self.warnings),
             "limitations": [COMPARISON_LIMITATION_NOTE],
@@ -381,6 +402,10 @@ class ComparisonResult:
             lines.append(f"Truncated:        {self.truncated_differences} further difference(s) not listed")
         if self.reference_differences:
             lines.append(f"References:       {len(self.reference_differences)} difference(s)")
+        if self.reference_edges_not_compared:
+            lines.append(
+                f"References:       {self.reference_edges_not_compared} edge(s) left the compared nodes and were not compared"
+            )
         if self.namespace_differences:
             lines.append(f"Namespaces:       {len(self.namespace_differences)} difference(s)")
         for warning in self.warnings:
@@ -482,8 +507,14 @@ def _collect_browse_paths(
 # ---------------------------------------------------------------------------
 
 
-def _attribute_values(record: NodeRecord, snapshot: AddressSpace, *, strict: bool) -> dict[str, Any]:
-    """The attributes that define functional equivalence, keyed by report label."""
+def _attribute_values(
+    record: NodeRecord,
+    snapshot: AddressSpace,
+    *,
+    strict: bool,
+    device: bool = False,
+) -> dict[str, Any]:
+    """The attributes that define equivalence, keyed by report label."""
     values: dict[str, Any] = {
         "NodeClass": record.node_class,
         "DataType": qualified_key(record.data_type, snapshot.namespace_uri),
@@ -496,6 +527,9 @@ def _attribute_values(record: NodeRecord, snapshot: AddressSpace, *, strict: boo
     if strict:
         values["DisplayName"] = record.display_name
         values["Description"] = record.description or ""
+    if device:
+        for name, text in record.device_attributes.items():
+            values[name] = text
     return values
 
 
@@ -558,10 +592,20 @@ def _compare_pair(
     config: ComparisonConfig,
     *,
     compare_values: bool,
+    compare_device_attributes: bool = False,
 ) -> tuple[list[AttributeDifference], bool]:
     """Attribute differences of one matched pair, plus "cannot be called equal" flag."""
-    reference_values = _attribute_values(record_reference, snapshot_reference, strict=config.strict)
-    candidate_values = _attribute_values(record_candidate, snapshot_candidate, strict=config.strict)
+    reference_values = _attribute_values(
+        record_reference, snapshot_reference, strict=config.strict, device=compare_device_attributes
+    )
+    candidate_values = _attribute_values(
+        record_candidate, snapshot_candidate, strict=config.strict, device=compare_device_attributes
+    )
+    # An attribute one side has and the other never read is not equality - it is an
+    # unknown. The union of names keeps a device attribute visible that only one
+    # side exposes.
+    for name in sorted(set(candidate_values) - set(reference_values)):
+        reference_values[name] = ""
 
     differences: list[AttributeDifference] = []
     not_comparable = False
@@ -724,26 +768,37 @@ def _namespace_index(snapshot: AddressSpace, uri: str) -> int | None:
 def _reference_differences(
     reference: _Index,
     candidate: _Index,
-) -> list[ReferenceDifference]:
-    def edges_of(index: _Index) -> dict[tuple[str, str, str], str]:
+) -> tuple[list[ReferenceDifference], int, int]:
+    """Reference edges present on only one side, plus the edges not compared.
+
+    An edge is only comparable when *both* of its endpoints are nodes of that
+    snapshot. A reference to something outside the downloaded subtree can only be
+    seen on one side, so comparing it would report a difference that the download
+    caused - the counts are returned separately and surface as a warning instead of
+    disappearing.
+    """
+
+    def edges_of(index: _Index) -> tuple[dict[tuple[str, str, str], str], int]:
         seen: dict[tuple[str, str, str], str] = {}
+        not_compared = 0
         for edge in index.snapshot.references:
             source = index.key_of_node.get(edge.source)
             target = index.key_of_node.get(edge.target)
             if source is None or target is None:
+                not_compared += 1
                 continue
             name = edge.reference_type_name or edge.reference_type
             seen.setdefault((source, name, target), name)
-        return seen
+        return seen, not_compared
 
-    reference_edges = edges_of(reference)
-    candidate_edges = edges_of(candidate)
+    reference_edges, reference_not_compared = edges_of(reference)
+    candidate_edges, candidate_not_compared = edges_of(candidate)
     differences: list[ReferenceDifference] = []
     for source, name, target in sorted(reference_edges.keys() - candidate_edges.keys()):
         differences.append(ReferenceDifference(KIND_MISSING_IN_CANDIDATE, source, target, name))
     for source, name, target in sorted(candidate_edges.keys() - reference_edges.keys()):
         differences.append(ReferenceDifference(KIND_EXTRA_IN_CANDIDATE, source, target, name))
-    return differences
+    return differences, reference_not_compared, candidate_not_compared
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +828,26 @@ def compare_address_spaces(
     result.warnings.extend(_snapshot_warnings(reference, "reference"))
     result.warnings.extend(_snapshot_warnings(candidate, "candidate"))
     result.warnings.extend(_identity_warnings(reference, candidate))
+
+    # Device attributes are only comparable when the download read them; saying so
+    # is the difference between "the devices agree" and "this was not looked at".
+    compare_device_attributes = settings.device and (
+        reference.config.include_device_attributes and candidate.config.include_device_attributes
+    )
+    result.device_attributes_compared = compare_device_attributes
+    if settings.device and not compare_device_attributes:
+        missing = [
+            role
+            for role, snapshot in (("reference", reference), ("candidate", candidate))
+            if not snapshot.config.include_device_attributes
+        ]
+        result.warnings.append(
+            "The device tolerance needs the device attributes in both snapshots, but the "
+            f"{' and '.join(missing)} side was downloaded without them; only the model "
+            "attributes were compared. Download again with 'device attributes' enabled "
+            "(or --device-attributes) to compare write masks, historizing, sampling "
+            "intervals and role permissions."
+        )
     result.namespace_differences = _namespace_differences(reference, candidate)
     if result.namespace_differences:
         result.warnings.append(
@@ -828,6 +903,7 @@ def compare_address_spaces(
             candidate,
             settings,
             compare_values=reference_key in value_reference or candidate_key in value_candidate,
+            compare_device_attributes=compare_device_attributes,
         )
         if not differences:
             continue
@@ -877,7 +953,19 @@ def compare_address_spaces(
         )
 
     if settings.compare_references:
-        result.reference_differences = _reference_differences(reference_index, candidate_index)
+        (
+            result.reference_differences,
+            reference_not_compared,
+            candidate_not_compared,
+        ) = _reference_differences(reference_index, candidate_index)
+        result.reference_edges_not_compared = reference_not_compared + candidate_not_compared
+        if result.reference_edges_not_compared:
+            result.warnings.append(
+                f"{reference_not_compared} reference(s) on the reference side and "
+                f"{candidate_not_compared} on the candidate side point to nodes outside that "
+                "download (types in another namespace, nodes under a different root); they are not "
+                "part of the reference comparison. Download a wider scope to include them."
+            )
     if result.truncated_differences:
         result.warnings.append(
             f"{result.truncated_differences} difference(s) were not listed "

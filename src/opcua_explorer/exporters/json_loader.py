@@ -24,8 +24,16 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import ExportError
-from ..models import AddressSpace, ConnectionInfo, Edge, NamespaceEntry, NodeRecord, ValueSnapshot
-from .json_exporter import FORMAT_NAME, FORMAT_VERSION
+from ..models import (
+    AddressSpace,
+    ConnectionInfo,
+    Edge,
+    NamespaceEntry,
+    NodeRecord,
+    TraversalConfig,
+    ValueSnapshot,
+)
+from .json_exporter import FORMAT_NAME, READABLE_FORMAT_VERSIONS
 
 
 def _as_mapping(value: Any, what: str) -> Mapping[str, Any]:
@@ -77,6 +85,31 @@ def _connection(raw: Any) -> ConnectionInfo | None:
     )
 
 
+def _traversal_config(raw: Any) -> TraversalConfig:
+    """Restore the recorded download bounds; missing keys keep their defaults."""
+    data = raw if isinstance(raw, Mapping) else {}
+    defaults = TraversalConfig()
+    namespace_filter = data.get("namespace_filter")
+    return TraversalConfig(
+        max_depth=None if data.get("max_depth") is None else int(data["max_depth"]),
+        max_nodes=None if data.get("max_nodes") is None else int(data["max_nodes"]),
+        concurrency=int(data.get("concurrency", defaults.concurrency)),
+        batch_size=int(data.get("batch_size", defaults.batch_size)),
+        max_references_per_node=int(
+            data.get("max_references_per_node", defaults.max_references_per_node)
+        ),
+        namespace_filter=(
+            None if namespace_filter is None else frozenset(int(item) for item in namespace_filter)
+        ),
+        include_values=bool(data.get("include_values", defaults.include_values)),
+        include_description=bool(data.get("include_description", defaults.include_description)),
+        follow_subtypes=bool(data.get("follow_subtypes", defaults.follow_subtypes)),
+        include_device_attributes=bool(
+            data.get("include_device_attributes", defaults.include_device_attributes)
+        ),
+    )
+
+
 def _node_record(node_id: str, raw: Any) -> NodeRecord:
     data = _as_mapping(raw, f"Node {node_id!r}")
     record = NodeRecord(node_id=str(data.get("node_id") or node_id))
@@ -102,6 +135,9 @@ def _node_record(node_id: str, raw: Any) -> NodeRecord:
         str(name): str(status) for name, status in (data.get("unavailable_attributes") or {}).items()
     }
     record.errors = [str(item) for item in data.get("errors") or ()]
+    record.device_attributes = {
+        str(name): str(value) for name, value in (data.get("device_attributes") or {}).items()
+    }
     return record
 
 
@@ -117,9 +153,10 @@ def snapshot_from_document(document: Any, *, name: str | None = None) -> Address
             f"Not an OPC UA address-space document (format={data.get('format')!r}, expected {FORMAT_NAME!r})."
         )
     version = data.get("format_version")
-    if version != FORMAT_VERSION:
+    if version not in READABLE_FORMAT_VERSIONS:
+        readable = ", ".join(str(item) for item in READABLE_FORMAT_VERSIONS)
         raise ExportError(
-            f"Unsupported format_version {version!r}; this build reads version {FORMAT_VERSION}."
+            f"Unsupported format_version {version!r}; this build reads version(s) {readable}."
         )
 
     nodes_document = data.get("nodes")
@@ -161,6 +198,7 @@ def snapshot_from_document(document: Any, *, name: str | None = None) -> Address
         namespaces=namespaces,
         connection=_connection(source_document.get("connection")),
         values_included=bool(source_document.get("values_included")),
+        config=_traversal_config(source_document.get("traversal")),
         limitations=[str(item) for item in source_document.get("limitations") or ()],
         inaccessible={
             str(entry.get("node_id")): str(entry.get("status") or "")

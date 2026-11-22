@@ -63,6 +63,7 @@ from ...exporters import load_json_snapshot
 from ...models import TraversalConfig, TraversalProgress
 from ...reporting import write_comparison_html, write_comparison_json
 from ..async_runner import AsyncRunner, TaskHandle
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
 
 _logger = logging.getLogger(__name__)
@@ -71,7 +72,11 @@ FILTER_ALL = "all"
 #: Combo value that selects a saved JSON export instead of a live session.
 FILE_SOURCE = "__saved_document__"
 
-TOLERANCE_LABELS = (("functional", "functional (structure)"), ("strict", "strict (+ display text)"))
+TOLERANCE_LABELS = (
+    ("functional", "functional (structure)"),
+    ("strict", "strict (+ display text)"),
+    ("device", "device (+ masks, historizing, permissions)"),
+)
 
 _COLUMNS = ("Kind", "Browse path", "Node class", "Reference NodeId", "Candidate NodeId", "Attributes")
 
@@ -184,15 +189,15 @@ class CompareTab(QWidget):
         title = QLabel("Compare two sessions")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Downloads the address space of both sessions and compares them structurally. Read-only: the "
-            "comparison writes, calls and subscribes nothing. Both sessions should use the same identity, "
-            "otherwise access levels cannot be compared. A side can also be a saved JSON export "
-            "(Export tab → Export JSON…), which needs no connection."
+        layout.addWidget(
+            TabNotice(
+                "Structural comparison of two address spaces; read-only, and a side may be a saved JSON export.",
+                "Downloads the address space of both sessions and compares them structurally. Read-only: the "
+                "comparison writes, calls and subscribes nothing. Both sessions should use the same identity, "
+                "otherwise access levels cannot be compared. A side can also be a saved JSON export "
+                "(Export tab → Export JSON…), which needs no connection.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         sessions_box = QGroupBox("Sessions")
         sessions_layout = QFormLayout(sessions_box)
@@ -455,6 +460,10 @@ class CompareTab(QWidget):
             concurrency=DEFAULT_CONCURRENCY,
             batch_size=DEFAULT_BATCH_SIZE,
             include_values=bool(values),
+            # The device tolerance compares attributes that are not part of the data
+            # model, so the download has to read them - otherwise the comparison would
+            # report "not compared" for every node.
+            include_device_attributes=str(self.tolerance_combo.currentData() or "") == "device",
         ).normalised()
 
     def _comparison_config(self) -> ComparisonConfig:

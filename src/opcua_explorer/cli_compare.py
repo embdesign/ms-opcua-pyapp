@@ -51,7 +51,13 @@ from .cli import (
     settings_from_args,
     traversal_config_from_args,
 )
-from .compare import ComparisonConfig, compare_address_spaces
+from .compare import (
+    TOLERANCE_DEVICE,
+    TOLERANCE_FUNCTIONAL,
+    TOLERANCES,
+    ComparisonConfig,
+    compare_address_spaces,
+)
 from .config import ConnectionSettings, TrustStore
 from .defaults import (
     DEFAULT_BATCH_SIZE,
@@ -171,11 +177,13 @@ def build_parser() -> argparse.ArgumentParser:
     comparison = parser.add_argument_group("comparison")
     comparison.add_argument(
         "--tolerance",
-        choices=("functional", "strict"),
-        default="functional",
+        choices=TOLERANCES,
+        default=TOLERANCE_FUNCTIONAL,
         help=(
             "functional (default): node class, data type, value rank, array dimensions, access levels, "
-            "type definition; strict: also display name and description"
+            "type definition; strict: also display name and description; device: also write masks, "
+            "event notifier, historizing, sampling interval, type flags, access restrictions and role "
+            "permissions (implies reading them during the download)"
         ),
     )
     comparison.add_argument(
@@ -371,6 +379,10 @@ async def run_compare(args: argparse.Namespace) -> int:
     if args.compare_value and not traversal.include_values:
         # Comparing a payload requires reading it; the download flag is implied.
         traversal = dataclasses.replace(traversal, include_values=True)
+    if args.tolerance == TOLERANCE_DEVICE and not traversal.include_device_attributes:
+        # Same rule for the device attributes: a tolerance the download cannot feed
+        # would only report "not compared" for every node.
+        traversal = dataclasses.replace(traversal, include_device_attributes=True)
     config = comparison_config_from_args(args)
 
     reference_endpoint, reference_document = source_of("reference", args.reference, args.reference_file)

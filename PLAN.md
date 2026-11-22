@@ -8,17 +8,21 @@ covered by tests, including the device-independent sequence runner for operator-
 
 | Area | Delivered |
 |---|---|
-| Connection & security | Endpoint discovery, policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
+| Connection & security | Endpoint discovery, **FindServers directory lookup** (LDS/GDS or any server, optional application-URI filter, advertised URL adoption), policy/mode selection without downgrade, anonymous/username/certificate identity, client certificate & key, explicit server-certificate approval, trust-store management, timeouts, connection profiles (no secrets) |
 | Resilience | Automatic reconnect with exponential backoff (default on), explicit release on link loss when disabled, clear GUI states and diagnostics |
-| Address space | Lazy tree from Root/Objects or any NodeId, attributes and references panel, explicit value read, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
-| Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; JSON, CSV and NodeSet2 XML |
+| Address space | Lazy tree from Root/Objects or any NodeId with a browse filter (reference type, direction, include subtypes, `NodeClassMask`), attributes and references panel, explicit value read with `IndexRange`/`MaxAge`/`TimestampsToReturn`, copy NodeId, search in a downloaded snapshot, session-local live-monitor markers |
+| Download & export | Bounded graph traversal with namespace filter, depth/node budget, concurrency/batch size, continuation-point handling, progress/cancel; explicit value/description switches and a coverage report of what is and is not in the snapshot; JSON, CSV and NodeSet2 XML |
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
-| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals |
-| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), read-only by default |
-| Guarded operations | Single-target write and method call, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
+| Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
+| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event plus one unconfirmed `ConditionRefresh` call on the running subscription (no `Confirm`/`Enable`, never retried) |
+| Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
+| History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
+| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below); the same suite runs headlessly through `opcua-check` and writes the same JSON/HTML report |
+| Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page, and headlessly through `opcua-nodes` (also for a `DisplayName`/`Description` write); admin-only on `UserRole.Admin` servers |
+| Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
-| Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict tolerance, value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
+| Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict/device tolerance (device adds write masks, historizing, sampling interval, permissions), value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
 | Sessions & projects | Several independent sessions per window, shared trust store and asyncio loop; versioned project files (version 2) with per-session configuration and editor state, never secrets |
 | Sequences | Operator-written sequence documents (`opcua-explorer-sequence` v1): preconditions, user-defined gate (acquire / verify / keepalive / release) and body (`write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`), `${name}` inputs, dry run, browse-path addressing, run timeline, and the Qt-free `opcua-run-sequence` command |
 | Demo & examples | Local demo server with a graph-shaped model; example JSON/CSV/NodeSet2 exports and sample reports |
@@ -30,11 +34,11 @@ src/opcua_explorer/
 ├── gui/            window shell, one workspace per session, tabs, Qt↔asyncio bridge
 ├── cli.py          opcua-export: headless NodeSet2 export (same services, no Qt)
 ├── opcua/          client service, security, browse, attributes, traversal, serialize,
-│                   monitor, NodeSet2 (+ validation), check support, test runner,
+│                   monitor, events, NodeSet2 (+ validation), check support, test runner,
 │                   guarded operations, write service, type support, path support,
 │                   sequence runner, shared UA names
 ├── exporters/      JSON and CSV writers, JSON snapshot loader
-├── models.py       plain dataclasses shared by every layer
+├── models/         plain dataclasses shared by every layer (one module per feature cluster)
 ├── config.py       settings, profiles, trust store
 ├── defaults.py     single definition of numeric defaults
 ├── project.py      versioned project documents
@@ -44,6 +48,10 @@ src/opcua_explorer/
 ├── compare.py      structural comparison of two address-space snapshots (Qt/asyncua-free)
 ├── sequence_document.py  read/validate *.opcua-sequence.json (Qt/asyncua-free)
 ├── cli_compare.py  opcua-compare: headless comparison (same services, no Qt)
+├── cli_read.py     opcua-read: headless attribute read (Qt-free)
+├── cli_monitor.py  opcua-monitor: headless data-change monitor (Qt-free)
+├── cli_history.py  opcua-history: headless raw-history read (Qt-free)
+├── cli_write.py    opcua-write: headless guarded single write (Qt-free, --confirm)
 ├── cli_sequence.py opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── logging_setup.py log bus and secret redaction
 └── demo/           local demo server
@@ -56,8 +64,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 416 passed, ~5:30
-uv run pytest tests/unit -q       # 315 passed, ~3 s
+uv run pytest -q                  # 796 passed, ~8–15 min
+uv run pytest tests/unit -q       # 583 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -68,7 +76,33 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 
 ## 4. Deliberate limitations
 
-- Values are point-in-time; there are no history reads.
+- Node management is one node per request, never a batch: no child check before a delete, no undo, no reference
+  editing, and servers usually restrict it to administrators.
+- Browse filters (reference type, direction, subtypes, `NodeClassMask`) are requests; the tree is a navigation
+  aid and an export always uses the unfiltered hierarchical traversal.
+- A value read's `IndexRange`, `MaxAge` and `TimestampsToReturn` are requests: the NumericRange is validated
+  locally, but the server decides whether it slices, caches or returns the timestamps it was asked for.
+- The server directory is a lookup only: one `FindServers` call per request on a temporary unencrypted channel.
+  Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
+  no `RegisterServer` and no automatic connection to a found application.
+- Values are point-in-time reads; history is raw or one aggregate (no read-at-time, no event
+  history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
+  returned. The History trend chart plots exactly the numbers of one read (no second read, no interpolation);
+  non-numeric values are counted instead of plotted.
+- Events are notifications, not alarm management: sources are subscription-only. There are two condition
+  actions: one operator-confirmed `Acknowledge` method call for a selected condition event, and one
+  `ConditionRefresh` call on the running subscription (no dialog, because it stores nothing; its
+  `RefreshStart`/`RefreshEnd` events are the only evidence). Both are reachable headlessly through
+  `opcua-events` (`--refresh`, and `--acknowledge … --confirm`). No `Confirm`/`Enable`/`AddComment`, no retry, no
+  automatic acknowledgement, no `ConditionRefresh2`, no event history. Event sources are session state.
+- `EventNotifier` and the other details-only attributes are read for the selected node, not downloaded; the
+  JSON/CSV snapshot format is unchanged and the tree does not mark event sources.
+- Server status/diagnostics cover the standard status, summary and capability variables that the server
+  provides. `GetMonitoredItems` is not called (the tab shows the client's own monitor view); there is no
+  diagnostics-array detail and no aggregate computation.
+- Data-change filters and intervals are requests: the server decides whether a deadband is honoured and which
+  interval it uses. Filters are fixed for the lifetime of a subscription; intervals and the monitoring mode can
+  be changed while it runs. The demo server accepts filters but does not implement deadband suppression.
 - The functional suite covers one session, one browse root and one variable.
 - Writes and method calls are single-target, opt-in and never repeated; no batch write, restore-all,
   scan or stress mode.
@@ -79,7 +113,10 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
   refused rather than encoded on a guess.
 - Downloads and NodeSet2 exports contain what the session was allowed to browse; access-denied nodes
   and missing dependencies are reported, not hidden.
-- NodeSet2 is an export of an existing session, not a model-authoring or merging tool.
+- NodeSet2 is an export of an existing session, not a model-authoring or merging tool. Attributes the XML
+  exporter cannot write (`WriteMask`/`UserWriteMask`, `AccessRestrictions`, `RolePermissions`/
+  `UserRolePermissions`, `Symmetric`/`IsAbstract` of custom ReferenceTypes, `IsAbstract` of custom DataTypes)
+  and skipped `View` nodes are reported as limitations in every export.
 - Sessions share one window and one asyncio loop; the shared **Compare** tab and `opcua-compare` compare two
   of them, but nothing is merged automatically, and the comparison is structural evidence for one identity and
   one point in time rather than an equivalence guarantee.
@@ -102,12 +139,12 @@ code enforces only mechanical rules.
 
 ### 6.1 Universal document
 
-`opcua-explorer-sequence`, version 1 (`SEQUENCE_FORMAT` / `SEQUENCE_VERSION` in `models.py`):
+`opcua-explorer-sequence`, version 1 (`SEQUENCE_FORMAT` / `SEQUENCE_VERSION` in `models/`):
 
 | Part | Content |
 |---|---|
 | `inputs` | Parameters substituted into step texts as `${name}`; values come from the document, the project or a CLI argument |
-| `preconditions` | Steps that run before the gate; usually read-only checks such as `assert` / `wait_until`, plus an optional `ensure` that may write a prerequisite |
+| `preconditions` | Steps that run before the gate; usually verification checks such as `assert` / `wait_until`, plus an optional `ensure` that may write a prerequisite |
 | `gate` | Operator-defined `on` steps, optional `verify` step, optional `keepalive` step with interval and failure policy, and `off` steps |
 | `steps` | The body: `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until` |
 
@@ -130,13 +167,15 @@ Step kinds are fixed (`SEQUENCE_STEP_KINDS`); anything else is refused before th
 
 ### 6.3 Work breakdown
 
-1. **Engine (done)** — `models.py` sequence dataclasses and statuses;
+1. **Engine (done)** — `models/` sequence dataclasses and statuses;
    `opcua/method_support.py` (server DataType/ValueRank, `InputArguments`, `Executable` read once);
    `opcua/write_service.py` (`prepare_write` → one write → read-back, one method call with validated
    arguments); `opcua/sequence_runner.py`; unit tests with a fake client.
 2. **Guarded checks delegate (done)** — `check_write_target` / `check_method_call` call `write_service`
    (`prepare_*` + `send_prepared_*`), so only one write/call implementation exists; the check-specific
-   reporting, StatusCode entries and messages are unchanged.
+   reporting, StatusCode entries and messages are unchanged. The optional restore now also runs through
+   `write_service.restore_value` (same one write + read-back), and every sending function requires an explicit
+   `WriteAuthority`; `tests/unit/test_layer_boundaries.py` fails if a second send path appears.
 3. **Value coverage (done)** — `value_parsing.py` keeps the built-in scalars; `opcua/type_support.py` adds
    enumerations (definition or `EnumStrings`/`EnumValues`, by name or number), arrays of enums, and structures
    with a `DataTypeDefinition` (nested structures, rank-1 arrays, encoded with `DefaultEncodingId`). Matrices,
@@ -171,6 +210,6 @@ Step kinds are fixed (`SEQUENCE_STEP_KINDS`); anything else is refused before th
 
 - Sequences are declarative; there is no embedded scripting language and no arbitrary code execution.
 - A keepalive failure aborts between steps, not inside a running `delay`.
-- Values remain point-in-time; there is still no history read, no batch write and no automatic retry.
+- Values remain point-in-time elsewhere; there is still no batch write and no automatic retry.
 - Whether a device honours a gate is device behaviour; the tool reports StatusCodes and read-backs, it
   cannot prove mutual exclusion.

@@ -80,6 +80,62 @@ async def test_rejected_node_is_reported_not_raised(monitor_service) -> None:
     await service.monitor_stop()
 
 
+async def test_data_change_filter_is_accepted_and_notifications_flow(monitor_service) -> None:
+    service, model = monitor_service
+    received: list[MonitorNotification] = []
+
+    start = await service.start_monitor(
+        [model.node_ids["temperature"]],
+        MonitorConfig(
+            publishing_interval_ms=200,
+            sampling_interval_ms=100,
+            trigger="StatusValue",
+            deadband_type="Absolute",
+            deadband_value=0.01,
+        ),
+        emit=received.append,
+    )
+
+    assert start.items[0].ok is True, start.items[0].status
+    assert await _wait_for(lambda: len(received) >= 1), "no notification arrived with a filter"
+    assert received[0].status == "Good"
+    assert received[0].value_text
+
+    await service.monitor_stop()
+    assert service.is_monitoring is False
+
+
+async def test_monitoring_mode_and_intervals_can_be_changed_while_running(monitor_service) -> None:
+    service, model = monitor_service
+    received: list[MonitorNotification] = []
+    await service.start_monitor(
+        [model.node_ids["temperature"]],
+        MonitorConfig(publishing_interval_ms=200, sampling_interval_ms=100),
+        emit=received.append,
+    )
+    assert await _wait_for(lambda: len(received) >= 1)
+
+    # Disabled stops the server from sampling; nothing is delivered.
+    assert await service.monitor_set_mode("Disabled") == "Disabled"
+    quiet = len(received)
+    await asyncio.sleep(1.6)
+    assert len(received) == quiet, "Disabled mode must stop data-change notifications"
+
+    # Reporting resumes the flow.
+    assert await service.monitor_set_mode("Reporting") == "Reporting"
+    assert await _wait_for(lambda: len(received) > quiet), "notifications did not resume"
+
+    # ModifySubscription and ModifyMonitoredItems are accepted; the server may revise.
+    revised, failures = await service.monitor_apply_intervals(
+        publishing_interval_ms=300, sampling_interval_ms=250
+    )
+    assert revised > 0
+    assert failures == []
+
+    await service.monitor_stop()
+    assert service.is_monitoring is False
+
+
 async def test_monitor_stop_is_safe_without_a_subscription(monitor_service) -> None:
     service, _model = monitor_service
     await service.monitor_stop()

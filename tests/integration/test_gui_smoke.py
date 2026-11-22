@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from PySide6.QtCore import QEventLoop, QTimer
 
@@ -55,6 +56,9 @@ def test_async_runner_reports_cancellation(qapp) -> None:
     runner.stop()
 
     assert events[:1] == ["cancelled"]
+    # The cancelled task's done/error closures must not be retained until stop().
+    assert runner._callbacks == {}
+    assert runner._tasks == {}
 
 
 def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
@@ -63,22 +67,29 @@ def test_main_window_structure_and_security_controls(qapp, tmp_path) -> None:
     service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
     window = MainWindow(runner, service, AppSettings())
     try:
-        # One session tab (with its own six tabs), the merged monitor tab, the compare tab, the logs tab.
+        # One session tab (with its own tabs), the merged monitor tab, the compare tab, the logs tab.
         assert window.tabs.count() == 4
         assert window.tabs.tabText(0).startswith("Session 1")
         assert window.tabs.tabText(1) == "All monitors"
         assert window.tabs.tabText(2) == "Compare"
-        assert window.tabs.tabText(3) == "Logs & reports"
+        # Qt needs '&&' to draw a literal '&'; tabText() returns it unprocessed.
+        assert window.tabs.tabText(3) == "Logs && reports"
         # "All sessions" + the one open session.
         assert window.unified_monitor_tab.filter_combo.count() == 2
         workspace = window.workspaces[0]
+        # The order follows the on-site walk: connect, check the server, browse, observe,
+        # act, verify/report.
         assert [workspace.tabs.tabText(i) for i in range(workspace.tabs.count())] == [
             "Connection",
+            "Server",
             "Address space",
-            "Export",
             "Live monitor",
+            "Events",
+            "History",
+            "Write && call",
             "Tests",
             "Sequences",
+            "Export",
         ]
 
         tab = window.connection_tab
@@ -158,6 +169,48 @@ def test_browser_selection_is_local_to_each_session(qapp, tmp_path) -> None:
 
         first.tests_tab._on_use_selection()
         assert first.tests_tab.variable_edit.text() == "ns=2;s=First"
+    finally:
+        window.shutdown()
+        for session_service in window.services:
+            runner.run_until_complete(session_service.shutdown, timeout=3.0)
+        runner.stop()
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_closing_a_session_cancels_browser_reads(qapp, tmp_path) -> None:
+    """A browse still in flight must not outlive its session tab."""
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        workspace = window.workspaces[0]
+        tab = workspace.browser_tab
+
+        async def slow_browse() -> list[object]:
+            await asyncio.sleep(30.0)
+            return []
+
+        tab._submit(slow_browse, on_done=lambda _children: None, on_error=lambda _message: None)
+        assert len(tab._tasks) == 1
+        key = next(iter(tab._tasks))
+
+        deadline = time.monotonic() + 5.0
+        while not runner.is_active(key) and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert runner.is_active(key), "the browse did not start"
+
+        window.close_session(workspace)
+
+        assert tab._tasks == {}
+        deadline = time.monotonic() + 5.0
+        while runner.is_active(key) and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert not runner.is_active(key), "the browse kept running after its session was closed"
     finally:
         window.shutdown()
         for session_service in window.services:

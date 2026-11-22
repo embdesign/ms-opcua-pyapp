@@ -106,14 +106,14 @@ async def test_secure_connect_requires_approval_and_then_works(secure_server, tm
         assert "approved" in str(excinfo.value).lower()
 
         # 2. Trust store starts empty, then records the explicit approval.
-        assert service.certificate_is_trusted(endpoint.certificate_der) is False
-        service.approve_certificate(
-            endpoint.certificate_der,
+        assert service.trust_store.is_trusted(endpoint.certificate_sha256 or "") is False
+        service.trust_store.add(
+            endpoint.certificate_sha256 or "",
             subject=endpoint.certificate_subject or "",
             endpoint_url=endpoint.endpoint_url,
             not_after=endpoint.certificate_not_after,
         )
-        assert service.certificate_is_trusted(endpoint.certificate_der) is True
+        assert service.trust_store.is_trusted(endpoint.certificate_sha256 or "") is True
         assert trust_path.exists()
         assert TrustStore(trust_path).is_trusted(endpoint.certificate_sha256)
 

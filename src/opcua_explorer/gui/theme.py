@@ -11,10 +11,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QLabel
 
 ACCENT = "#14639e"
-ACCENT_DARK = "#0f5286"
 ERROR = "#b3261e"
-WARNING = "#8a5a00"
-SUCCESS = "#17603a"
 
 STYLESHEET = """
 QWidget {
@@ -172,6 +169,12 @@ QPlainTextEdit#fingerprint {
 }
 
 QLabel#hintLabel { color: #5b6a7d; }
+QLabel#warnLabel {
+    color: #8a5a00;
+    border: 1px solid #f0d9a6;
+    border-radius: 6px;
+    padding: 2px 6px;
+}
 QLabel#warningLabel {
     color: #8a5a00;
     background: #fff6e0;

@@ -2,7 +2,9 @@
 
 One row per node. Reference counts are computed from the reference list so the
 inventory is useful without a second file. Values are only present when the
-download explicitly included them.
+download explicitly included them; a refused or undecodable value keeps its
+StatusCode in ``value_status``/``unavailable_attributes`` so it cannot be
+mistaken for a value that was simply not requested.
 
 The file is written as UTF-8 with BOM so that Excel on Windows detects the
 encoding; descriptions with commas, quotes or newlines are quoted by the csv
@@ -40,12 +42,14 @@ COLUMNS = [
     "type_definition_name",
     "description",
     "value_status",
+    "value_encoding",
     "value_variant_type",
     "value",
     "value_source_timestamp",
     "value_server_timestamp",
     "references_out",
     "references_in",
+    "unavailable_attributes",
     "errors",
 ]
 
@@ -57,8 +61,14 @@ class CsvExportResult:
     bytes_written: int
 
 
+def _unavailable_text(record: NodeRecord) -> str:
+    """``Attribute=StatusCode`` pairs, sorted, for every attribute the server refused."""
+    return ";".join(f"{name}={status}" for name, status in sorted(record.unavailable.items()))
+
+
 def _row(record: NodeRecord, out_count: int, in_count: int, include_values: bool) -> dict[str, Any]:
     value = record.value if include_values else None
+    refused_value = record.unavailable.get("Value")
     return {
         "node_id": record.node_id,
         "node_class": record.node_class,
@@ -77,13 +87,20 @@ def _row(record: NodeRecord, out_count: int, in_count: int, include_values: bool
         "type_definition": record.type_definition or "",
         "type_definition_name": record.type_definition_name or "",
         "description": record.description or "",
-        "value_status": "" if value is None else value.status,
+        # A refused/undecodable Value keeps its StatusCode instead of looking absent.
+        "value_status": value.status if value is not None else (refused_value or ""),
+        "value_encoding": (
+            value.encoding
+            if value is not None
+            else ("unavailable" if refused_value else "")
+        ),
         "value_variant_type": "" if value is None else (value.variant_type or ""),
         "value": "" if value is None else flatten_for_csv(value.value),
         "value_source_timestamp": "" if value is None else (value.source_timestamp or ""),
         "value_server_timestamp": "" if value is None else (value.server_timestamp or ""),
         "references_out": out_count,
         "references_in": in_count,
+        "unavailable_attributes": _unavailable_text(record),
         "errors": " | ".join(record.errors),
     }
 

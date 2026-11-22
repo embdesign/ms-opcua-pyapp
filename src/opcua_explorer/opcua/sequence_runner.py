@@ -28,7 +28,9 @@ from typing import Any
 
 from asyncua import ua
 
+from ..errors import OpcUaExplorerError
 from ..models import (
+    AUTHORITY_SEQUENCE_DOCUMENT,
     KEEPALIVE_ABORT,
     PHASE_GATE_OFF,
     PHASE_GATE_ON,
@@ -47,6 +49,7 @@ from ..models import (
     SequenceRun,
     SequenceStep,
     SequenceStepResult,
+    WriteAuthority,
     utc_now,
 )
 from . import path_support, type_support, write_service
@@ -60,11 +63,11 @@ _INPUT_PATTERN = re.compile(r"\$\{([A-Za-z0-9_.\-]+)\}")
 _logger = logging.getLogger(__name__)
 
 
-class SequenceBusyError(RuntimeError):
+class SequenceBusyError(OpcUaExplorerError):
     """A sequence is already running on this runner."""
 
 
-class SequenceAborted(Exception):
+class SequenceAborted(OpcUaExplorerError):
     """The run stopped early; the message is shown to the operator."""
 
 
@@ -572,6 +575,14 @@ class SequenceRunner:
 
     # -- shared step helpers ---------------------------------------------------------
 
+    def _authority(self, result: SequenceStepResult) -> WriteAuthority:
+        """The sequence document authorises its own steps; the reference names the step."""
+        authorization = WriteAuthority(
+            AUTHORITY_SEQUENCE_DOCUMENT, f"{result.phase} {result.step_id}"
+        )
+        result.authorization = authorization.describe()
+        return authorization
+
     async def _write(
         self,
         node_id: str,
@@ -598,8 +609,11 @@ class SequenceRunner:
                 self._fail(result, inspection.detail)
             return
 
+        authorization = self._authority(result)
         try:
-            outcome = await write_service.write_variable(self._client, node_id, value_text, verify=verify)
+            outcome = await write_service.write_variable(
+                self._client, node_id, value_text, authorization=authorization, verify=verify
+            )
         except asyncio.CancelledError as exc:
             sent = bool(getattr(exc, "sent", False))
             result.status = STATUS_OUTCOME_UNKNOWN if sent else STATUS_CANCELLED
@@ -718,8 +732,11 @@ class SequenceRunner:
                 self._fail(result, inspection.detail)
             return
 
+        authorization = self._authority(result)
         try:
-            outcome = await write_service.call_method(self._client, object_node_id, method_node_id, arguments)
+            outcome = await write_service.call_method(
+                self._client, object_node_id, method_node_id, arguments, authorization=authorization
+            )
         except asyncio.CancelledError as exc:
             sent = bool(getattr(exc, "sent", False))
             result.status = STATUS_OUTCOME_UNKNOWN if sent else STATUS_CANCELLED

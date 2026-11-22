@@ -1,4 +1,4 @@
-"""One OPC UA session: its own service, connection state and five tabs.
+"""One OPC UA session: its own service, connection state and ten tabs.
 
 The window shell (:class:`~opcua_explorer.gui.main_window.MainWindow`) hosts any
 number of these workspaces as top-level tabs. Each workspace owns an independent
@@ -24,7 +24,20 @@ from ..models import ConnectionInfo
 from ..opcua.client_service import OpcUaService
 from ..project import ProjectSession
 from .async_runner import AsyncRunner
-from .tabs import BrowserTab, ConnectionTab, ExportTab, MonitorTab, SequencesTab, TestsTab
+from .selection_marker import refresh_markers
+from .tab_notice import apply_notices
+from .tabs import (
+    BrowserTab,
+    ConnectionTab,
+    EventsTab,
+    ExportTab,
+    HistoryTab,
+    MonitorTab,
+    SequencesTab,
+    ServerTab,
+    TestsTab,
+    WriteCallTab,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -57,6 +70,8 @@ class SessionWorkspace(QWidget):
         self._chip_text = "Disconnected"
         self._server_text = ""
         self._connection: ConnectionInfo | None = None
+        #: Set by the shell: show every page description in full.
+        self._verbose_notices = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -74,17 +89,34 @@ class SessionWorkspace(QWidget):
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
         )
         self.monitor_tab = MonitorTab(runner, service)
+        self.events_tab = EventsTab(
+            runner, service, selection_provider=self.browser_tab.current_node_id
+        )
+        self.history_tab = HistoryTab(
+            runner, service, selection_provider=self.browser_tab.current_node_id
+        )
+        self.write_tab = WriteCallTab(
+            runner, service, selection_provider=self.browser_tab.current_node_id
+        )
+        self.server_tab = ServerTab(runner, service)
         self.tests_tab = TestsTab(
             runner, service, settings, selection_provider=self.browser_tab.current_node_id
         )
         self.sequences_tab = SequencesTab(runner, service, settings)
 
+        # The order follows an on-site walk of the device: connect, check the server, browse,
+        # observe, act, verify/report. The write tab stays last before the long workflows.
         self.tabs.addTab(self.connection_tab, "Connection")
+        self.tabs.addTab(self.server_tab, "Server")
         self.tabs.addTab(self.browser_tab, "Address space")
-        self.tabs.addTab(self.export_tab, "Export")
         self.tabs.addTab(self.monitor_tab, "Live monitor")
+        self.tabs.addTab(self.events_tab, "Events")
+        self.tabs.addTab(self.history_tab, "History")
+        # Tab labels are drawn with Qt::TextShowMnemonic: '&&' is one literal '&'.
+        self.tabs.addTab(self.write_tab, "Write && call")
         self.tabs.addTab(self.tests_tab, "Tests")
         self.tabs.addTab(self.sequences_tab, "Sequences")
+        self.tabs.addTab(self.export_tab, "Export")
 
         self._wire()
 
@@ -110,6 +142,20 @@ class SessionWorkspace(QWidget):
     def server_text(self) -> str:
         return self._server_text
 
+    # -- page descriptions -------------------------------------------------
+    def set_verbose_notices(self, verbose: bool) -> None:
+        """Show every page description in full (View menu), or keep it to one line."""
+        self._verbose_notices = bool(verbose)
+        for index in range(self.tabs.count()):
+            apply_notices(self.tabs.widget(index), self._verbose_notices)
+
+    def step_page(self, step: int) -> None:
+        """Move to the next/previous page of this session, wrapping around."""
+        count = self.tabs.count()
+        if count < 2 or step == 0:
+            return
+        self.tabs.setCurrentIndex((self.tabs.currentIndex() + step) % count)
+
     def describe(self) -> str:
         """Tooltip text: endpoint, security, identity and session name."""
         info = self._connection
@@ -129,11 +175,16 @@ class SessionWorkspace(QWidget):
             name=(name or self._title).strip() or self._title,
             connection=self.connection_tab.connection_profile(),
             start_node_id=self.browser_tab.start_node(),
+            active_page=self.active_page(),
             export=self.export_tab.export_state(),
             monitor=self.monitor_tab.monitor_state(),
             tests=self.tests_tab.tests_state(),
             sequence=self.sequences_tab.sequence_state(),
         )
+
+    def active_page(self) -> str:
+        """Title of the visible page, i.e. what a project should reopen."""
+        return "" if self.tabs.count() == 0 else self.tabs.tabText(self.tabs.currentIndex())
 
     def apply_project_state(self, session: ProjectSession) -> None:
         """Restore a project session without connecting, subscribing or running anything."""
@@ -143,6 +194,18 @@ class SessionWorkspace(QWidget):
         self.monitor_tab.apply_monitor_state(session.monitor)
         self.tests_tab.apply_tests_state(session.tests)
         self.sequences_tab.apply_sequence_state(session.sequence)
+        self.show_page(session.active_page)
+
+    def show_page(self, title: str) -> bool:
+        """Select the page named ``title``; unknown or empty titles keep the current one."""
+        wanted = (title or "").strip()
+        if not wanted:
+            return False
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index).replace("&&", "&") == wanted.replace("&&", "&"):
+                self.tabs.setCurrentIndex(index)
+                return True
+        return False
 
     def set_project_title(self, title: str) -> None:
         """Use the project's own session name for the tab until a server name is known."""
@@ -161,11 +224,13 @@ class SessionWorkspace(QWidget):
         self.connection_tab.connection_restored.connect(self._on_connection_restored)
         self.browser_tab.download_requested.connect(self._on_download_requested)
         self.browser_tab.monitor_requested.connect(self._on_monitor_requested)
+        self.browser_tab.selection_changed.connect(self._on_selection_changed)
         self.export_tab.snapshot_ready.connect(self._on_snapshot_ready)
         self.export_tab.busy_changed.connect(self._on_export_busy)
         self.export_tab.export_finished.connect(self._report)
         self.tests_tab.report_ready.connect(self._report)
         self.sequences_tab.report_ready.connect(self._report)
+        self.events_tab.report_ready.connect(self._report)
         self.monitor_tab.items_changed.connect(self._on_monitored_items_changed)
 
     def _on_monitored_items_changed(self) -> None:
@@ -174,6 +239,10 @@ class SessionWorkspace(QWidget):
             self.monitor_tab.monitored_node_ids(),
             active=self.monitor_tab.is_running,
         )
+
+    def _on_selection_changed(self, _node_id: str) -> None:
+        """Every page's target marker re-checks itself when the selection moves."""
+        refresh_markers(self)
 
     def _set_state(self, state: str, chip_text: str, server_text: str | None = None) -> None:
         self._chip_state = state
@@ -192,14 +261,26 @@ class SessionWorkspace(QWidget):
         """Prefix operator-facing summaries with the session name."""
         self.report.emit(f"[{self._title}] {text}")
 
+    @property
+    def _session_tabs(self) -> tuple[Any, ...]:
+        """Every page that follows the connection state, in tab order."""
+        return (
+            self.browser_tab,
+            self.export_tab,
+            self.monitor_tab,
+            self.events_tab,
+            self.history_tab,
+            self.write_tab,
+            self.server_tab,
+            self.tests_tab,
+            self.sequences_tab,
+        )
+
     # -- connection state --------------------------------------------------
     def _on_connected(self, info: ConnectionInfo) -> None:
         self._connection = info
-        self.browser_tab.set_connected(True, info)
-        self.export_tab.set_connected(True)
-        self.monitor_tab.set_connected(True)
-        self.tests_tab.set_connected(True)
-        self.sequences_tab.set_connected(True)
+        for tab in self._session_tabs:
+            tab.set_connected(True, info)
         self.export_tab.refresh_namespaces()
 
         server = info.server_application_name or "server"
@@ -226,11 +307,8 @@ class SessionWorkspace(QWidget):
         self._report("Session closed.")
 
     def _set_tabs_connected(self, connected: bool) -> None:
-        self.browser_tab.set_connected(connected)
-        self.export_tab.set_connected(connected)
-        self.monitor_tab.set_connected(connected)
-        self.tests_tab.set_connected(connected)
-        self.sequences_tab.set_connected(connected)
+        for tab in self._session_tabs:
+            tab.set_connected(connected)
 
     def _on_connection_lost(self) -> None:
         """The session disappeared without the operator pressing Disconnect."""
@@ -266,6 +344,7 @@ class SessionWorkspace(QWidget):
         self._report("Connection restored automatically.")
         self.export_tab.refresh_namespaces()
         self.monitor_tab.resubscribe_after_reconnect()
+        self.events_tab.resubscribe_after_reconnect()
 
     # -- intra-session navigation -----------------------------------------
     def _on_download_requested(self, node_id: str) -> None:
@@ -292,6 +371,5 @@ class SessionWorkspace(QWidget):
     def shutdown(self) -> None:
         """Stop UI work for this session (the service is released by the shell)."""
         self.connection_tab.shutdown()
-        self.export_tab.shutdown()
-        self.monitor_tab.shutdown()
-        self.tests_tab.shutdown()
+        for tab in self._session_tabs:
+            tab.shutdown()

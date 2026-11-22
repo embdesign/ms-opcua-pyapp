@@ -6,10 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from opcua_explorer.models import AddressSpace, NodeRecord
 from opcua_explorer.opcua.nodeset2 import (
     NodeSet2Config,
     NodeSet2Result,
+    NodeSetDependencyCollector,
     ValidationResult,
+    _exporter_limitations,
     _inspect_nodeset,
     _structural_validation,
     _validate_schema,
@@ -196,6 +199,42 @@ def test_config_is_normalised_and_bounded():
 
 def test_negative_dependency_budget_is_clamped_to_zero():
     assert NodeSet2Config(max_dependency_nodes=-5).normalised().max_dependency_nodes == 0
+
+
+def test_collector_records_view_nodes_it_cannot_write():
+    snapshot = AddressSpace(
+        endpoint_url="opc.tcp://demo:4840",
+        nodes={
+            "ns=2;s=PlantView": NodeRecord(node_id="ns=2;s=PlantView", node_class="View"),
+            "ns=2;s=Plant": NodeRecord(node_id="ns=2;s=Plant", node_class="Object"),
+        },
+    )
+    collector = NodeSetDependencyCollector(None, None, snapshot, NodeSet2Config())
+
+    selected = collector._select_for_writing()  # noqa: SLF001 - the selection rule is the unit
+
+    assert selected == ["ns=2;s=Plant"]
+    assert collector.skipped_views == ["ns=2;s=PlantView"]
+
+
+def test_exporter_limitations_name_attributes_asyncua_cannot_write():
+    notes = _exporter_limitations({"Object"}, [])
+    text = " ".join(notes)
+    assert "WriteMask" in text and "UserWriteMask" in text
+    assert "AccessRestrictions" in text and "RolePermissions" in text
+    assert "Symmetric" not in text
+    assert "custom DataType" not in text
+    assert "View node(s)" not in text
+
+
+def test_exporter_limitations_cover_types_and_skipped_views():
+    notes = _exporter_limitations({"ReferenceType", "DataType"}, ["ns=2;s=PlantView"])
+    text = " ".join(notes)
+
+    assert "Symmetric" in text and "ReferenceType" in text
+    assert "IsAbstract is not written for custom DataType" in text
+    assert "1 View node(s) were not written" in text
+    assert "ParentNodeId" in text
 
 
 def test_validation_status_reflects_schema_outcome():

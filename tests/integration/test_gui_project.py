@@ -42,6 +42,7 @@ def test_project_file_roundtrips_configuration_without_secrets(qapp, tmp_path, m
                 batch_size=11,
                 max_references_per_node=7,
                 include_values=True,
+                include_description=False,
                 namespaces=[0, 2],
                 include_dependencies=False,
                 max_dependency_nodes=50,
@@ -96,6 +97,7 @@ def test_project_file_roundtrips_configuration_without_secrets(qapp, tmp_path, m
         assert first.export_tab.concurrency_spin.value() == 2
         assert first.export_tab.batch_size_spin.value() == 11
         assert first.export_tab.include_values_check.isChecked()
+        assert first.export_tab.include_description_check.isChecked() is False
         assert first.export_tab.dependencies_check.isChecked() is False
         assert first.export_tab.max_dependencies_spin.value() == 50
         assert first.export_tab.schema_edit.text() == "/tmp/nodeset.xsd"

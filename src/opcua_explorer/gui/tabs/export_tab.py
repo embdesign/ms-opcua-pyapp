@@ -31,7 +31,14 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppSettings
-from ...defaults import DEFAULT_MAX_DEPENDENCIES, DEFAULT_MAX_NODES
+from ...defaults import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_DEPENDENCIES,
+    DEFAULT_MAX_NODES,
+    MAX_TRAVERSAL_BATCH_SIZE,
+    MAX_TRAVERSAL_CONCURRENCY,
+)
 from ...errors import InvalidNodeIdError
 from ...exporters import export_csv, export_json
 from ...models import AddressSpace, NamespaceEntry, TraversalConfig, TraversalProgress
@@ -40,9 +47,23 @@ from ...opcua.client_service import OpcUaService
 from ...opcua.nodeset2 import NodeSet2Config, NodeSet2Result
 from ...project import ExportState
 from ..async_runner import AsyncRunner, TaskHandle
+from ..selection_marker import SelectionMarker
+from ..tab_notice import TabNotice
 from ..theme import mono_font
 
 _logger = logging.getLogger(__name__)
+
+#: What each output format carries beyond the snapshot itself. Shown in the
+#: "Export coverage" panel so the tab answers "is everything exported?".
+_FORMAT_NOTES = (
+    "JSON / CSV: contain exactly what the snapshot holds (values, descriptions and device attributes\n"
+    "             only when the download included them).\n"
+    "NodeSet2:    writes the downloaded nodes plus parents, type definitions, encodings and method\n"
+    "             arguments, reading each written node's attributes from the live session at export\n"
+    "             time. The XML exporter cannot write WriteMask/UserWriteMask, AccessRestrictions,\n"
+    "             RolePermissions/UserRolePermissions, Symmetric/IsAbstract of custom ReferenceTypes,\n"
+    "             IsAbstract of custom DataTypes or View nodes; every export lists what it omitted."
+)
 
 
 class ExportTab(QWidget):
@@ -64,6 +85,9 @@ class ExportTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._settings = settings
         #: Returns the NodeId selected in *this session's* browser tab.
         self._selection_provider = selection_provider
@@ -97,13 +121,13 @@ class ExportTab(QWidget):
         title = QLabel("Download & export")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Downloads are bounded and cancellable. Continuation points are released when possible, "
-            "including after cancellation."
+        layout.addWidget(
+            TabNotice(
+                "Bounded, cancellable downloads; continuation points are released, also after cancelling.",
+                "Downloads are bounded and cancellable. Continuation points are released when possible, "
+                "including after cancellation.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         scope_box = QGroupBox("Scope")
         scope_layout = QVBoxLayout(scope_box)
@@ -120,11 +144,13 @@ class ExportTab(QWidget):
         self.use_selection_btn.clicked.connect(self._on_use_selection)
         subtree_row.addWidget(self.subtree_edit, 1)
         subtree_row.addWidget(self.use_selection_btn)
+        subtree_row.addWidget(SelectionMarker(self.subtree_edit, self._selection_provider))
         scope_layout.addLayout(subtree_row)
         self.subtree_radio.toggled.connect(self._sync_scope)
         layout.addWidget(scope_box)
 
-        limits_box = QGroupBox("Limits & batching")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        limits_box = QGroupBox("Limits && batching")
         limits_layout = QFormLayout(limits_box)
         self.max_nodes_spin = QSpinBox()
         self.max_nodes_spin.setRange(0, 1_000_000)
@@ -135,11 +161,11 @@ class ExportTab(QWidget):
         self.max_depth_spin.setValue(0)
         self.max_depth_spin.setSpecialValueText("unlimited")
         self.concurrency_spin = QSpinBox()
-        self.concurrency_spin.setRange(1, 32)
-        self.concurrency_spin.setValue(4)
+        self.concurrency_spin.setRange(1, MAX_TRAVERSAL_CONCURRENCY)
+        self.concurrency_spin.setValue(DEFAULT_CONCURRENCY)
         self.batch_size_spin = QSpinBox()
-        self.batch_size_spin.setRange(1, 500)
-        self.batch_size_spin.setValue(50)
+        self.batch_size_spin.setRange(1, MAX_TRAVERSAL_BATCH_SIZE)
+        self.batch_size_spin.setValue(DEFAULT_BATCH_SIZE)
         self.max_refs_spin = QSpinBox()
         self.max_refs_spin.setRange(0, 100_000)
         self.max_refs_spin.setValue(0)
@@ -179,18 +205,34 @@ class ExportTab(QWidget):
         namespaces_layout.addLayout(buttons)
         layout.addWidget(namespaces_box)
 
-        values_box = QGroupBox("Variable values")
-        values_layout = QVBoxLayout(values_box)
+        content_box = QGroupBox("Export content")
+        content_layout = QVBoxLayout(content_box)
         self.include_values_check = QCheckBox("Include variable values (Value, SourceTimestamp, ServerTimestamp)")
-        values_layout.addWidget(self.include_values_check)
-        values_warning = QLabel(
-            "Off by default. Enabling values makes the export larger and reads live data from the process; "
-            "unsupported encodings are flagged rather than silently dropped."
+        content_layout.addWidget(self.include_values_check)
+        self.include_description_check = QCheckBox("Include node descriptions (Description attribute)")
+        self.include_description_check.setChecked(True)
+        content_layout.addWidget(self.include_description_check)
+        self.include_device_attributes_check = QCheckBox(
+            "Include device attributes (write masks, historizing, sampling interval, …)"
         )
-        values_warning.setObjectName("hintLabel")
-        values_warning.setWordWrap(True)
-        values_layout.addWidget(values_warning)
-        layout.addWidget(values_box)
+        self.include_device_attributes_check.setToolTip(
+            "Reads the attributes that are not part of the data model, so two devices can be compared "
+            "on them (Compare tolerance 'device'). It multiplies the attribute reads of every node."
+        )
+        content_layout.addWidget(self.include_device_attributes_check)
+        content_hint = QLabel(
+            "Values are off by default: enabling them makes the export larger and reads live data from the "
+            "process; unsupported encodings are flagged, never silently dropped. JSON/CSV contain exactly "
+            "what the download collected, while NodeSet2 reads the written nodes' attributes from the live "
+            "session at export time. Standard attributes that only the Address space panel shows (event "
+            "notifier, write/role masks, historizing, sampling interval, abstract/symmetric/inverse name, "
+            "data type definition, access restrictions, executable) are never part of a snapshot - see "
+            "Export coverage."
+        )
+        content_hint.setObjectName("hintLabel")
+        content_hint.setWordWrap(True)
+        content_layout.addWidget(content_hint)
+        layout.addWidget(content_box)
 
         nodeset_box = QGroupBox("NodeSet2 XML")
         nodeset_layout = QFormLayout(nodeset_box)
@@ -278,6 +320,19 @@ class ExportTab(QWidget):
         progress_layout.addWidget(self.counters_label)
         layout.addWidget(progress_box, 0)
 
+        coverage_box = QGroupBox("Export coverage")
+        coverage_layout = QVBoxLayout(coverage_box)
+        self.coverage_view = QPlainTextEdit()
+        self.coverage_view.setObjectName("coverage")
+        self.coverage_view.setReadOnly(True)
+        self.coverage_view.setFont(mono_font(9))
+        self.coverage_view.setPlaceholderText(
+            "Download an address space to see exactly what the snapshot contains and what the exporters "
+            "can and cannot carry."
+        )
+        coverage_layout.addWidget(self.coverage_view, 1)
+        layout.addWidget(coverage_box, 1)
+
         summary_box = QGroupBox("Export summary")
         summary_layout = QVBoxLayout(summary_box)
         self.summary_view = QPlainTextEdit()
@@ -290,7 +345,10 @@ class ExportTab(QWidget):
         return container
 
     # -- state -------------------------------------------------------------
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self.download_btn.setEnabled(connected)
         if not connected:
             self._set_busy(False)
@@ -313,7 +371,7 @@ class ExportTab(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
 
     def _refresh_namespaces(self) -> None:
-        if not self._service.is_connected:
+        if not self._connected:
             return
         self.status_label.setText("Reading the namespace array…")
         self._runner.submit(
@@ -373,6 +431,8 @@ class ExportTab(QWidget):
             batch_size=self.batch_size_spin.value(),
             max_references_per_node=self.max_refs_spin.value(),
             include_values=self.include_values_check.isChecked(),
+            include_description=self.include_description_check.isChecked(),
+            include_device_attributes=self.include_device_attributes_check.isChecked(),
             namespaces=namespaces,
             include_dependencies=self.dependencies_check.isChecked(),
             max_dependency_nodes=self.max_dependencies_spin.value(),
@@ -392,6 +452,8 @@ class ExportTab(QWidget):
         self.batch_size_spin.setValue(int(state.batch_size))
         self.max_refs_spin.setValue(int(state.max_references_per_node))
         self.include_values_check.setChecked(bool(state.include_values))
+        self.include_description_check.setChecked(bool(state.include_description))
+        self.include_device_attributes_check.setChecked(bool(state.include_device_attributes))
         self.dependencies_check.setChecked(bool(state.include_dependencies))
         self.max_dependencies_spin.setValue(int(state.max_dependency_nodes))
         self.schema_edit.setText(state.schema_path or "")
@@ -421,6 +483,8 @@ class ExportTab(QWidget):
             max_references_per_node=self.max_refs_spin.value(),
             namespace_filter=namespace_filter,
             include_values=self.include_values_check.isChecked(),
+            include_description=self.include_description_check.isChecked(),
+            include_device_attributes=self.include_device_attributes_check.isChecked(),
         )
 
     def _roots(self) -> list[str] | None:
@@ -446,6 +510,7 @@ class ExportTab(QWidget):
         self._set_busy(True)
         self.status_label.setText("Preparing download…")
         self.summary_view.clear()
+        self.coverage_view.clear()
 
         key = self._runner.new_key()
         progress_callback = self._runner.progress_callback(key)
@@ -476,6 +541,7 @@ class ExportTab(QWidget):
             "Download cancelled (partial snapshot)." if snapshot.cancelled else "Download complete."
         )
         self.summary_view.setPlainText(snapshot.summary_text())
+        self.coverage_view.setPlainText(snapshot.coverage_text() + "\n\n" + _FORMAT_NOTES)
         self.snapshot_ready.emit(snapshot)
         self.export_finished.emit(
             f"Download from {snapshot.endpoint_url}: {len(snapshot.nodes)} node(s), "
@@ -615,7 +681,7 @@ class ExportTab(QWidget):
 
     # -- helpers -----------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
-        self.download_btn.setEnabled(not busy and self._service.is_connected)
+        self.download_btn.setEnabled(not busy and self._connected)
         self.cancel_btn.setEnabled(busy)
         self.export_json_btn.setEnabled(not busy and self._snapshot is not None)
         self.export_csv_btn.setEnabled(not busy and self._snapshot is not None)

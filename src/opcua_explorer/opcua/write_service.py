@@ -1,17 +1,22 @@
-"""One place that performs a single variable write or a single method call.
+"""One place that performs a single variable write, a single method call or a single restore.
 
 The guarded test checks and the universal sequence runner share these primitives so that a
-write is always: server DataType -> parse -> **one** write -> read-back compare, and a call is
-always: ``InputArguments`` -> parse -> ``Executable`` -> **one** call.
+write is always: server DataType -> parse -> **one** write -> read-back compare, a call is
+always: ``InputArguments`` -> parse -> ``Executable`` -> **one** call, and a restore is one more
+write of the value that was read before, verified the same way.
 
-Nothing here discovers targets, scans, batches, retries or restores. A cancelled write or call
-reports whether it had already been sent, so a caller can never present an unknown effect as a
-plain failure.
+Every send states its authority (``models.WriteAuthority``): a caller cannot send without saying
+whether an operator dialog or an operator-written sequence document asked for it.
+
+Nothing here discovers targets, scans, batches, retries or restores on its own. A cancelled
+write or call reports whether it had already been sent, so a caller can never present an unknown
+effect as a plain failure.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,10 +24,13 @@ from typing import Any
 from asyncua import ua
 
 from ..models import (
+    CONDITION_REFRESH_METHOD_ID,
+    CONDITION_TYPE_NODE_ID,
     STATUS_FAILED,
     STATUS_OUTCOME_UNKNOWN,
     STATUS_PASSED,
     STATUS_SKIPPED,
+    WriteAuthority,
 )
 from . import type_support
 from .check_support import preview_value
@@ -81,6 +89,251 @@ class WriteOutcome:
     write_status_code: str = ""
     sent: bool = False
     duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
+
+
+@dataclass(slots=True)
+class RestoreOutcome:
+    """Result of one restore write: the value that was written back and its read-back."""
+
+    node_id: str
+    status: str = STATUS_FAILED
+    detail: str = ""
+    written_value: str = ""
+    read_back_value: str = ""
+    read_back_status_code: str = ""
+    sent: bool = False
+    duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
+
+
+@dataclass(slots=True)
+class WriteResult:
+    """One operator-requested write: the write itself plus an optional explicit restore.
+
+    The restore is a separate, equally single and verified write (``restore_value``);
+    it never happens unless the caller asked for it.
+    """
+
+    write: WriteOutcome
+    restore: RestoreOutcome | None = None
+
+    @property
+    def status(self) -> str:
+        if self.restore is None or self.write.status != STATUS_PASSED:
+            return self.write.status
+        return self.restore.status
+
+    def summary_text(self) -> str:
+        parts = [self.write.detail or self.write.status]
+        if self.restore is not None:
+            parts.append(self.restore.detail or self.restore.status)
+        return " ".join(part for part in parts if part)
+
+
+#: The only non-Value attributes this module writes (text metadata, not process data).
+TEXT_ATTRIBUTES: dict[str, ua.AttributeIds] = {
+    "DisplayName": ua.AttributeIds.DisplayName,
+    "Description": ua.AttributeIds.Description,
+}
+
+#: Case-insensitive lookup, keeping the canonical OPC UA attribute name.
+_TEXT_ATTRIBUTES_BY_LOWER = {name.lower(): (name, attribute_id) for name, attribute_id in TEXT_ATTRIBUTES.items()}
+
+
+@dataclass(slots=True)
+class PreparedAttributeWrite:
+    """A validated DisplayName/Description write for one node."""
+
+    node: Any
+    node_id: str
+    attribute_name: str
+    attribute_id: ua.AttributeIds
+    text: str
+    locale: str | None = None
+    previous_text: str = ""
+
+
+@dataclass(slots=True)
+class AttributeWriteOutcome:
+    """Result of one attribute write, including the read-back that proves it."""
+
+    node_id: str
+    attribute_name: str
+    status: str = STATUS_FAILED
+    detail: str = ""
+    text: str = ""
+    previous_text: str = ""
+    write_status_code: str = ""
+    read_back_text: str = ""
+    read_back_status_code: str = ""
+    sent: bool = False
+    duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
+
+    def summary_text(self) -> str:
+        head = f"Write {self.attribute_name} on {self.node_id}"
+        return f"{head}: {self.detail or self.status}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "attribute_name": self.attribute_name,
+            "status": self.status,
+            "detail": self.detail,
+            "text": self.text,
+            "previous_text": self.previous_text,
+            "write_status_code": self.write_status_code,
+            "read_back_text": self.read_back_text,
+            "read_back_status_code": self.read_back_status_code,
+            "sent": self.sent,
+            "duration_ms": round(self.duration_ms, 3),
+            "authorization": self.authorization.describe() if self.authorization else "",
+        }
+
+
+def _localized_text(data_value: ua.DataValue) -> str:
+    """Plain text of a LocalizedText DataValue (empty when it carries none)."""
+    variant = data_value.Value
+    raw = variant.Value if isinstance(variant, ua.Variant) else variant
+    if isinstance(raw, ua.LocalizedText):
+        return raw.Text or ""
+    return "" if raw is None else str(raw)
+
+
+async def prepare_attribute_write(
+    client: Any, node_id: str, attribute_name: str, text: str
+) -> PreparedAttributeWrite:
+    """Validate one DisplayName/Description write without sending it."""
+    name = (attribute_name or "").strip()
+    entry = _TEXT_ATTRIBUTES_BY_LOWER.get(name.lower())
+    if entry is None:
+        allowed = ", ".join(TEXT_ATTRIBUTES)
+        raise PrepareError(f"{attribute_name!r} is not a writable text attribute here ({allowed}).")
+    canonical_name, attribute_id = entry
+    if not (text or "").strip():
+        raise PrepareError("The attribute text is empty; nothing was written.")
+    node = client.get_node(node_id)
+    try:
+        await node.read_node_class()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        raise PrepareError(f"{node_id} could not be read: {type(exc).__name__}: {exc}") from exc
+    previous_text = "unreadable"
+    try:
+        previous = await node.read_attribute(attribute_id, raise_on_bad_status=False)
+        if previous.StatusCode is None or previous.StatusCode.is_good():
+            previous_text = _localized_text(previous)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        previous_text = "unreadable"
+    return PreparedAttributeWrite(
+        node=node,
+        node_id=node_id,
+        attribute_name=canonical_name,
+        attribute_id=attribute_id,
+        text=text.strip(),
+        previous_text=previous_text,
+    )
+
+
+async def send_prepared_attribute_write(
+    prepared: PreparedAttributeWrite, *, authorization: WriteAuthority
+) -> AttributeWriteOutcome:
+    """Send exactly one attribute write, then read the attribute back."""
+    outcome = AttributeWriteOutcome(
+        node_id=prepared.node_id,
+        attribute_name=prepared.attribute_name,
+        text=prepared.text,
+        previous_text=prepared.previous_text,
+        authorization=authorization,
+    )
+    started = time.perf_counter()
+    localized = ua.LocalizedText(Text=prepared.text, Locale=prepared.locale)
+    data_value = ua.DataValue(ua.Variant(localized, ua.VariantType.LocalizedText))
+    try:
+        await prepared.node.write_attribute(prepared.attribute_id, data_value)
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        outcome.sent = True
+        outcome.write_status_code = status_name(exc.code)
+        outcome.detail = (
+            f"Writing {prepared.attribute_name} of {prepared.node_id} returned "
+            f"{outcome.write_status_code}."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = (
+            f"Writing {prepared.attribute_name} of {prepared.node_id} failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    outcome.sent = True
+    outcome.write_status_code = "Good"
+
+    try:
+        read_back = await prepared.node.read_attribute(prepared.attribute_id, raise_on_bad_status=False)
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except Exception as exc:
+        outcome.status = STATUS_OUTCOME_UNKNOWN
+        outcome.detail = (
+            f"The {prepared.attribute_name} was written but could not be read back: "
+            f"{type(exc).__name__}: {exc}. The effect on the server is unknown."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+
+    good = read_back.StatusCode is None or read_back.StatusCode.is_good()
+    outcome.read_back_status_code = status_name(read_back.StatusCode) if read_back.StatusCode else "Good"
+    outcome.read_back_text = _localized_text(read_back) if good else "unreadable"
+    if not good:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"{prepared.attribute_name} was written but reading it back returned "
+            f"{outcome.read_back_status_code}."
+        )
+    elif outcome.read_back_text != prepared.text:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"Read-back {outcome.read_back_text!r} differs from the written "
+            f"{prepared.attribute_name} {prepared.text!r}."
+        )
+    else:
+        outcome.status = STATUS_PASSED
+        outcome.detail = (
+            f"Wrote {prepared.attribute_name} {prepared.text!r} to {prepared.node_id} and read it back."
+        )
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
+
+
+async def write_attribute_value(
+    client: Any,
+    node_id: str,
+    attribute_name: str,
+    text: str,
+    *,
+    authorization: WriteAuthority,
+) -> AttributeWriteOutcome:
+    """Prepare and send one DisplayName/Description write; exactly once."""
+    try:
+        prepared = await prepare_attribute_write(client, node_id, attribute_name, text)
+    except PrepareError as exc:
+        return AttributeWriteOutcome(
+            node_id=node_id,
+            attribute_name=attribute_name,
+            status=STATUS_SKIPPED,
+            detail=str(exc),
+            authorization=authorization,
+        )
+    return await send_prepared_attribute_write(prepared, authorization=authorization)
 
 
 @dataclass(slots=True)
@@ -107,9 +360,12 @@ class CallOutcome:
     detail: str = ""
     arguments: list[str] = field(default_factory=list)
     output: str = ""
+    #: Raw output values (asyncua returns a list of Variants).
+    output_values: list[Any] = field(default_factory=list)
     status_code: str = ""
     sent: bool = False
     duration_ms: float = 0.0
+    authorization: WriteAuthority | None = None
 
 
 @dataclass(slots=True)
@@ -119,6 +375,8 @@ class Inspection:
     ok: bool
     detail: str
     preview: str = ""
+    data_type_label: str = ""
+    value_rank: int = 0
 
 
 async def prepare_write(client: Any, node_id: str, value_text: str) -> PreparedWrite:
@@ -170,6 +428,8 @@ async def inspect_write(client: Any, node_id: str, value_text: str) -> Inspectio
             f"({label}, ValueRank {prepared.value_rank}) and read it back"
         ),
         preview=preview,
+        data_type_label=label,
+        value_rank=int(prepared.value_rank),
     )
 
 
@@ -191,10 +451,15 @@ async def _read_previous(node: Any, outcome: WriteOutcome) -> Any:
     return None
 
 
-async def send_prepared_write(prepared: PreparedWrite, *, verify: bool = True) -> WriteOutcome:
+async def send_prepared_write(
+    prepared: PreparedWrite,
+    *,
+    authorization: WriteAuthority,
+    verify: bool = True,
+) -> WriteOutcome:
     """Send exactly one prepared write, then read it back unless ``verify`` is false."""
     node_id = prepared.node_id
-    outcome = WriteOutcome(node_id=node_id)
+    outcome = WriteOutcome(node_id=node_id, authorization=authorization)
     started = time.perf_counter()
     outcome.new_value = preview_value(prepared.parsed)
     await _read_previous(prepared.node, outcome)
@@ -255,13 +520,119 @@ async def send_prepared_write(prepared: PreparedWrite, *, verify: bool = True) -
     return outcome
 
 
-async def write_variable(client: Any, node_id: str, value_text: str, *, verify: bool = True) -> WriteOutcome:
+async def write_variable(
+    client: Any,
+    node_id: str,
+    value_text: str,
+    *,
+    authorization: WriteAuthority,
+    verify: bool = True,
+) -> WriteOutcome:
     """Prepare and send one write to one variable; the only write path in the application."""
     try:
         prepared = await prepare_write(client, node_id, value_text)
     except PrepareError as exc:
-        return WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc))
-    return await send_prepared_write(prepared, verify=verify)
+        return WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc), authorization=authorization)
+    return await send_prepared_write(prepared, authorization=authorization, verify=verify)
+
+
+async def restore_value(
+    prepared: PreparedWrite,
+    previous: Any,
+    *,
+    authorization: WriteAuthority,
+) -> RestoreOutcome:
+    """Write back one previously read value: exactly one write, then a read-back compare.
+
+    This is the only restore path; it exists so an optional "restore the previous value" is the
+    same single, typed and verified write as any other, never a second implementation.
+    """
+    outcome = RestoreOutcome(node_id=prepared.node_id, authorization=authorization)
+    outcome.written_value = preview_value(previous)
+    started = time.perf_counter()
+    try:
+        await prepared.node.write_value(ua.DataValue(ua.Variant(previous, prepared.variant_type)))
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        outcome.sent = True
+        outcome.detail = f"Restoring {prepared.node_id} returned {status_name(exc.code)}."
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = f"Restoring {prepared.node_id} failed: {type(exc).__name__}: {exc}"
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+    outcome.sent = True
+
+    try:
+        read_back = await prepared.node.read_data_value()
+    except asyncio.CancelledError:
+        raise WriteCancelled(sent=True) from None
+    except Exception as exc:
+        outcome.status = STATUS_OUTCOME_UNKNOWN
+        outcome.detail = (
+            f"The value was written back but could not be read back: {type(exc).__name__}: {exc}. "
+            "The effect on the server is unknown."
+        )
+        outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+        return outcome
+
+    outcome.read_back_status_code = status_name(read_back.StatusCode)
+    outcome.read_back_value = (
+        preview_value(read_back.Value.Value) if read_back.StatusCode.is_good() else "unreadable"
+    )
+    if not read_back.StatusCode.is_good():
+        outcome.status = STATUS_FAILED
+        outcome.detail = f"Restore of {prepared.node_id} was written but reading it back returned {outcome.read_back_status_code}."
+    elif outcome.read_back_value != outcome.written_value:
+        outcome.status = STATUS_FAILED
+        outcome.detail = (
+            f"Restore of {prepared.node_id} read back {outcome.read_back_value}, "
+            f"which differs from {outcome.written_value}."
+        )
+    else:
+        outcome.status = STATUS_PASSED
+        outcome.detail = f"Restored {prepared.node_id} to {outcome.written_value} and read it back."
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
+
+
+async def write_and_restore(
+    client: Any,
+    node_id: str,
+    value_text: str,
+    *,
+    authorization: WriteAuthority,
+    restore_previous: bool = False,
+) -> WriteResult:
+    """Prepare and send one write, optionally restoring the value that was read first.
+
+    This is the interactive path (an operator typed the value in a dialog).
+    It sends exactly one write, reads it back, and - only when asked - one
+    restore write of the previously read value.
+    """
+    try:
+        prepared = await prepare_write(client, node_id, value_text)
+    except PrepareError as exc:
+        return WriteResult(
+            WriteOutcome(node_id=node_id, status=STATUS_SKIPPED, detail=str(exc), authorization=authorization)
+        )
+    outcome = await send_prepared_write(prepared, authorization=authorization)
+    result = WriteResult(outcome)
+    if not restore_previous:
+        return result
+    if not outcome.sent or not outcome.previous_known:
+        result.restore = RestoreOutcome(
+            node_id=node_id,
+            status=STATUS_SKIPPED,
+            detail="The previous value could not be read, so nothing was restored.",
+            authorization=authorization,
+        )
+        return result
+    result.restore = await restore_value(prepared, outcome.previous_raw, authorization=authorization)
+    return result
 
 
 async def resolve_method_node_id(client: Any, object_node_id: str, method_node_id: str, method_name: str) -> str:
@@ -282,6 +653,30 @@ async def resolve_method_node_id(client: Any, object_node_id: str, method_node_i
     return str(method_node.nodeid.to_string())
 
 
+def _signature_row(argument: Any) -> dict[str, Any]:
+    """One ``InputArguments`` entry as a plain row for confirmation and display."""
+    description = getattr(argument, "Description", None)
+    description_text = (
+        (description.Text or "") if isinstance(description, ua.LocalizedText) else str(description or "")
+    )
+    return {
+        "name": argument.Name or "",
+        "data_type": argument.DataType.to_string(),
+        "data_type_name": describe_data_type(argument.DataType),
+        "value_rank": int(argument.ValueRank),
+        "description": description_text,
+    }
+
+
+async def read_method_signature(client: Any, method_node_id: str) -> list[dict[str, Any]]:
+    """``InputArguments`` of one method as plain rows; nothing is called."""
+    try:
+        arguments = await read_input_arguments(client, method_node_id)
+    except MetadataUnavailable as exc:
+        raise PrepareError(str(exc)) from exc
+    return [_signature_row(argument) for argument in arguments]
+
+
 async def prepare_call(
     client: Any,
     object_node_id: str,
@@ -294,15 +689,7 @@ async def prepare_call(
     except MetadataUnavailable as exc:
         raise PrepareError(str(exc)) from exc
 
-    signature = [
-        {
-            "name": argument.Name,
-            "data_type": argument.DataType.to_string(),
-            "data_type_name": describe_data_type(argument.DataType),
-            "value_rank": int(argument.ValueRank),
-        }
-        for argument in arguments
-    ]
+    signature = [_signature_row(argument) for argument in arguments]
 
     if len(argument_texts) != len(arguments):
         rendered = ", ".join(
@@ -373,9 +760,13 @@ async def inspect_call(
     )
 
 
-async def send_prepared_call(prepared: PreparedCall) -> CallOutcome:
+async def send_prepared_call(prepared: PreparedCall, *, authorization: WriteAuthority) -> CallOutcome:
     """Send exactly one prepared method call."""
-    outcome = CallOutcome(object_node_id=prepared.object_node_id, method_node_id=prepared.method_node_id)
+    outcome = CallOutcome(
+        object_node_id=prepared.object_node_id,
+        method_node_id=prepared.method_node_id,
+        authorization=authorization,
+    )
     outcome.arguments = list(prepared.previews)
     started = time.perf_counter()
     try:
@@ -397,6 +788,14 @@ async def send_prepared_call(prepared: PreparedCall) -> CallOutcome:
         return outcome
     outcome.sent = True
     outcome.status = STATUS_PASSED
+    outcome.status_code = "Good"
+    # asyncua unwraps a single output argument; multi-output methods return a list.
+    if result is None:
+        outcome.output_values = []
+    elif isinstance(result, (list, tuple)):
+        outcome.output_values = list(result)
+    else:
+        outcome.output_values = [result]
     outcome.output = preview_value(result) if result is not None else "no output arguments"
     rendered = ", ".join(prepared.previews) if prepared.previews else "no arguments"
     outcome.detail = (
@@ -407,18 +806,181 @@ async def send_prepared_call(prepared: PreparedCall) -> CallOutcome:
     return outcome
 
 
+async def refresh_conditions(
+    client: Any,
+    subscription_id: int,
+    *,
+    object_node_id: str = "",
+    authorization: WriteAuthority,
+) -> CallOutcome:
+    """Ask the server to re-publish the retained Conditions of one subscription.
+
+    One ``ConditionRefresh`` method call with the SubscriptionId as its only
+    input, sent exactly once. It stores nothing, acknowledges nothing and
+    interrupts nothing, so no confirmation dialog is involved; the authority is
+    still recorded. ``object_node_id`` defaults to the object that owns the
+    method in the standard address space (the ConditionType, ``i=2782``); a
+    server that requires another parent answers with its StatusCode, which is
+    reported verbatim and never retried.
+    """
+    method = ua.NodeId.from_string(CONDITION_REFRESH_METHOD_ID)
+    parent = ua.NodeId.from_string(object_node_id) if object_node_id else ua.NodeId.from_string(
+        CONDITION_TYPE_NODE_ID
+    )
+    outcome = CallOutcome(
+        object_node_id=parent.to_string(),
+        method_node_id=method.to_string(),
+        authorization=authorization,
+    )
+    try:
+        wanted = int(subscription_id)
+    except (TypeError, ValueError):
+        wanted = 0
+    if wanted <= 0:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = "No subscription id is available; ConditionRefresh was not called."
+        return outcome
+
+    outcome.arguments = [f"SubscriptionId={wanted}"]
+    started = time.perf_counter()
+    try:
+        result = await client.get_node(parent).call_method(
+            method, ua.Variant(wanted, ua.VariantType.UInt32)
+        )
+    except asyncio.CancelledError:
+        raise CallCancelled(sent=True) from None
+    except ua.UaStatusCodeError as exc:
+        # The server answered, so the request did leave; it just refused it.
+        outcome.sent = True
+        outcome.status_code = status_name(exc.code)
+        outcome.detail = (
+            f"ConditionRefresh on subscription {wanted} via {outcome.object_node_id} "
+            f"returned {outcome.status_code}; the server refused the request."
+        )
+    except Exception as exc:
+        outcome.sent = True
+        outcome.detail = f"ConditionRefresh on subscription {wanted} failed: {type(exc).__name__}: {exc}"
+    else:
+        outcome.sent = True
+        code = result if isinstance(result, ua.StatusCode) else None
+        if code is not None and not code.is_good():
+            outcome.status_code = status_name(code)
+            outcome.detail = (
+                f"ConditionRefresh on subscription {wanted} returned {outcome.status_code}; "
+                "the server refused the request."
+            )
+        else:
+            outcome.status = STATUS_PASSED
+            outcome.status_code = "Good"
+            outcome.output = "no output arguments"
+            outcome.detail = (
+                f"Called {outcome.method_node_id} on {outcome.object_node_id} for subscription {wanted}."
+            )
+    outcome.duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    return outcome
+
+
 async def call_method(
     client: Any,
     object_node_id: str,
     method_node_id: str,
     argument_texts: list[str],
+    *,
+    authorization: WriteAuthority,
 ) -> CallOutcome:
     """Prepare and send one method call on one object node; exactly once."""
     try:
         prepared = await prepare_call(client, object_node_id, method_node_id, argument_texts)
     except PrepareError as exc:
-        return CallOutcome(object_node_id=object_node_id, method_node_id=method_node_id, status=STATUS_SKIPPED, detail=str(exc))
-    return await send_prepared_call(prepared)
+        return CallOutcome(
+            object_node_id=object_node_id,
+            method_node_id=method_node_id,
+            status=STATUS_SKIPPED,
+            detail=str(exc),
+            authorization=authorization,
+        )
+    return await send_prepared_call(prepared, authorization=authorization)
+
+
+#: Browse name of the A&C method this module calls; nothing else is ever invoked.
+ACKNOWLEDGE_METHOD_NAME = "Acknowledge"
+
+
+async def acknowledge_condition(
+    client: Any,
+    condition_node_id: str,
+    event_id: bytes,
+    comment: str,
+    *,
+    authorization: WriteAuthority,
+) -> CallOutcome:
+    """Acknowledge one condition event: one ``Acknowledge`` call, exactly once.
+
+    The method is resolved below the condition node by browse name and its
+    ``InputArguments`` must be ``ByteString`` (EventId) and ``LocalizedText``
+    (Comment) - the A&C definition. When either does not hold, nothing is sent.
+    No retry, no ``Confirm``, no comment synthesis.
+    """
+    outcome = CallOutcome(
+        object_node_id=condition_node_id, method_node_id="", authorization=authorization
+    )
+    if not event_id:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = "The event has no EventId; nothing was called."
+        return outcome
+
+    try:
+        method_node_id = await resolve_method_node_id(
+            client, condition_node_id, "", ACKNOWLEDGE_METHOD_NAME
+        )
+    except PrepareError as exc:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = str(exc)
+        return outcome
+    outcome.method_node_id = method_node_id
+
+    try:
+        prepared = await prepare_call(
+            client,
+            condition_node_id,
+            method_node_id,
+            [base64.b64encode(event_id).decode("ascii"), comment],
+        )
+    except PrepareError as exc:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = str(exc)
+        return outcome
+
+    expected = [
+        ua.NodeId(ua.ObjectIds.ByteString).to_string(),
+        ua.NodeId(ua.ObjectIds.LocalizedText).to_string(),
+    ]
+    actual = [str(entry.get("data_type") or "") for entry in prepared.signature]
+    if actual != expected:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = (
+            f"{condition_node_id} exposes {method_node_id} but its arguments are {actual or 'none'}; "
+            "an Acknowledge method takes EventId (ByteString) and Comment (LocalizedText). "
+            "The method was not called."
+        )
+        return outcome
+
+    outcome = await send_prepared_call(prepared, authorization=authorization)
+    # Acknowledge reports its own result as an output StatusCode: a Good service
+    # result does not mean the acknowledgement was accepted.
+    if outcome.status == STATUS_PASSED and outcome.output_values:
+        code = outcome.output_values[0]
+        if isinstance(code, ua.Variant):
+            code = code.Value
+        if isinstance(code, ua.StatusCode) and not code.is_good():
+            name = status_name(code)
+            outcome.status = STATUS_FAILED
+            outcome.status_code = name
+            outcome.detail = (
+                f"The server returned {name} from Acknowledge on {condition_node_id}; "
+                "the acknowledgement was not accepted."
+            )
+    return outcome
 
 
 __all__ = [
@@ -428,14 +990,18 @@ __all__ = [
     "PrepareError",
     "PreparedCall",
     "PreparedWrite",
+    "RestoreOutcome",
     "WriteCancelled",
     "WriteOutcome",
+    "acknowledge_condition",
     "call_method",
     "inspect_call",
     "inspect_write",
     "prepare_call",
     "prepare_write",
+    "refresh_conditions",
     "resolve_method_node_id",
+    "restore_value",
     "send_prepared_call",
     "send_prepared_write",
     "write_variable",

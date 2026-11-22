@@ -16,20 +16,33 @@ from typing import Any
 
 from asyncua import ua
 
-from ..models import STATUS_PASSED, MethodCallTarget, TestCheck, TestConfig, WriteTarget
+from ..models import (
+    AUTHORITY_OPERATOR_DIALOG,
+    STATUS_OUTCOME_UNKNOWN,
+    STATUS_PASSED,
+    MethodCallTarget,
+    TestCheck,
+    TestConfig,
+    WriteAuthority,
+    WriteTarget,
+)
 from . import write_service
 from .check_support import CheckSkipped, mark_failed, mark_passed, preview_value
 from .ua_names import node_class_name, status_name
 from .value_parsing import describe_data_type
 
 
-def require_writes_allowed(config: TestConfig, check: TestCheck) -> None:
+def require_writes_allowed(config: TestConfig, check: TestCheck) -> WriteAuthority:
+    """Refuse unless writes are enabled; return the authority the operator dialog grants."""
     if not config.allow_writes:
         raise CheckSkipped(
             "Writes and method calls are disabled. Enable 'allow guarded write / method-call tests' and "
             "confirm the target before running."
         )
     check.data["confirmed_by_operator"] = True
+    authorization = WriteAuthority(AUTHORITY_OPERATOR_DIALOG, check.id)
+    check.data["authorization"] = authorization.describe()
+    return authorization
 
 
 async def _restore_previous_value(
@@ -37,6 +50,7 @@ async def _restore_previous_value(
     outcome: Any,
     check: TestCheck,
     target: WriteTarget,
+    authorization: WriteAuthority,
 ) -> tuple[str | None, bool]:
     """Restore exactly what was read before the write, only when the operator asked for it."""
     restored: str | None = None
@@ -45,22 +59,23 @@ async def _restore_previous_value(
         if not outcome.previous_known:
             restored = "not restored: the previous value could not be read"
         else:
-            previous = outcome.previous_raw
             try:
-                await prepared.node.write_value(ua.DataValue(ua.Variant(previous, prepared.variant_type)))
-                verify = await prepared.node.read_data_value()
-                if verify.StatusCode.is_good() and preview_value(verify.Value.Value) == preview_value(previous):
-                    restored = f"restored to {preview_value(previous)}"
-                    check.add_status("Restore", "Good", node_id=prepared.node_id)
-                else:
-                    restored = "restore could not be verified"
-                    restore_failed = True
-                    check.add_status("Restore", status_name(verify.StatusCode), node_id=prepared.node_id)
+                restore = await write_service.restore_value(
+                    prepared, outcome.previous_raw, authorization=authorization
+                )
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                restored = f"restore failed: {type(exc).__name__}: {exc}"
+            if restore.status == STATUS_PASSED:
+                restored = f"restored to {restore.written_value}"
+                check.add_status("Restore", "Good", node_id=prepared.node_id)
+            elif restore.status == STATUS_OUTCOME_UNKNOWN:
+                restored = f"restore effect unknown: {restore.detail}"
                 restore_failed = True
+                check.add_status("Restore", "unknown", node_id=prepared.node_id)
+            else:
+                restored = f"restore failed: {restore.detail}"
+                restore_failed = True
+                check.add_status("Restore", restore.read_back_status_code or "unknown", node_id=prepared.node_id)
     elif outcome.previous_known:
         restored = "not restored (restore was not requested)"
     check.data["restore"] = restored
@@ -83,7 +98,7 @@ async def check_write_target(
             "restore_previous_value": target.restore_previous_value,
         }
     )
-    require_writes_allowed(config, check)
+    authorization = require_writes_allowed(config, check)
 
     node = client.get_node(node_id)
     try:
@@ -120,7 +135,7 @@ async def check_write_target(
     check.add_status("Read UserAccessLevel", access_status, node_id=node_id)
     check.data["parsed_value"] = preview_value(prepared.parsed)
 
-    outcome = await write_service.send_prepared_write(prepared)
+    outcome = await write_service.send_prepared_write(prepared, authorization=authorization)
     check.add_status("Read previous value", outcome.previous_status_code or "unreadable", node_id=node_id)
     check.data["previous_value"] = outcome.previous_value if outcome.previous_known else "unreadable"
     check.data["write_ms"] = outcome.duration_ms
@@ -135,7 +150,7 @@ async def check_write_target(
         mark_failed(check, outcome.detail)
         return
 
-    restored, restore_failed = await _restore_previous_value(prepared, outcome, check, target)
+    restored, restore_failed = await _restore_previous_value(prepared, outcome, check, target, authorization)
 
     if outcome.status != STATUS_PASSED:
         mark_failed(check, outcome.detail)
@@ -164,7 +179,7 @@ async def check_method_call(
             "argument_texts": list(call.arguments),
         }
     )
-    require_writes_allowed(config, check)
+    authorization = require_writes_allowed(config, check)
 
     # The one method-call path of the application: InputArguments -> parse -> Executable -> one call.
     try:
@@ -177,7 +192,7 @@ async def check_method_call(
     check.data["parsed_arguments"] = list(prepared.previews)
     check.add_status("Read Executable", prepared.executable_status, node_id=call.method_node_id)
 
-    outcome = await write_service.send_prepared_call(prepared)
+    outcome = await write_service.send_prepared_call(prepared, authorization=authorization)
     check.add_status("Call", outcome.status_code or "Good", node_id=call.method_node_id)
     check.data["duration_ms"] = outcome.duration_ms
     check.data["output"] = outcome.output or "no output arguments"

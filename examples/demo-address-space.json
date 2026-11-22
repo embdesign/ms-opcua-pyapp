@@ -1,11 +1,11 @@
 {
   "format": "opcua-address-space-snapshot",
-  "format_version": 1,
+  "format_version": 2,
   "generator": {
     "name": "opcua-explorer",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
-  "generated_at_utc": "2026-11-16T12:26:17.557Z",
+  "generated_at_utc": "2026-11-22T11:15:35.315Z",
   "source": {
     "endpoint_url": "opc.tcp://127.0.0.1:4840",
     "connection": {
@@ -20,7 +20,7 @@
       "server_application_uri": "urn:opcua-explorer:demo:server",
       "product_uri": "urn:opcua-explorer:demo:server",
       "manufacturer_name": "opcua-explorer",
-      "software_version": "0.1.1",
+      "software_version": "0.1.2",
       "build_number": "1",
       "server_certificate_sha256": null,
       "namespaces": [
@@ -41,7 +41,7 @@
           "uri": "urn:opcua-explorer:demo:extra"
         }
       ],
-      "connected_at_utc": "2026-11-16T12:26:17.361Z"
+      "connected_at_utc": "2026-11-22T11:15:34.817Z"
     },
     "download_roots": [
       "i=85"
@@ -52,8 +52,12 @@
       "max_nodes": 300,
       "concurrency": 4,
       "batch_size": 25,
+      "max_references_per_node": 0,
       "namespace_filter": null,
-      "include_values": false
+      "include_values": false,
+      "include_description": true,
+      "follow_subtypes": true,
+      "include_device_attributes": false
     },
     "limitations": [
       "A download from a live server contains what this session was allowed to browse. It is not guaranteed to be a complete, independently importable information model.",
@@ -97,9 +101,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.195,
-    "started_at_utc": "2026-11-16T12:26:17.361Z",
-    "finished_at_utc": "2026-11-16T12:26:17.556Z"
+    "duration_seconds": 0.495,
+    "started_at_utc": "2026-11-22T11:15:34.817Z",
+    "finished_at_utc": "2026-11-22T11:15:35.313Z"
   },
   "nodes": {
     "i=11192": {
@@ -122,6 +126,7 @@
       "type_definition_name": "HistoryServerCapabilitiesType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11193": {
@@ -148,6 +153,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11196": {
@@ -174,6 +180,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11197": {
@@ -200,6 +207,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11198": {
@@ -226,6 +234,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11199": {
@@ -252,6 +261,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11200": {
@@ -278,6 +288,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11201": {
@@ -300,6 +311,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11242": {
@@ -326,6 +338,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11273": {
@@ -352,6 +365,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11274": {
@@ -378,6 +392,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11275": {
@@ -404,6 +419,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11281": {
@@ -430,6 +446,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11282": {
@@ -456,6 +473,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11283": {
@@ -482,6 +500,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11313": {
@@ -510,6 +529,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11492": {
@@ -532,6 +552,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=11493": {
@@ -560,6 +584,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11494": {
@@ -588,6 +613,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11502": {
@@ -614,6 +640,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11702": {
@@ -640,6 +667,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11703": {
@@ -666,6 +694,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11704": {
@@ -688,6 +717,7 @@
       "type_definition_name": "OperationLimitsType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11705": {
@@ -714,6 +744,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11707": {
@@ -740,6 +771,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11709": {
@@ -766,6 +798,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11710": {
@@ -792,6 +825,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11711": {
@@ -818,6 +852,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11712": {
@@ -844,6 +879,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11713": {
@@ -870,6 +906,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11714": {
@@ -896,6 +933,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=11715": {
@@ -918,6 +956,7 @@
       "type_definition_name": "NamespacesType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12165": {
@@ -944,6 +983,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12166": {
@@ -970,6 +1010,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12167": {
@@ -996,6 +1037,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12168": {
@@ -1022,6 +1064,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12637": {
@@ -1044,6 +1087,7 @@
       "type_definition_name": "ServerConfigurationType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12639": {
@@ -1072,6 +1116,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12640": {
@@ -1098,6 +1143,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12641": {
@@ -1124,6 +1170,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12710": {
@@ -1152,6 +1199,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12737": {
@@ -1174,6 +1222,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12738": {
@@ -1202,6 +1254,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12739": {
@@ -1230,6 +1283,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12740": {
@@ -1252,6 +1306,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12749": {
@@ -1274,6 +1332,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12750": {
@@ -1302,6 +1364,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12751": {
@@ -1330,6 +1393,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12777": {
@@ -1352,6 +1416,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12778": {
@@ -1380,6 +1448,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12873": {
@@ -1402,6 +1471,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12874": {
@@ -1430,6 +1503,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12885": {
@@ -1456,6 +1530,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12886": {
@@ -1478,6 +1553,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=12887": {
@@ -1506,6 +1585,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=12911": {
@@ -1532,6 +1612,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=13737": {
@@ -1554,6 +1635,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=13738": {
@@ -1582,6 +1667,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=13739": {
@@ -1610,6 +1696,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=14053": {
@@ -1632,6 +1719,7 @@
       "type_definition_name": "CertificateGroupFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=14088": {
@@ -1654,6 +1742,7 @@
       "type_definition_name": "CertificateGroupType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=14122": {
@@ -1676,6 +1765,7 @@
       "type_definition_name": "CertificateGroupType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=14156": {
@@ -1698,6 +1788,7 @@
       "type_definition_name": "CertificateGroupType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=14443": {
@@ -1720,6 +1811,7 @@
       "type_definition_name": "PublishSubscribeType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15004": {
@@ -1746,6 +1838,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15215": {
@@ -1768,6 +1861,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=15216": {
@@ -1796,6 +1893,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15217": {
@@ -1824,6 +1922,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15440": {
@@ -1846,6 +1945,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=15441": {
@@ -1874,6 +1977,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15442": {
@@ -1902,6 +2006,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15443": {
@@ -1924,6 +2029,7 @@
       "type_definition_name": "SecurityGroupFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15444": {
@@ -1946,6 +2052,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=15447": {
@@ -1968,6 +2078,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=15606": {
@@ -1990,6 +2104,7 @@
       "type_definition_name": "RoleSetType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15644": {
@@ -2012,6 +2127,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15656": {
@@ -2034,6 +2150,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15668": {
@@ -2056,6 +2173,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15680": {
@@ -2078,6 +2196,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15692": {
@@ -2100,6 +2219,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15704": {
@@ -2122,6 +2242,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15716": {
@@ -2144,6 +2265,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15892": {
@@ -2166,6 +2288,7 @@
       "type_definition_name": "ApplicationConfigurationFileType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15893": {
@@ -2192,6 +2315,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15894": {
@@ -2218,6 +2342,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15937": {
@@ -2244,6 +2369,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15938": {
@@ -2270,6 +2396,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15957": {
@@ -2292,6 +2419,7 @@
       "type_definition_name": "NamespaceMetadataType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15958": {
@@ -2318,6 +2446,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15959": {
@@ -2344,6 +2473,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15960": {
@@ -2370,6 +2500,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15961": {
@@ -2396,6 +2527,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15962": {
@@ -2424,6 +2556,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15963": {
@@ -2452,6 +2585,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=15964": {
@@ -2478,6 +2612,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16013": {
@@ -2500,6 +2635,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16036": {
@@ -2522,6 +2661,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16060": {
@@ -2544,6 +2684,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16074": {
@@ -2566,6 +2710,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16101": {
@@ -2588,6 +2736,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16103": {
@@ -2610,6 +2762,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16124": {
@@ -2632,6 +2788,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16134": {
@@ -2660,6 +2820,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16135": {
@@ -2688,6 +2849,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16136": {
@@ -2714,6 +2876,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16283": {
@@ -2740,6 +2903,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16301": {
@@ -2762,6 +2926,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16304": {
@@ -2784,6 +2952,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16306": {
@@ -2810,6 +2982,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16315": {
@@ -2836,6 +3009,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16316": {
@@ -2862,6 +3036,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16317": {
@@ -2884,6 +3059,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16320": {
@@ -2906,6 +3085,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=16652": {
@@ -2934,6 +3117,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16653": {
@@ -2960,6 +3144,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16654": {
@@ -2988,6 +3173,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16655": {
@@ -3016,6 +3202,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16656": {
@@ -3044,6 +3231,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=16706": {
@@ -3066,6 +3254,7 @@
       "type_definition_name": "ApplicationConfigurationFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17364": {
@@ -3088,6 +3277,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=17365": {
@@ -3116,6 +3309,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17366": {
@@ -3138,6 +3332,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=17367": {
@@ -3166,6 +3364,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17368": {
@@ -3194,6 +3393,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17369": {
@@ -3216,6 +3416,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=17370": {
@@ -3244,6 +3448,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17371": {
@@ -3266,6 +3471,7 @@
       "type_definition_name": "DataSetFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17405": {
@@ -3288,6 +3494,7 @@
       "type_definition_name": "PubSubStatusType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17409": {
@@ -3310,6 +3517,7 @@
       "type_definition_name": "PubSubDiagnosticsRootType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17481": {
@@ -3338,6 +3546,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17528": {
@@ -3360,6 +3569,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=17594": {
@@ -3382,6 +3595,7 @@
       "type_definition_name": "DictionaryFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17634": {
@@ -3408,6 +3622,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=17732": {
@@ -3430,6 +3645,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=18155": {
@@ -3452,6 +3668,7 @@
       "type_definition_name": "KeyCredentialConfigurationFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=18625": {
@@ -3474,6 +3691,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19091": {
@@ -3500,6 +3718,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19372": {
@@ -3522,6 +3741,7 @@
       "type_definition_name": "LogObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19373": {
@@ -3544,6 +3764,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=19376": {
@@ -3570,6 +3794,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19377": {
@@ -3596,6 +3821,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19378": {
@@ -3618,6 +3844,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19442": {
@@ -3644,6 +3871,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19443": {
@@ -3670,6 +3898,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19444": {
@@ -3698,6 +3927,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=19751": {
@@ -3724,6 +3954,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2253": {
@@ -3746,6 +3977,7 @@
       "type_definition_name": "ServerType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2254": {
@@ -3774,6 +4006,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2255": {
@@ -3802,6 +4035,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2256": {
@@ -3828,6 +4062,7 @@
       "type_definition_name": "ServerStatusType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2257": {
@@ -3854,6 +4089,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2258": {
@@ -3880,6 +4116,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2259": {
@@ -3906,6 +4143,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2260": {
@@ -3932,6 +4170,7 @@
       "type_definition_name": "BuildInfoType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2261": {
@@ -3958,6 +4197,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2262": {
@@ -3984,6 +4224,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2263": {
@@ -4010,6 +4251,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2264": {
@@ -4036,6 +4278,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2265": {
@@ -4062,6 +4305,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2266": {
@@ -4088,6 +4332,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2267": {
@@ -4114,6 +4359,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2268": {
@@ -4136,6 +4382,7 @@
       "type_definition_name": "ServerCapabilitiesType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2269": {
@@ -4164,6 +4411,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2271": {
@@ -4192,6 +4440,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2272": {
@@ -4218,6 +4467,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2274": {
@@ -4240,6 +4490,7 @@
       "type_definition_name": "ServerDiagnosticsType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2275": {
@@ -4266,6 +4517,7 @@
       "type_definition_name": "ServerDiagnosticsSummaryType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2276": {
@@ -4292,6 +4544,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2277": {
@@ -4318,6 +4571,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2278": {
@@ -4344,6 +4598,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2279": {
@@ -4370,6 +4625,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2281": {
@@ -4396,6 +4652,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2282": {
@@ -4422,6 +4679,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2284": {
@@ -4448,6 +4706,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2285": {
@@ -4474,6 +4733,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2286": {
@@ -4500,6 +4760,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2287": {
@@ -4526,6 +4787,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2288": {
@@ -4552,6 +4814,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2289": {
@@ -4580,6 +4843,7 @@
       "type_definition_name": "SamplingIntervalDiagnosticsArrayType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2290": {
@@ -4608,6 +4872,7 @@
       "type_definition_name": "SubscriptionDiagnosticsArrayType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2294": {
@@ -4635,6 +4900,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2295": {
@@ -4657,6 +4923,7 @@
       "type_definition_name": "VendorServerInfoType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2296": {
@@ -4679,6 +4946,7 @@
       "type_definition_name": "ServerRedundancyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23470": {
@@ -4701,6 +4969,7 @@
       "type_definition_name": "AliasNameCategoryType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23476": {
@@ -4723,6 +4992,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=23477": {
@@ -4751,6 +5024,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23478": {
@@ -4779,6 +5053,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23479": {
@@ -4801,6 +5076,7 @@
       "type_definition_name": "AliasNameCategoryType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23485": {
@@ -4823,6 +5099,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=23488": {
@@ -4845,6 +5125,7 @@
       "type_definition_name": "AliasNameCategoryType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23494": {
@@ -4867,6 +5148,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=23597": {
@@ -4893,6 +5178,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23658": {
@@ -4915,6 +5201,7 @@
       "type_definition_name": "SubscribedDataSetFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23678": {
@@ -4937,6 +5224,7 @@
       "type_definition_name": "PubSubCapabilitiesType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=23685": {
@@ -4959,6 +5247,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24095": {
@@ -4985,6 +5274,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24096": {
@@ -5011,6 +5301,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24097": {
@@ -5037,6 +5328,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24098": {
@@ -5063,6 +5355,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24099": {
@@ -5089,6 +5382,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24100": {
@@ -5115,6 +5409,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24101": {
@@ -5143,6 +5438,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24104": {
@@ -5169,6 +5465,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24226": {
@@ -5191,6 +5488,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24227": {
@@ -5213,6 +5511,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24290": {
@@ -5235,6 +5534,7 @@
       "type_definition_name": "UserManagementType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24291": {
@@ -5261,6 +5561,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24301": {
@@ -5289,6 +5590,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24302": {
@@ -5315,6 +5617,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24303": {
@@ -5341,6 +5644,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=24304": {
@@ -5363,6 +5667,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=24306": {
@@ -5385,6 +5693,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=24308": {
@@ -5407,6 +5719,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=24310": {
@@ -5429,6 +5745,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25440": {
@@ -5451,6 +5771,7 @@
       "type_definition_name": "PubSubKeyPushTargetFolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25441": {
@@ -5473,6 +5794,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25444": {
@@ -5495,6 +5820,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25451": {
@@ -5517,6 +5846,7 @@
       "type_definition_name": "PubSubConfigurationType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25452": {
@@ -5543,6 +5873,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25453": {
@@ -5569,6 +5900,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25454": {
@@ -5595,6 +5927,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25455": {
@@ -5621,6 +5954,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25459": {
@@ -5643,6 +5977,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25462": {
@@ -5665,6 +6003,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25480": {
@@ -5691,6 +6033,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25481": {
@@ -5717,6 +6060,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25565": {
@@ -5739,6 +6083,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25584": {
@@ -5761,6 +6106,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25603": {
@@ -5783,6 +6129,7 @@
       "type_definition_name": "RoleType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25706": {
@@ -5809,6 +6156,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25707": {
@@ -5835,6 +6183,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=25708": {
@@ -5857,6 +6206,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25709": {
@@ -5879,6 +6232,10 @@
       "type_definition_name": null,
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {
+        "Executable": "True",
+        "UserExecutable": "True"
+      },
       "errors": []
     },
     "i=25725": {
@@ -5905,6 +6262,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2735": {
@@ -5931,6 +6289,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2736": {
@@ -5957,6 +6316,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2737": {
@@ -5983,6 +6343,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=29878": {
@@ -6005,6 +6366,7 @@
       "type_definition_name": "ProvisionableDeviceType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2992": {
@@ -6031,6 +6393,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2993": {
@@ -6057,6 +6420,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2994": {
@@ -6083,6 +6447,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2996": {
@@ -6105,6 +6470,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=2997": {
@@ -6127,6 +6493,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=31915": {
@@ -6149,6 +6516,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=31916": {
@@ -6175,6 +6543,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32336": {
@@ -6197,6 +6566,7 @@
       "type_definition_name": "TransactionDiagnosticsType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32337": {
@@ -6223,6 +6593,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32338": {
@@ -6249,6 +6620,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32339": {
@@ -6275,6 +6647,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32340": {
@@ -6303,6 +6676,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32341": {
@@ -6331,6 +6705,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32342": {
@@ -6359,6 +6734,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32403": {
@@ -6387,6 +6763,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32404": {
@@ -6415,6 +6792,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32408": {
@@ -6441,6 +6819,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32530": {
@@ -6463,6 +6842,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32637": {
@@ -6485,6 +6865,7 @@
       "type_definition_name": "HistoricalDataConfigurationType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32638": {
@@ -6507,6 +6888,7 @@
       "type_definition_name": "AggregateConfigurationType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32639": {
@@ -6533,6 +6915,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32640": {
@@ -6559,6 +6942,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32641": {
@@ -6585,6 +6969,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32642": {
@@ -6611,6 +6996,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32643": {
@@ -6633,6 +7019,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32644": {
@@ -6659,6 +7046,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32645": {
@@ -6685,6 +7073,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32646": {
@@ -6711,6 +7100,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32647": {
@@ -6737,6 +7127,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32648": {
@@ -6763,6 +7154,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32649": {
@@ -6789,6 +7181,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32650": {
@@ -6815,6 +7208,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32656": {
@@ -6841,6 +7235,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32682": {
@@ -6867,6 +7262,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32752": {
@@ -6893,6 +7289,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32753": {
@@ -6919,6 +7316,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32754": {
@@ -6941,6 +7339,7 @@
       "type_definition_name": "HistoricalEventConfigurationType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32755": {
@@ -6963,6 +7362,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32756": {
@@ -6989,6 +7389,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32757": {
@@ -7015,6 +7416,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=32852": {
@@ -7041,6 +7443,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3704": {
@@ -7069,6 +7472,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3705": {
@@ -7095,6 +7499,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3706": {
@@ -7117,6 +7522,7 @@
       "type_definition_name": "SessionsDiagnosticsSummaryType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3707": {
@@ -7145,6 +7551,7 @@
       "type_definition_name": "SessionDiagnosticsArrayType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3708": {
@@ -7173,6 +7580,7 @@
       "type_definition_name": "SessionSecurityDiagnosticsArrayType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=3709": {
@@ -7199,6 +7607,7 @@
       "type_definition_name": "PropertyType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "i=85": {
@@ -7221,6 +7630,7 @@
       "type_definition_name": "FolderType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Blob": {
@@ -7249,6 +7659,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Line1": {
@@ -7271,6 +7682,7 @@
       "type_definition_name": "BaseObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Motor": {
@@ -7293,6 +7705,7 @@
       "type_definition_name": "BaseObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=OperatingRange": {
@@ -7319,6 +7732,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Plant": {
@@ -7341,6 +7755,7 @@
       "type_definition_name": "BaseObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Pressure": {
@@ -7369,6 +7784,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Recipe": {
@@ -7397,6 +7813,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Samples": {
@@ -7425,6 +7842,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=SharedConfig": {
@@ -7447,6 +7865,7 @@
       "type_definition_name": "BaseObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=SharedThreshold": {
@@ -7475,6 +7894,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Temperature": {
@@ -7503,6 +7923,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=2;s=Timestamp": {
@@ -7531,6 +7952,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=3;s=Extra": {
@@ -7553,6 +7975,7 @@
       "type_definition_name": "BaseObjectType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     },
     "ns=3;s=ExtraValue": {
@@ -7579,6 +8002,7 @@
       "type_definition_name": "BaseDataVariableType",
       "value": null,
       "unavailable_attributes": {},
+      "device_attributes": {},
       "errors": []
     }
   },

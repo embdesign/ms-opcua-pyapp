@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -43,7 +44,9 @@ def _sequence_document(node_id: str) -> dict:
 
 def test_sequences_tab_loads_dry_runs_and_runs(qapp, tmp_path) -> None:
     port = free_port()
-    server = start_demo_server(port)
+    # --no-updates: the dry run must see the value the document expects, not a value
+    # the demo updater moved while the test was waiting.
+    server = start_demo_server(port, "--no-updates")
     runner = AsyncRunner()
     runner.start()
     service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
@@ -86,6 +89,36 @@ def test_sequences_tab_loads_dry_runs_and_runs(qapp, tmp_path) -> None:
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
         stop_demo_server(server)
+
+
+def test_closing_a_session_cancels_a_running_sequence(qapp, tmp_path) -> None:
+    """Closing the session tab must cancel the tab's run, not leave it on the loop."""
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        workspace = window.workspaces[0]
+        tab = workspace.sequences_tab
+
+        async def long_run() -> None:
+            await asyncio.sleep(30.0)
+
+        key = runner.new_key()
+        tab._task_key = key
+        tab._handle = runner.submit(long_run, key=key)
+        assert _wait_until(qapp, lambda: runner.is_active(key)), "the run did not start"
+
+        window.close_session(workspace)
+
+        assert tab._handle is None
+        assert tab._task_key is None
+        assert _wait_until(qapp, lambda: not runner.is_active(key)), (
+            "the sequence kept running after its session was closed"
+        )
+    finally:
+        window.shutdown()
+        runner.stop()
 
 
 def test_sequences_tab_refuses_a_bad_document_and_keeps_state(qapp, tmp_path, monkeypatch) -> None:

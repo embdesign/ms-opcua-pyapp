@@ -15,11 +15,13 @@ import asyncio
 from typing import Any
 
 from asyncua import ua
+from asyncua.ua.uaerrors import BadNoMatch
 
+from ..errors import OpcUaExplorerError
 from .ua_names import status_name
 
 
-class MetadataUnavailable(RuntimeError):
+class MetadataUnavailable(OpcUaExplorerError):
     """The server did not provide a fact the caller needs; nothing has been sent."""
 
 
@@ -56,9 +58,13 @@ async def read_input_arguments(client: Any, method_node_id: str) -> list[Any]:
         argument_property = await method.get_child(["InputArguments"])
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except BadNoMatch:
         # A method without an InputArguments property takes no arguments.
         return []
+    except Exception as exc:
+        # Anything else means the property could not be located; never present that
+        # as "the method takes no arguments".
+        raise MetadataUnavailable(f"InputArguments of {method_node_id} could not be located: {exc}") from exc
     try:
         value = await argument_property.read_value()
     except asyncio.CancelledError:
@@ -67,11 +73,14 @@ async def read_input_arguments(client: Any, method_node_id: str) -> list[Any]:
         raise MetadataUnavailable(f"InputArguments of {method_node_id} could not be read: {exc}") from exc
     if not value:
         return []
-    return [
+    arguments = [
         argument
         for argument in value
         if all(hasattr(argument, field) for field in ("Name", "DataType", "ValueRank"))
     ]
+    if len(arguments) != len(value):
+        raise MetadataUnavailable(f"InputArguments of {method_node_id} contained malformed entries.")
+    return arguments
 
 
 async def read_executable(client: Any, method_node_id: str) -> tuple[bool | None, str]:

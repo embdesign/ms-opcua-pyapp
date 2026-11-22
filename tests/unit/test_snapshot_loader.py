@@ -9,7 +9,13 @@ import pytest
 from opcua_explorer.compare import ComparisonConfig, compare_address_spaces
 from opcua_explorer.errors import ExportError
 from opcua_explorer.exporters import export_json, load_json_snapshot, snapshot_from_document
-from opcua_explorer.models import AddressSpace, NamespaceEntry, NodeRecord, ValueSnapshot
+from opcua_explorer.models import (
+    AddressSpace,
+    NamespaceEntry,
+    NodeRecord,
+    TraversalConfig,
+    ValueSnapshot,
+)
 
 
 def _write(document: dict, path) -> str:  # noqa: ANN001 - pytest tmp_path
@@ -39,6 +45,29 @@ def test_export_then_load_round_trips_the_snapshot(sample_snapshot, tmp_path) ->
     assert loaded.namespaces == sample_snapshot.namespaces
     assert loaded.inaccessible == sample_snapshot.inaccessible
     assert loaded.limitations == sample_snapshot.limitations
+    # The download bounds are part of the record, so a baseline keeps its provenance.
+    assert loaded.config == sample_snapshot.config
+
+
+def test_traversal_configuration_round_trips(sample_snapshot, tmp_path) -> None:
+    sample_snapshot.config = TraversalConfig(
+        max_depth=4,
+        max_nodes=25,
+        concurrency=3,
+        batch_size=15,
+        max_references_per_node=9,
+        namespace_filter=frozenset({0, 2}),
+        include_values=True,
+        include_description=False,
+        follow_subtypes=False,
+    )
+    target = tmp_path / "snapshot.json"
+    export_json(sample_snapshot, target)
+
+    loaded = load_json_snapshot(target)
+
+    assert loaded.config == sample_snapshot.config
+    assert loaded.config.namespace_filter == frozenset({0, 2})
 
 
 def test_loaded_snapshot_compares_equal_to_the_original(sample_snapshot, tmp_path) -> None:
@@ -53,8 +82,12 @@ def test_loaded_snapshot_compares_equal_to_the_original(sample_snapshot, tmp_pat
     )
 
     assert result.is_equal, result.summary_text()
-    # The fixture contains one inaccessible node, so both sides warn about it.
-    assert all("could not browse" in warning for warning in result.warnings)
+    # The fixture contains one inaccessible node, so both sides warn about it...
+    assert sum("could not browse" in warning for warning in result.warnings) == 2
+    # ...and one reference to a node that is not part of the snapshot, which the
+    # reference comparison now counts instead of dropping silently.
+    assert result.reference_edges_not_compared >= 1
+    assert any("outside that download" in warning for warning in result.warnings)
 
 
 def test_values_survive_when_the_download_included_them(tmp_path) -> None:
@@ -143,3 +176,39 @@ def test_broken_json_and_missing_files_are_reported(tmp_path) -> None:
 def test_document_without_a_node_object_is_refused() -> None:
     with pytest.raises(ExportError, match="not a JSON object"):
         snapshot_from_document([])
+
+
+def test_device_attributes_round_trip_and_version_1_documents_still_load(sample_snapshot) -> None:
+    """A device-attribute snapshot keeps them through the document; v1 stays readable."""
+    from opcua_explorer.exporters.json_exporter import snapshot_to_document
+    from opcua_explorer.exporters.json_loader import snapshot_from_document
+
+    sample_snapshot.config = TraversalConfig(include_device_attributes=True)
+    sample_snapshot.nodes["ns=2;s=Temperature"].device_attributes = {
+        "Historizing": "False",
+        "MinimumSamplingInterval": "100.0",
+        "WriteMask": "3 (AccessLevel, ArrayDimensions)",
+    }
+
+    document = snapshot_to_document(sample_snapshot)
+    assert document["format_version"] == 2
+    assert document["source"]["traversal"]["include_device_attributes"] is True
+
+    restored = snapshot_from_document(document)
+    assert restored.config.include_device_attributes is True
+    assert restored.nodes["ns=2;s=Temperature"].device_attributes == {
+        "Historizing": "False",
+        "MinimumSamplingInterval": "100.0",
+        "WriteMask": "3 (AccessLevel, ArrayDimensions)",
+    }
+
+    older = dict(document)
+    older["format_version"] = 1
+    older["source"] = {key: value for key, value in document["source"].items() if key != "traversal"}
+    older["nodes"] = {
+        node_id: {key: value for key, value in node.items() if key != "device_attributes"}
+        for node_id, node in document["nodes"].items()
+    }
+    legacy = snapshot_from_document(older)
+    assert legacy.config.include_device_attributes is False
+    assert legacy.nodes["ns=2;s=Temperature"].device_attributes == {}

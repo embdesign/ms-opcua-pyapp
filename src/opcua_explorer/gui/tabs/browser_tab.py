@@ -12,6 +12,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -29,13 +31,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...defaults import DEFAULT_READ_MAX_AGE_MS, MAX_READ_MAX_AGE_MS
 from ...errors import InvalidNodeIdError
-from ...models import AddressSpace, AttributeResult, NodeDetails, ValueSnapshot
+from ...models import (
+    BROWSE_DIRECTIONS,
+    BROWSE_NODE_CLASSES,
+    BROWSE_REFERENCE_TYPES,
+    TIMESTAMPS_TO_RETURN,
+    AddressSpace,
+    AttributeResult,
+    BrowseOptions,
+    NodeDetails,
+    ValueReadOptions,
+    ValueReadResult,
+    ValueSnapshot,
+)
 from ...opcua.attributes import format_attribute_value
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import ACCENT, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -70,25 +87,39 @@ def _format_cell(value: Any) -> str:
     return format_attribute_value(value)
 
 
-class BrowserTab(QWidget):
+class BrowserTab(SessionTab):
     """On-demand tree, attribute table, reference table and value view."""
 
     download_requested = Signal(str)
     monitor_requested = Signal(str)
+    #: The selected tree node changed (``""`` when nothing is selected any more).
+    selection_changed = Signal(str)
 
     def __init__(self, runner: AsyncRunner, service: OpcUaService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``; widget decisions
+        #: must not read the service from this thread.
+        self._connected = False
+        self._endpoint_url = ""
         self._loading: set[str] = set()
         self._detail_token = 0
         self._snapshot: AddressSpace | None = None
         self._matches: list[str] = []
         self._match_index = 0
         self._current_node_id: str | None = None
+        #: NodeId of the tree root currently displayed (reloaded by the browse filter).
+        self._root_node_id: str = ""
+        #: Bumped whenever the tree is replaced, so late browse results are ignored.
+        self._tree_generation: int = 0
+        #: Suffix of the last explicit value read (duration + options).
+        self._value_read_note: str = ""
         #: NodeIds in this session's live-monitor list, marked with ●/○ in the tree.
         self._monitored: set[str] = set()
         self._monitor_active = False
+        #: (shown, total) rows of the last local filter run, for the status text.
+        self._row_filter_counts: tuple[int, int] = (0, 0)
 
         self._build_ui()
         self._on_start_changed()
@@ -103,15 +134,15 @@ class BrowserTab(QWidget):
         title = QLabel("Address space")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Loading happens on demand. The address space is a graph, not a tree: a node referenced from several "
-            "parents appears under each of them, while duplicate references from the same parent are merged into "
-            "one row. Nodes in this session's live monitor are prefixed with ● while the subscription runs and "
-            "with ○ when they are added but not subscribed yet."
+        layout.addWidget(
+            TabNotice(
+                "Loads on demand; the address space is a graph, so a shared child appears under each parent.",
+                "Loading happens on demand. The address space is a graph, not a tree: a node referenced from "
+                "several parents appears under each of them, while duplicate references from the same parent are "
+                "merged into one row. Nodes in this session's live monitor are prefixed with ● while the "
+                "subscription runs and with ○ when they are added but not subscribed yet.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         toolbar = QHBoxLayout()
         self.start_combo = QComboBox()
@@ -152,6 +183,45 @@ class BrowserTab(QWidget):
         self.download_btn.clicked.connect(self._on_download_requested)
         toolbar.addWidget(self.download_btn)
         layout.addLayout(toolbar)
+
+        filter_row = QHBoxLayout()
+        self.browse_type_combo = QComboBox()
+        for label, node_id in BROWSE_REFERENCE_TYPES:
+            self.browse_type_combo.addItem(label, node_id)
+        self.browse_direction_combo = QComboBox()
+        self.browse_direction_combo.addItems(list(BROWSE_DIRECTIONS))
+        self.browse_subtypes_check = QCheckBox("Include subtypes")
+        self.browse_subtypes_check.setChecked(True)
+        self.browse_class_combo = QComboBox()
+        for label, mask in BROWSE_NODE_CLASSES:
+            self.browse_class_combo.addItem(label, mask)
+        self.browse_apply_btn = QPushButton("Apply filter")
+        self.browse_apply_btn.setToolTip("Clear the loaded tree and browse the start node again with these filters.")
+        self.browse_apply_btn.clicked.connect(self._on_apply_browse_filter)
+        filter_row.addWidget(QLabel("References:"))
+        filter_row.addWidget(self.browse_type_combo)
+        filter_row.addWidget(self.browse_direction_combo)
+        filter_row.addWidget(self.browse_subtypes_check)
+        filter_row.addSpacing(8)
+        filter_row.addWidget(QLabel("Node class:"))
+        filter_row.addWidget(self.browse_class_combo)
+        filter_row.addWidget(self.browse_apply_btn)
+        filter_row.addSpacing(16)
+        # A local filter over the rows that already exist. It is deliberately not
+        # called "search": it never asks the server and never loads a branch.
+        self.row_filter_edit = QLineEdit()
+        self.row_filter_edit.setPlaceholderText("Filter loaded rows…")
+        self.row_filter_edit.setClearButtonEnabled(True)
+        self.row_filter_edit.setMaximumWidth(220)
+        self.row_filter_edit.setToolTip(
+            "Hides already loaded rows whose name does not match. It browses nothing, so "
+            "an unloaded branch is not searched - use Search downloaded nodes… / Find for "
+            "the whole address space. Clearing the box shows every row again."
+        )
+        self.row_filter_edit.textChanged.connect(self._on_row_filter_changed)
+        filter_row.addWidget(self.row_filter_edit)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         splitter = QSplitter(Qt.Horizontal)
 
@@ -217,6 +287,35 @@ class BrowserTab(QWidget):
         row.addWidget(self.value_meta, 1)
         value_layout.addLayout(row)
 
+        options_row = QHBoxLayout()
+        self.index_range_edit = QLineEdit()
+        self.index_range_edit.setPlaceholderText("IndexRange, e.g. 1:3 or 0,2 (empty = whole value)")
+        self.index_range_edit.setToolTip(
+            "NumericRange applied to the Value attribute. Only arrays and strings can be sliced; "
+            "the server refuses a range it cannot apply."
+        )
+        self.max_age_spin = QSpinBox()
+        # QSpinBox is int32; the protocol allows uint32, so the client accepts more than the UI offers.
+        self.max_age_spin.setRange(0, min(MAX_READ_MAX_AGE_MS, 2_147_483_647))
+        self.max_age_spin.setValue(DEFAULT_READ_MAX_AGE_MS)
+        self.max_age_spin.setSuffix(" ms")
+        self.max_age_spin.setToolTip(
+            "MaxAge: 0 lets the server answer from a cache, a large value asks for a fresh device read."
+        )
+        self.timestamps_combo = QComboBox()
+        self.timestamps_combo.addItems(list(TIMESTAMPS_TO_RETURN))
+        self.timestamps_combo.setCurrentText("Both")
+        self.timestamps_combo.setToolTip("TimestampsToReturn of the read request.")
+        options_row.addWidget(QLabel("IndexRange:"))
+        options_row.addWidget(self.index_range_edit, 1)
+        options_row.addSpacing(8)
+        options_row.addWidget(QLabel("MaxAge:"))
+        options_row.addWidget(self.max_age_spin)
+        options_row.addSpacing(8)
+        options_row.addWidget(QLabel("Timestamps:"))
+        options_row.addWidget(self.timestamps_combo)
+        value_layout.addLayout(options_row)
+
         self.value_warning = QLabel()
         self.value_warning.setObjectName("warningLabel")
         self.value_warning.setWordWrap(True)
@@ -236,6 +335,9 @@ class BrowserTab(QWidget):
 
     # -- connection state --------------------------------------------------
     def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         self.load_btn.setEnabled(connected)
         self.download_btn.setEnabled(connected)
         self.read_value_btn.setEnabled(connected)
@@ -244,9 +346,10 @@ class BrowserTab(QWidget):
             self.tree.clear()
             self._loading.clear()
             self._current_node_id = None
+            self.selection_changed.emit("")
             self._clear_details()
             self.status_label.setText("Not connected. Use the Connection tab to open a session.")
-        elif self._service.is_connected:
+        elif self._connected:
             self.load_start_node()
 
     def set_snapshot(self, snapshot: AddressSpace | None) -> None:
@@ -280,6 +383,28 @@ class BrowserTab(QWidget):
         if node_id:
             self.load_node(str(node_id))
 
+    # -- browse filter -----------------------------------------------------
+    def browse_options(self) -> BrowseOptions:
+        """The filters currently selected for the tree."""
+        return BrowseOptions(
+            reference_type=str(self.browse_type_combo.currentData() or "i=33"),
+            include_subtypes=self.browse_subtypes_check.isChecked(),
+            direction=self.browse_direction_combo.currentText(),
+            node_class_mask=int(self.browse_class_combo.currentData() or 0),
+        ).normalised()
+
+    def _browse_options(self) -> BrowseOptions:
+        return self.browse_options()
+
+    def _on_apply_browse_filter(self) -> None:
+        """Reload the tree with the selected filters."""
+        if not self._connected:
+            self._set_status("Connect to a server first.", error=True)
+            return
+        options = self.browse_options()
+        self.load_node(self._root_node_id or self.start_node())
+        self._set_status(f"Browsing with {options.label()}.")
+
     def start_node(self) -> str:
         """The configured start NodeId (fixed entry or a custom one)."""
         return str(self.start_combo.currentData() or self.node_id_edit.text().strip() or "i=85")
@@ -304,13 +429,16 @@ class BrowserTab(QWidget):
         except InvalidNodeIdError as exc:
             self._set_status(str(exc), error=True)
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
 
         self.tree.clear()
         item = self._make_item(canonical, canonical, "")
         self.tree.addTopLevelItem(item)
+        self._root_node_id = canonical
+        self._tree_generation += 1
+        self._loading.clear()
         item.setExpanded(True)
         self.tree.setCurrentItem(item)
         self._set_status(f"Loading {canonical}…")
@@ -342,6 +470,7 @@ class BrowserTab(QWidget):
             self._set_status(f"{count} live-monitor target(s) marked in the address space ({state}).")
 
     def is_monitored(self, node_id: str) -> bool:
+        """True when the row of ``node_id`` carries a live-monitor mark."""
         return str(node_id) in self._monitored
 
     def _apply_monitored_marks(self) -> None:
@@ -396,35 +525,120 @@ class BrowserTab(QWidget):
         node_id = item.data(0, ITEM_NODE_ID)
         if not node_id or node_id in self._loading:
             return
-        if not self._service.is_connected:
+        if not self._connected:
             return
         self._loading.add(node_id)
-        self._runner.submit(
-            lambda: self._service.browse_children(str(node_id)),
-            on_done=lambda children: self._on_children(item, str(node_id), children),
-            on_error=lambda message: self._on_children_error(item, str(node_id), message),
+        generation = self._tree_generation
+        # The options are fixed here, so the result is reported with the filter it was
+        # actually requested with even if the combo boxes change while it is in flight.
+        options = self._browse_options()
+        self._submit(
+            lambda: self._service.browse_children(str(node_id), options=options),
+            on_done=lambda children: self._on_children(
+                item, str(node_id), children, generation=generation, label=options.label()
+            ),
+            on_error=lambda message: self._on_children_error(
+                item, str(node_id), message, generation=generation
+            ),
         )
 
-    def _on_children(self, item: QTreeWidgetItem, node_id: str, children: list[Any]) -> None:
-        self._loading.discard(node_id)
-        if not item or item.data(0, ITEM_NODE_ID) != node_id:
+    def _is_stale(self, generation: int) -> bool:
+        """True when the tree was replaced while a browse was in flight."""
+        return generation != self._tree_generation
+
+    def _on_children(
+        self,
+        item: QTreeWidgetItem,
+        node_id: str,
+        children: list[Any],
+        *,
+        generation: int | None = None,
+        label: str = "",
+    ) -> None:
+        # A stale result belongs to a tree that no longer exists: it must not clear the
+        # in-flight marker, because that marker now belongs to the browse of the newer
+        # generation. Clearing it here made a reload look finished while it was not.
+        if generation is not None and self._is_stale(generation):
             return
-        item.takeChildren()
-        item.setData(0, ITEM_LOADED, True)
-        for child in children:
-            child_item = QTreeWidgetItem(
-                [child.display_name or child.browse_name or child.node_id, child.node_class, child.node_id]
-            )
-            child_item.setData(0, ITEM_NODE_ID, child.node_id)
-            child_item.setData(0, ITEM_LOADED, False)
-            child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-            tooltip = self._child_tooltip(child)
-            child_item.setToolTip(0, tooltip)
-            self._decorate_item(child_item, child.node_id)
-            item.addChild(child_item)
-        if not children:
-            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
-        self._set_status(f"{len(children)} child node(s) read from {node_id}.")
+        self._loading.discard(node_id)
+        try:
+            if not item or item.data(0, ITEM_NODE_ID) != node_id:
+                return
+            item.takeChildren()
+            item.setData(0, ITEM_LOADED, True)
+            for child in children:
+                child_item = QTreeWidgetItem(
+                    [child.display_name or child.browse_name or child.node_id, child.node_class, child.node_id]
+                )
+                child_item.setData(0, ITEM_NODE_ID, child.node_id)
+                child_item.setData(0, ITEM_LOADED, False)
+                child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                tooltip = self._child_tooltip(child)
+                child_item.setToolTip(0, tooltip)
+                self._decorate_item(child_item, child.node_id)
+                item.addChild(child_item)
+            if not children:
+                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+        except RuntimeError:
+            # The tree (and with it this item) was replaced while the browse was
+            # in flight - a filter change or a reload. The result is obsolete.
+            return
+        # The status names the filter this result was produced with, not the one the
+        # combo boxes carry now: the operator typed a filter, so the answer says which.
+        # A branch loaded while the filter is active must obey it immediately.
+        self._apply_row_filter(quiet=True)
+        with_options = f" with {label}" if label else ""
+        self._set_status(f"{len(children)} child node(s) read from {node_id}{with_options}.")
+
+    # -- local row filter ---------------------------------------------------
+    def _on_row_filter_changed(self, _text: str) -> None:
+        """Filter the loaded rows and say what that filter can and cannot see."""
+        self._apply_row_filter()
+        needle = self.row_filter_edit.text().strip()
+        if not needle:
+            self._set_status("Row filter cleared; every loaded row is shown again.")
+            return
+        shown, total = self._row_filter_counts
+        self._set_status(
+            f"Showing {shown} of {total} loaded row(s) containing {needle!r}. "
+            "Unloaded branches are not searched."
+        )
+
+    def _apply_row_filter(self, *, quiet: bool = False) -> None:
+        """Hide loaded rows that do not match, keeping the ancestors of matches.
+
+        Only rows that exist are considered: filtering never browses, so it can
+        never claim a node is absent from the server. The start node itself is
+        never hidden - a blank tree would read as "unloaded" or "no children" and
+        hide the fact that a filter is active. ``quiet`` is used when a browse
+        result re-applies the filter and the status already reports that result.
+        """
+        needle = self.row_filter_edit.text().strip().lower()
+        shown = 0
+        total = 0
+
+        def visit(item: QTreeWidgetItem, *, root: bool) -> bool:
+            nonlocal shown, total
+            total += 1
+            matches = not needle or needle in item.text(0).lower()
+            child_matches = False
+            for index in range(item.childCount()):
+                child_matches = visit(item.child(index), root=False) or child_matches
+            visible = root or matches or child_matches
+            item.setHidden(not visible)
+            if visible:
+                shown += 1
+            return visible
+
+        try:
+            for index in range(self.tree.topLevelItemCount()):
+                visit(self.tree.topLevelItem(index), root=True)
+        except RuntimeError:
+            # The tree was cleared while this ran; nothing left to filter.
+            return
+        self._row_filter_counts = (shown, total)
+        if quiet:
+            return
 
     @staticmethod
     def _child_tooltip(child: Any) -> str:
@@ -435,13 +649,20 @@ class BrowserTab(QWidget):
             text += "\n(merged: the server referenced this node more than once)"
         return text
 
-    def _on_children_error(self, item: QTreeWidgetItem, node_id: str, message: str) -> None:
+    def _on_children_error(
+        self, item: QTreeWidgetItem, node_id: str, message: str, *, generation: int | None = None
+    ) -> None:
+        if generation is not None and self._is_stale(generation):
+            return
         self._loading.discard(node_id)
-        if item:
-            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
-            item.setData(0, ITEM_BASE_TOOLTIP, message)
-            item.setToolTip(0, message)
-            self._decorate_item(item, node_id)
+        try:
+            if item:
+                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+                item.setData(0, ITEM_BASE_TOOLTIP, message)
+                item.setToolTip(0, message)
+                self._decorate_item(item, node_id)
+        except RuntimeError:
+            return
         _logger.warning("Browsing %s failed: %s", node_id, message)
         self._set_status(f"Browsing {node_id} failed: {message}", error=True)
 
@@ -452,6 +673,7 @@ class BrowserTab(QWidget):
         if not node_id:
             return
         self._current_node_id = str(node_id)
+        self.selection_changed.emit(self._current_node_id)
         self._load_details(str(node_id))
 
     # -- details -----------------------------------------------------------
@@ -459,7 +681,7 @@ class BrowserTab(QWidget):
         self._detail_token += 1
         token = self._detail_token
         self._clear_details()
-        self._runner.submit(
+        self._submit(
             lambda: self._service.read_node_details(node_id),
             on_done=lambda details: self._on_details(token, details),
             on_error=lambda message: self._on_details_error(token, node_id, message),
@@ -497,6 +719,7 @@ class BrowserTab(QWidget):
         self.value_view.clear()
         self.value_meta.setText("No value read.")
         self.value_warning.hide()
+        self._value_read_note = ""
 
     def _fill_attributes(self, attributes: list[AttributeResult]) -> None:
         table = self.attributes_table
@@ -504,7 +727,8 @@ class BrowserTab(QWidget):
         for row, attribute in enumerate(attributes):
             name_item = QTableWidgetItem(attribute.attribute)
             name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            value_item = QTableWidgetItem(_format_cell(attribute.value))
+            text = attribute.display if attribute.display is not None else _format_cell(attribute.value)
+            value_item = QTableWidgetItem(text)
             value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
             if not attribute.ok:
                 value_item.setToolTip(attribute.status)
@@ -541,16 +765,31 @@ class BrowserTab(QWidget):
             self.load_node(str(node_id))
 
     # -- value -------------------------------------------------------------
+    def _read_options(self) -> ValueReadOptions:
+        return ValueReadOptions(
+            index_range=self.index_range_edit.text(),
+            max_age_ms=int(self.max_age_spin.value()),
+            timestamps=self.timestamps_combo.currentText(),
+        ).normalised()
+
     def _on_read_value(self) -> None:
-        if not self._current_node_id or not self._service.is_connected:
+        if not self._current_node_id or not self._connected:
             return
         node_id = self._current_node_id
-        self.value_meta.setText(f"Reading {node_id}…")
-        self._runner.submit(
-            lambda: self._service.read_value(node_id),
-            on_done=self._render_value,
+        options = self._read_options()
+        self.value_meta.setText(f"Reading {node_id} ({options.label()})…")
+        self._submit(
+            lambda: self._service.read_value_with_options(node_id, options),
+            on_done=self._render_value_result,
             on_error=lambda message: self._set_status(f"Reading the value failed: {message}", error=True),
         )
+
+    def _render_value_result(self, result: ValueReadResult) -> None:
+        self._value_read_note = f"{result.duration_ms:.0f} ms · {result.options.label()}"
+        self._render_value(result.snapshot)
+        if result.snapshot.status != "Good" or result.options.index_range:
+            self.value_warning.setText(result.detail)
+            self.value_warning.show()
 
     def _render_value(self, snapshot: ValueSnapshot | None) -> None:
         self.value_warning.hide()
@@ -563,6 +802,8 @@ class BrowserTab(QWidget):
         if snapshot.variant_type:
             parts.append(f"Type: {snapshot.variant_type}")
         parts.append(f"Encoding: {snapshot.encoding}")
+        if self._value_read_note:
+            parts.append(self._value_read_note)
         self.value_meta.setText(" · ".join(parts))
 
         if snapshot.encoding == "unavailable":
@@ -654,13 +895,6 @@ class BrowserTab(QWidget):
             return
         self.monitor_requested.emit(self._current_node_id)
         self._set_status(f"{self._current_node_id} added to the Live monitor tab.")
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)
 
     def current_node_id(self) -> str | None:
         return self._current_node_id

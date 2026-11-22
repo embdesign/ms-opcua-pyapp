@@ -452,6 +452,11 @@ def render_comparison_html(result: ComparisonResult) -> str:
         ("Tolerance", result.config.tolerance),
         ("Match by browse path", "yes" if result.config.match_by_browse_path else "no"),
         ("References compared", "yes" if result.config.compare_references else "no"),
+        (
+            "Device attributes compared",
+            "yes" if result.config.device and result.device_attributes_compared
+            else ("no (not in a snapshot)" if result.config.device else "no"),
+        ),
         ("Values compared for", ", ".join(sorted(result.config.value_node_ids)) or "no node"),
         ("Float tolerance", result.config.float_tolerance),
         ("Ignore list", ", ".join(sorted(result.config.ignore_node_ids)) or "empty"),
@@ -519,6 +524,13 @@ def render_comparison_html(result: ComparisonResult) -> str:
                 '<div class="card"><table><thead><tr><th>Namespace URI</th><th>Reference index</th>'
                 f"<th>Candidate index</th></tr></thead><tbody>{rows}</tbody></table></div>",
             ]
+        )
+
+    if result.reference_edges_not_compared:
+        parts.append(
+            f'<div class="card"><p>{result.reference_edges_not_compared} reference edge(s) have an '
+            "endpoint outside the compared downloads, so they could not be compared. "
+            "They are counted here instead of being reported as a difference.</p></div>"
         )
 
     if result.reference_differences:

@@ -37,4 +37,47 @@ async def test_two_downloads_of_the_same_server_are_equal(service, demo_model, t
     assert result.not_comparable == []
     assert result.reference_differences == []
     assert result.namespace_differences == []
-    assert result.warnings == [], result.summary_text()
+    # A bounded download keeps references to nodes it did not include (types in
+    # namespace 0, nodes outside the root). They cannot be compared and are now
+    # counted and named instead of disappearing - that is the only warning a
+    # comparison of two identical downloads may produce.
+    assert result.reference_edges_not_compared > 0
+    assert result.warnings, "the reference scope limitation must be reported"
+    assert all("outside that download" in warning for warning in result.warnings), result.warnings
+
+
+async def test_two_device_attribute_downloads_compare_equal_with_the_device_tolerance(
+    service, demo_model, tmp_path
+) -> None:
+    """The device tolerance works end to end: the attributes are read, stored and compared."""
+    config = TraversalConfig(max_nodes=None, batch_size=25, include_device_attributes=True)
+    reference = await service.download(["i=85"], config)
+
+    second = OpcUaService(trust_store=TrustStore(tmp_path / "device-trust.json"))
+    await second.connect(ConnectionSettings(endpoint_url=demo_model.endpoint))
+    try:
+        candidate = await second.download(["i=85"], config)
+    finally:
+        await second.shutdown()
+
+    with_attributes = [node for node in reference.nodes.values() if node.device_attributes]
+    assert with_attributes, "the demo server answered no device attribute at all"
+    assert any("MinimumSamplingInterval" in node.device_attributes or "Historizing" in node.device_attributes
+               for node in with_attributes if node.node_class == "Variable")
+
+    result = compare_address_spaces(
+        reference,
+        candidate,
+        ComparisonConfig(tolerance="device", compare_references=True),
+    )
+
+    assert result.device_attributes_compared is True
+    assert result.changed == [], result.summary_text()
+    assert result.missing_in_candidate == [] and result.extra_in_candidate == []
+
+    # Against a snapshot that was downloaded without them the device tolerance must
+    # say that it could not look, not that the devices are equal.
+    plain = await service.download(["i=85"], TraversalConfig(max_nodes=None, batch_size=25))
+    partial = compare_address_spaces(reference, plain, ComparisonConfig(tolerance="device"))
+    assert partial.device_attributes_compared is False
+    assert any("downloaded without them" in warning for warning in partial.warnings)

@@ -81,6 +81,36 @@ async def test_browse_children_and_node_details(service, demo_model) -> None:
     assert ("Inverse", "HasComponent") in directions
 
 
+async def test_details_include_the_extended_standard_attributes(service, demo_model) -> None:
+    plant = await service.read_node_details(demo_model.node_ids["plant"])
+    plant_attributes = {attribute.attribute: attribute for attribute in plant.attributes}
+    # An Object that does not emit events says so instead of hiding the attribute.
+    assert plant_attributes["EventNotifier"].value == 0
+    assert plant_attributes["EventNotifier"].display == "0 (none)"
+    assert plant_attributes["WriteMask"].ok is True
+    assert plant_attributes["UserWriteMask"].ok is True
+    # Optional attributes this server does not implement are not shown at all.
+    assert "AccessRestrictions" not in plant_attributes
+    assert "RolePermissions" not in plant_attributes
+
+    temperature = await service.read_node_details(demo_model.node_ids["temperature"])
+    variable = {attribute.attribute: attribute for attribute in temperature.attributes}
+    assert variable["Historizing"].value is False
+    assert variable["MinimumSamplingInterval"].value == pytest.approx(0.0)
+    assert "CurrentWrite" in (variable["AccessLevel"].display or "")
+    assert "CurrentRead" in (variable["UserAccessLevel"].display or "")
+
+    reference_type = await service.read_node_details("i=31")
+    reference = {attribute.attribute: attribute for attribute in reference_type.attributes}
+    assert reference["IsAbstract"].value is True
+    assert reference["Symmetric"].value is True
+    assert "InverseName" in reference
+
+    object_type = await service.read_node_details("i=2041")
+    base_event = {attribute.attribute: attribute for attribute in object_type.attributes}
+    assert base_event["IsAbstract"].value is True
+
+
 async def test_read_value_returns_status_and_timestamps(service, demo_model) -> None:
     snapshot = await service.read_value(demo_model.node_ids["temperature"])
     assert snapshot.status == "Good"

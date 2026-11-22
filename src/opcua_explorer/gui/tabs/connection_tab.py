@@ -48,8 +48,10 @@ from ...opcua.security import (
 )
 from ...operator_text import connection_diagnostics_text
 from ..async_runner import AsyncRunner, TaskHandle
+from ..tab_notice import TabNotice
 from ..theme import mono_font, set_chip_state
 from .connection_dialogs import CertificateReviewDialog, TrustStoreDialog
+from .server_directory_dialog import ServerDirectoryDialog
 
 _logger = logging.getLogger(__name__)
 
@@ -117,10 +119,12 @@ class ConnectionTab(QWidget):
         heading = QLabel("Connection & security")
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
-        subtitle = QLabel("Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.")
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        layout.addWidget(
+            TabNotice(
+                "Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.",
+                "Nothing is downgraded automatically: the exact policy and mode you choose is what gets used.",
+            )
+        )
 
         # Endpoint ---------------------------------------------------------
         endpoint_box = QGroupBox("Endpoint")
@@ -143,13 +147,33 @@ class ConnectionTab(QWidget):
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("opc.tcp://192.168.0.10:4840")
         self.url_edit.returnPressed.connect(self._on_discover)
-        endpoint_layout.addWidget(self.url_edit)
+        # The endpoints this window connected to successfully before; picking one
+        # only fills the field, it never connects by itself.
+        self.recent_combo = QComboBox()
+        self.recent_combo.setMinimumWidth(220)
+        self.recent_combo.setToolTip(
+            "Endpoints connected to successfully in this profile. Selecting one fills the field; "
+            "nothing connects until you press Discover endpoints."
+        )
+        self.recent_combo.activated.connect(self._on_recent_activated)
+        self._refresh_recent()
+        url_row = QHBoxLayout()
+        url_row.addWidget(self.url_edit, 1)
+        url_row.addWidget(QLabel("Recent:"))
+        url_row.addWidget(self.recent_combo)
+        endpoint_layout.addLayout(url_row)
         row = QHBoxLayout()
         self.discover_btn = QPushButton("Discover endpoints")
         self.discover_btn.clicked.connect(self._on_discover)
+        self.find_servers_btn = QPushButton("Find servers…")
+        self.find_servers_btn.setToolTip(
+            "Ask a discovery endpoint (LDS/GDS or any server) which applications it knows (FindServers)."
+        )
+        self.find_servers_btn.clicked.connect(self._on_find_servers)
         self.trust_btn = QPushButton("Trusted certificates…")
         self.trust_btn.clicked.connect(self._on_manage_trust)
         row.addWidget(self.discover_btn)
+        row.addWidget(self.find_servers_btn)
         row.addWidget(self.trust_btn)
         row.addStretch(1)
         endpoint_layout.addLayout(row)
@@ -228,7 +252,8 @@ class ConnectionTab(QWidget):
         layout.addWidget(identity_box)
 
         # Certificates -----------------------------------------------------
-        cert_box = QGroupBox("Client certificate & private key")
+        # Group-box titles are drawn with Qt::TextShowMnemonic: '&&' is one '&'.
+        cert_box = QGroupBox("Client certificate && private key")
         cert_layout = QGridLayout(cert_box)
         cert_layout.setColumnStretch(1, 1)
         self.cert_edit = QLineEdit()
@@ -405,6 +430,28 @@ class ConnectionTab(QWidget):
 
         QApplication.clipboard().setText(text)
 
+    def _refresh_recent(self) -> None:
+        """Rebuild the recent-endpoint pick list from the settings."""
+        current = self.recent_combo.currentText() if hasattr(self, "recent_combo") else ""
+        self.recent_combo.blockSignals(True)
+        self.recent_combo.clear()
+        self.recent_combo.addItem("recent…" if not self._settings.recent_endpoints else "choose…", "")
+        for url in self._settings.recent_endpoints:
+            self.recent_combo.addItem(url, url)
+        self.recent_combo.setCurrentIndex(0)
+        self.recent_combo.blockSignals(False)
+        self.recent_combo.setEnabled(bool(self._settings.recent_endpoints))
+        if current and self.recent_combo.findText(current) >= 0:
+            self.recent_combo.setCurrentText(current)
+
+    def _on_recent_activated(self, index: int) -> None:
+        """Fill the endpoint field from the pick list; never connects."""
+        url = self.recent_combo.itemData(index)
+        if not url:
+            return
+        self.url_edit.setText(str(url))
+        self.status_chip.setText("Endpoint selected — press Discover endpoints to connect")
+
     def _load_settings(self, settings: AppSettings) -> None:
         self.url_edit.setText(settings.last_endpoint)
         self.connect_timeout_spin.setValue(10.0)
@@ -502,6 +549,7 @@ class ConnectionTab(QWidget):
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self.connect_btn.setEnabled(not busy)
         self.discover_btn.setEnabled(not busy)
+        self.find_servers_btn.setEnabled(not busy)
         self.disconnect_btn.setEnabled(not busy and self._service.is_connected)
         self.cancel_btn.setEnabled(busy)
         if busy:
@@ -530,6 +578,7 @@ class ConnectionTab(QWidget):
     def _set_busy_controls_idle(self) -> None:
         self.connect_btn.setEnabled(not self._service.is_connected)
         self.discover_btn.setEnabled(True)
+        self.find_servers_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(self._service.is_connected)
         self.cancel_btn.setEnabled(False)
 
@@ -592,7 +641,11 @@ class ConnectionTab(QWidget):
                 self._show_error("The server did not provide a certificate for the selected secure endpoint.")
                 return
             summary = summarize_certificate(endpoint.certificate_der)
-            if not self._service.certificate_is_trusted(endpoint.certificate_der):
+            fingerprint = summary.sha256 or ""
+            if not fingerprint:
+                self._show_error("The server certificate could not be fingerprinted.")
+                return
+            if not self._service.trust_store.is_trusted(fingerprint):
                 known = self._service.trust_store.get(summary.sha256 or "")
                 approved = CertificateReviewDialog.ask(
                     self,
@@ -606,8 +659,8 @@ class ConnectionTab(QWidget):
                     set_chip_state(self.status_chip, "disconnected")
                     self.status_chip.setText("Disconnected (certificate not approved)")
                     return
-                self._service.approve_certificate(
-                    endpoint.certificate_der,
+                self._service.trust_store.add(
+                    fingerprint,
                     subject=summary.subject,
                     endpoint_url=endpoint.endpoint_url,
                     not_after=summary.not_after,
@@ -637,6 +690,8 @@ class ConnectionTab(QWidget):
         )
         self.status_chip.setText(self._connected_chip_text())
         self._settings.last_endpoint = info.endpoint_url
+        self._settings.remember_endpoint(info.endpoint_url)
+        self._refresh_recent()
         self._render_diagnostics(info=info)
 
         if self.clear_password_check.isChecked():
@@ -815,6 +870,24 @@ class ConnectionTab(QWidget):
     # -- trust store -------------------------------------------------------
     def _on_manage_trust(self) -> None:
         TrustStoreDialog(self, self._service).exec()
+
+    def _on_find_servers(self) -> None:
+        """Browse a discovery endpoint's server list; fill the URL on accept."""
+        dialog = ServerDirectoryDialog(
+            self,
+            self._runner,
+            self._service,
+            discovery_url=self.url_edit.text().strip(),
+        )
+        try:
+            accepted = dialog.exec() == int(ServerDirectoryDialog.DialogCode.Accepted)
+        finally:
+            dialog.shutdown()
+        if accepted and dialog.selected_url:
+            self.url_edit.setText(dialog.selected_url)
+            self.status_chip.setText("Endpoint taken from the server directory")
+            if self._discovery is not None:
+                self._render_diagnostics(discovery=self._discovery)
 
     # -- profiles ----------------------------------------------------------
     def _reload_profiles(self) -> None:

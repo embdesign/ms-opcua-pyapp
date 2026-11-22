@@ -32,8 +32,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...defaults import MAX_KEEP_ROWS, MIN_KEEP_ROWS
 from ...models import MonitorNotification, iso_utc
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 from .monitor_tab import DEFAULT_MAX_ROWS, MonitorTab
 
 _logger = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ def _is_bad_status(status: str) -> bool:
     return lowered.startswith("bad") or lowered.startswith(("rejected", "failed", "disabled", "invalid"))
 
 
-class UnifiedMonitorTab(QWidget):
+class UnifiedMonitorTab(SessionTab):
     """Merged, read-only view of all sessions' monitored items and notifications."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -123,7 +126,7 @@ class UnifiedMonitorTab(QWidget):
                     session_item.setText(title)
 
     def shutdown(self) -> None:
-        self._closed = True
+        super().shutdown()
         for key in list(self._sessions):
             self.unregister(key)
 
@@ -136,14 +139,14 @@ class UnifiedMonitorTab(QWidget):
         title = QLabel("All monitors")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "Merged view of every session's live monitor. This page is read-only: add, start, stop and remove "
-            "monitored items in the session's own Live monitor tab. Each row and log entry is labelled with the "
-            "session it came from; identical NodeIds on different servers stay separate."
+        layout.addWidget(
+            TabNotice(
+                "Merged, read-only view of every session's live monitor; start and stop in the session tab.",
+                "Merged view of every session's live monitor. This page is read-only: add, start, stop and remove "
+                "monitored items in the session's own Live monitor tab. Each row and log entry is labelled with "
+                "the session it came from; identical NodeIds on different servers stay separate.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         controls = QHBoxLayout()
         self.filter_combo = QComboBox()
@@ -155,7 +158,7 @@ class UnifiedMonitorTab(QWidget):
         self.clear_btn = QPushButton("Clear log")
         self.clear_btn.clicked.connect(self._on_clear_notifications)
         self.max_rows_spin = QSpinBox()
-        self.max_rows_spin.setRange(100, 50_000)
+        self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
         self.max_rows_spin.setValue(DEFAULT_MAX_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the merged notification log; the oldest rows are dropped first.")
@@ -512,10 +515,3 @@ class UnifiedMonitorTab(QWidget):
             self._set_status(
                 "No monitored items yet. Add nodes and start the subscription in a session's Live monitor tab."
             )
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)

@@ -1,8 +1,8 @@
 """Main window: any number of OPC UA sessions plus a shared log/report view.
 
 Each session is a :class:`~opcua_explorer.gui.session_workspace.SessionWorkspace`
-with its own five tabs (Connection, Address space, Export, Live monitor, Tests)
-and its own ``OpcUaService``. The window shell owns the tab bar, the menus and
+with its own ten tabs (Connection, Address space, Export, Live monitor, Events,
+History, Write & call, Server, Tests, Sequences) and its own ``OpcUaService``. The window shell owns the tab bar, the menus and
 the status bar, and keeps one global "Logs & reports" tab shared by all
 sessions (operator summaries are prefixed with the session name).
 """
@@ -26,9 +26,10 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import AppSettings, TrustStore
 from ..opcua.client_service import OpcUaService
-from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectError, ProjectFile
+from ..project import PROJECT_FILE_FILTER, PROJECT_SUFFIX, ProjectFile
 from .async_runner import AsyncRunner
 from .session_workspace import SessionWorkspace
+from .tab_notice import apply_notices
 from .tabs import CompareTab, LogsTab, UnifiedMonitorTab
 from .theme import set_chip_state
 
@@ -65,7 +66,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_current_tab_changed)
         self.setCentralWidget(self.tabs)
 
-        self.logs_tab = LogsTab()
+        self.logs_tab = LogsTab(self._runner)
         self.unified_monitor_tab = UnifiedMonitorTab()
         #: Read-only comparison of two sessions; it owns no client of its own.
         self.compare_tab = CompareTab(self._runner, self._settings)
@@ -77,12 +78,15 @@ class MainWindow(QMainWindow):
         self.add_session(service)
         self.tabs.addTab(self.unified_monitor_tab, "All monitors")
         self.tabs.addTab(self.compare_tab, "Compare")
-        self.tabs.addTab(self.logs_tab, "Logs & reports")
+        # Tab labels are drawn with Qt::TextShowMnemonic: '&&' is one literal '&',
+        # a bare '&' would be swallowed as a mnemonic marker ("Logs _reports").
+        self.tabs.addTab(self.logs_tab, "Logs && reports")
         for fixed in (self.unified_monitor_tab, self.compare_tab, self.logs_tab):
             self._disable_close_button(self.tabs.indexOf(fixed))
         self.compare_tab.message.connect(self._on_message)
         self.compare_tab.report.connect(self.logs_tab.append_report)
 
+        self._apply_show_descriptions()
         _logger.info("OPC UA Explorer %s started", __version__)
         self.statusBar().showMessage("Ready. Enter an endpoint URL on the Connection tab.")
 
@@ -100,6 +104,7 @@ class MainWindow(QMainWindow):
         workspace.changed.connect(self._on_workspace_changed)
         workspace.message.connect(self._on_message)
         workspace.report.connect(self.logs_tab.append_report)
+        workspace.set_verbose_notices(self._settings.show_tab_descriptions)
         self.workspaces.append(workspace)
         self.unified_monitor_tab.register(workspace, workspace.title, workspace.monitor_tab)
         logs_index = self.tabs.indexOf(self.logs_tab)
@@ -180,6 +185,22 @@ class MainWindow(QMainWindow):
     @property
     def monitor_tab(self) -> Any:
         return self.workspaces[0].monitor_tab
+
+    @property
+    def events_tab(self) -> Any:
+        return self.workspaces[0].events_tab
+
+    @property
+    def server_tab(self) -> Any:
+        return self.workspaces[0].server_tab
+
+    @property
+    def history_tab(self) -> Any:
+        return self.workspaces[0].history_tab
+
+    @property
+    def write_tab(self) -> Any:
+        return self.workspaces[0].write_tab
 
     @property
     def tests_tab(self) -> Any:
@@ -289,10 +310,79 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        view_menu = self.menuBar().addMenu("&View")
+        self.show_descriptions_action = QAction("Show tab descriptions", self)
+        self.show_descriptions_action.setCheckable(True)
+        self.show_descriptions_action.setChecked(self._settings.show_tab_descriptions)
+        self.show_descriptions_action.setStatusTip(
+            "Show the full explanation at the top of each page instead of its one-line summary."
+        )
+        self.show_descriptions_action.toggled.connect(self._on_show_descriptions_toggled)
+        view_menu.addAction(self.show_descriptions_action)
+
+        # Navigation without the mouse: ten pages per session and any number of
+        # sessions are two levels, so both get a shortcut pair.
+        view_menu.addSeparator()
+        self.next_page_action = QAction("Next page", self)
+        self.next_page_action.setShortcut(QKeySequence("Ctrl+PgDown"))
+        self.next_page_action.triggered.connect(lambda: self.step_page(1))
+        view_menu.addAction(self.next_page_action)
+
+        self.previous_page_action = QAction("Previous page", self)
+        self.previous_page_action.setShortcut(QKeySequence("Ctrl+PgUp"))
+        self.previous_page_action.triggered.connect(lambda: self.step_page(-1))
+        view_menu.addAction(self.previous_page_action)
+
+        view_menu.addSeparator()
+        self.next_session_action = QAction("Next session", self)
+        self.next_session_action.setShortcut(QKeySequence("Ctrl+Tab"))
+        self.next_session_action.triggered.connect(lambda: self.step_session(1))
+        view_menu.addAction(self.next_session_action)
+
+        self.previous_session_action = QAction("Previous session", self)
+        self.previous_session_action.setShortcut(QKeySequence("Ctrl+Shift+Tab"))
+        self.previous_session_action.triggered.connect(lambda: self.step_session(-1))
+        view_menu.addAction(self.previous_session_action)
+
         help_menu = self.menuBar().addMenu("&Help")
         about = QAction("About OPC UA Explorer", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
+
+    # -- page descriptions -------------------------------------------------
+    def step_page(self, step: int) -> None:
+        """Move to the next/previous page of the visible session (wraps around)."""
+        workspace = self.active_workspace
+        if workspace is not None:
+            workspace.step_page(step)
+
+    def step_session(self, step: int) -> None:
+        """Move to the next/previous session tab, skipping the shared tabs."""
+        if len(self.workspaces) < 2:
+            return
+        indices = [self.tabs.indexOf(workspace) for workspace in self.workspaces]
+        current = self.tabs.currentIndex()
+        if current in indices:
+            position = indices.index(current) + (1 if step > 0 else -1)
+        else:  # a shared tab is visible: continue from the nearest session
+            position = 0 if step > 0 else len(indices) - 1
+        self.tabs.setCurrentIndex(indices[position % len(indices)])
+
+    def _on_show_descriptions_toggled(self, checked: bool) -> None:
+        """One switch for every page description in every session, persisted in the settings."""
+        self._settings.show_tab_descriptions = bool(checked)
+        self._apply_show_descriptions()
+        try:
+            self._settings.save()
+        except OSError as exc:  # pragma: no cover - an unwritable profile is not fatal
+            _logger.warning("Saving the settings failed: %s", exc)
+
+    def _apply_show_descriptions(self) -> None:
+        show = bool(self._settings.show_tab_descriptions)
+        for workspace in self.workspaces:
+            workspace.set_verbose_notices(show)
+        for fixed in (self.unified_monitor_tab, self.compare_tab, self.logs_tab):
+            apply_notices(fixed, show)
 
     # -- shell status ------------------------------------------------------
     def _on_current_tab_changed(self, _index: int) -> None:
@@ -334,7 +424,9 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         suffix = {"connecting": " — reconnecting", "error": " — link lost"}.get(workspace.chip_state, "")
-        self.tabs.setTabText(index, f"{self._display_title(workspace)}{suffix}")
+        # Session titles come from project files and from the server's application
+        # name, so an '&' can arrive here; '&&' keeps it visible in the tab label.
+        self.tabs.setTabText(index, f"{self._display_title(workspace)}{suffix}".replace("&", "&&"))
         self.tabs.setTabToolTip(index, workspace.describe())
 
     def _display_title(self, workspace: SessionWorkspace) -> str:
@@ -377,11 +469,20 @@ class MainWindow(QMainWindow):
             return
         if not path.lower().endswith(".json"):
             path += PROJECT_SUFFIX
+        project = self.project_state()
         try:
-            self.save_project(path)
-        except (ProjectError, OSError) as exc:
+            self._runner.submit_call(
+                project.save,
+                path,
+                on_done=lambda _result: self._project_saved(path, len(project.sessions)),
+                on_error=lambda message: QMessageBox.warning(self, "Save project", message),
+            )
+        except RuntimeError as exc:
             QMessageBox.warning(self, "Save project", str(exc))
-            return
+
+    def _project_saved(self, path: str, sessions: int) -> None:
+        self.logs_tab.append_report(f"Project saved: {path} ({sessions} session(s)).")
+        self.statusBar().showMessage(f"Project saved to {path}.", 8000)
         self._remember_project_path(path)
 
     def _on_open_project(self) -> None:
@@ -392,10 +493,16 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            project = ProjectFile.load(path)
-        except ProjectError as exc:
+            self._runner.submit_call(
+                ProjectFile.load,
+                path,
+                on_done=lambda project: self._open_loaded_project(project, path),
+                on_error=lambda message: QMessageBox.warning(self, "Open project", message),
+            )
+        except RuntimeError as exc:
             QMessageBox.warning(self, "Open project", str(exc))
-            return
+
+    def _open_loaded_project(self, project: ProjectFile, path: str) -> None:
         if any(workspace.service.is_connected for workspace in self.workspaces):
             answer = QMessageBox.question(
                 self,

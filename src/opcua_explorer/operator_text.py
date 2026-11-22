@@ -45,6 +45,188 @@ def guarded_operation_confirmation(*, endpoint_url: str, config: TestConfig) -> 
     return "\n".join(lines)
 
 
+def write_value_confirmation(
+    *,
+    endpoint_url: str,
+    node_id: str,
+    value_preview: str,
+    data_type_label: str,
+    value_rank: int,
+    restore_previous: bool,
+    previous_value: str = "",
+) -> str:
+    """Confirmation body for one interactive variable write from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one write will be sent, then read back and compared:",
+        f"  WRITE  {node_id}  \u2190  {value_preview}",
+        f"  Type: {data_type_label}, ValueRank {value_rank}",
+    ]
+    if previous_value:
+        lines.append(f"  Current value: {previous_value}")
+    lines.extend(
+        [
+            "  Restore afterwards: " + ("yes, one additional verified write" if restore_previous else "no"),
+            "",
+            "A refused write, a differing read-back, or an unreadable previous value is reported as such. "
+            "Nothing is retried and no value is restored unless you asked for it.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def method_call_confirmation(    *,
+    endpoint_url: str,
+    object_node_id: str,
+    method_node_id: str,
+    arguments: list[str],
+    executable_status: str = "",
+) -> str:
+    """Confirmation body for one interactive method call from the Write & call tab."""
+    rendered = ", ".join(arguments) if arguments else "no arguments"
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one method call will be sent:",
+        f"  CALL  {method_node_id} on {object_node_id}",
+        f"  Arguments ({len(arguments)}): {rendered}",
+    ]
+    if executable_status:
+        lines.append(f"  Executable: {executable_status}")
+    lines.extend(
+        [
+            "",
+            "The arguments were parsed with the server's InputArguments. The call is never retried, and its "
+            "output arguments are reported as the server returned them.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def attribute_write_confirmation(
+    *,
+    endpoint_url: str,
+    node_id: str,
+    attribute_name: str,
+    text: str,
+    previous_text: str = "",
+) -> str:
+    """Confirmation body for one DisplayName/Description write from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one attribute write will be sent, then read back and compared:",
+        f"  WRITE  {attribute_name} of {node_id}",
+        f"  new text: {text!r}",
+    ]
+    if previous_text:
+        lines.append(f"  current text: {previous_text!r}")
+    lines.extend(
+        [
+            "",
+            "This changes the node's metadata (its name or description), not its process value. Servers "
+            "usually allow only privileged users to write non-Value attributes, so a refusal is reported "
+            "with its StatusCode. Nothing is retried.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def node_create_confirmation(
+    *,
+    endpoint_url: str,
+    node_class: str,
+    browse_name: str,
+    parent_node_id: str,
+    display_name: str = "",
+    data_type: str = "",
+    value_text: str = "",
+) -> str:
+    """Confirmation body for one AddNodes request from the Write & call tab."""
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one node will be created, with a NodeId the server assigns:",
+        f"  CREATE  {node_class} {browse_name!r} below {parent_node_id}",
+    ]
+    if display_name:
+        lines.append(f"  DisplayName: {display_name!r}")
+    if node_class == "Variable" and data_type:
+        lines.append(f"  DataType: {data_type}, initial value {value_text!r}")
+    lines.extend(
+        [
+            "",
+            "This changes the server's address space, not a process value. Servers usually allow node management "
+            "for administrators only, so a refusal is reported with its StatusCode. One node is created — no "
+            "children, no references and no batch — and it is read back afterwards. Nothing is retried.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def node_delete_confirmation(*, endpoint_url: str, node_id: str) -> str:
+    """Confirmation body for one DeleteNodes request from the Write & call tab."""
+    return "\n".join(
+        [
+            f"Endpoint: {endpoint_url}",
+            "",
+            "Exactly one node will be deleted:",
+            f"  DELETE  {node_id}",
+            "",
+            "This removes the node from the server's address space. Deleting a node that still has children or "
+            "that a running process depends on can break the server or the process; the client does not check "
+            "for children first and does not offer an undo. References to the node are deleted with it, one "
+            "request only, never retried.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+
+
+def acknowledge_condition_confirmation(
+    *, endpoint_url: str, condition_node_id: str, event_id: str, comment: str
+) -> str:
+    """Confirmation body for one condition acknowledgement (Acknowledge method)."""
+    return "\n".join(
+        [
+            f"Endpoint: {endpoint_url}",
+            "",
+            "One method call will be sent exactly once:",
+            f"  CALL Acknowledge on {condition_node_id}",
+            f"  EventId: {event_id}",
+            f"  Comment: {comment or '(empty)'}",
+            "",
+            "This acknowledges one condition event. It does not write a variable, does not confirm the "
+            "condition and is never retried; the server decides whether the acknowledgement is accepted.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+
+
+def condition_refresh_text(*, subscription_id: int | None, object_node_id: str) -> str:
+    """What a ``ConditionRefresh`` call does, for the Events tab and its log line.
+
+    No dialog uses this text: the call stores nothing and interrupts nothing, so
+    the operator only needs to know what it asks the server to do.
+    """
+    return (
+        f"ConditionRefresh on subscription {subscription_id} (method call on {object_node_id}): the server "
+        "is asked to publish the Conditions it already retains for this subscription again. Nothing is "
+        "written, acknowledged, confirmed or reset, no condition is cleared and the call is sent once "
+        "without a retry. The server's RefreshStart/RefreshEnd events are the only evidence it arrived."
+    )
+
+
 def connection_diagnostics_text(
     *,
     discovery: DiscoveryResult | None = None,

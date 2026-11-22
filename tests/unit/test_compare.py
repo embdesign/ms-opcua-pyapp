@@ -26,6 +26,7 @@ from opcua_explorer.models import (
     Edge,
     NamespaceEntry,
     NodeRecord,
+    TraversalConfig,
     ValueSnapshot,
 )
 
@@ -518,3 +519,61 @@ def test_summary_document_is_versioned() -> None:
     assert document["differences"][0]["kind"] == KIND_MISSING_IN_CANDIDATE
     assert document["reference"]["nodes"] == 3
     assert document["candidate"]["nodes"] == 2
+
+
+# -- device attributes and references that leave the download --------------
+
+
+def _device_snapshot(endpoint: str, *, write_mask: str, include: bool = True) -> AddressSpace:
+    node = _node("ns=1;i=7", device_attributes={"WriteMask": write_mask, "Historizing": "False"})
+    snapshot = _snapshot(endpoint, [*_base_nodes()[:1], node])
+    snapshot.config = TraversalConfig(include_device_attributes=include)
+    return snapshot
+
+
+def test_device_attributes_need_the_device_tolerance() -> None:
+    """Write masks and historizing are invisible to functional/strict by contract."""
+    reference = _device_snapshot("opc.tcp://old:4840", write_mask="CurrentWrite")
+    candidate = _device_snapshot("opc.tcp://new:4840", write_mask="CurrentRead")
+
+    functional = compare_address_spaces(
+        reference, candidate, ComparisonConfig(tolerance="functional")
+    )
+    strict = compare_address_spaces(reference, candidate, ComparisonConfig(tolerance="strict"))
+    device = compare_address_spaces(reference, candidate, ComparisonConfig(tolerance="device"))
+
+    assert functional.changed == [], functional.summary_text()
+    assert strict.changed == [], strict.summary_text()
+    assert len(device.changed) == 1
+    assert device.device_attributes_compared is True
+    attributes = {item.attribute for item in device.changed[0].attributes}
+    assert "WriteMask" in attributes
+    assert device.changed[0].attributes[0].reference != device.changed[0].attributes[0].candidate
+
+
+def test_the_device_tolerance_says_when_a_snapshot_lacks_device_attributes() -> None:
+    """A snapshot without them must not look equal — it was not looked at."""
+    reference = _device_snapshot("opc.tcp://old:4840", write_mask="CurrentWrite")
+    candidate = _device_snapshot("opc.tcp://new:4840", write_mask="CurrentRead", include=False)
+
+    result = compare_address_spaces(reference, candidate, ComparisonConfig(tolerance="device"))
+
+    assert result.device_attributes_compared is False
+    assert result.changed == []
+    assert any("downloaded without them" in warning for warning in result.warnings)
+    assert result.to_dict()["device_attributes_compared"] is False
+
+
+def test_reference_edges_outside_the_download_are_counted_not_reported_as_differences() -> None:
+    """A reference to a node outside the subtree is not evidence of a difference."""
+    reference = _snapshot("opc.tcp://old:4840", _base_nodes())
+    reference.references = [Edge("ns=1;i=5", "ns=1;i=999", "i=47", "HasComponent")]
+    candidate = _snapshot("opc.tcp://new:4840", _base_nodes())
+
+    result = compare_address_spaces(reference, candidate, ComparisonConfig(compare_references=True))
+
+    assert result.reference_differences == []
+    assert result.reference_edges_not_compared == 1
+    assert any("outside that download" in warning for warning in result.warnings)
+    assert "were not compared" in result.summary_text()
+    assert result.to_dict()["reference_edges_not_compared"] == 1

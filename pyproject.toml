@@ -1,7 +1,7 @@
 [project]
 name = "opcua-explorer"
-version = "0.1.1"
-description = "Desktop OPC UA address-space browser, exporter and functional interoperability test client"
+version = "0.1.2"
+description = "Desktop OPC UA client: browse, download, export, monitor, write, call methods and run operator sequences"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "MIT" }
@@ -36,6 +36,9 @@ validation = ["lxml>=5.0"]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=1.0",
+    # Optional parallel runs: `uv run pytest -n auto --dist loadscope`.
+    # Module-scoped `qapp` and free-port demo servers make loadscope safe.
+    "pytest-xdist>=3.6",
     "lxml>=5.0",
     # tests/support.py creates throw-away certificates; do not rely on asyncua's
     # transitive dependency for it.
@@ -47,8 +50,26 @@ opcua-explorer = "opcua_explorer.gui.app:main"
 opcua-demo-server = "opcua_explorer.demo.demo_server:main"
 # Headless address-space export (Qt-free, same services as the GUI Export tab).
 opcua-export = "opcua_explorer.cli:main"
-# Headless comparison of two address spaces (Qt-free, read-only).
+# Headless comparison of two address spaces (Qt-free).
 opcua-compare = "opcua_explorer.cli_compare:main"
+# Headless read of one or more node attributes (Qt-free).
+opcua-read = "opcua_explorer.cli_read:main"
+# Headless live data-change monitor (Qt-free).
+opcua-monitor = "opcua_explorer.cli_monitor:main"
+# Headless event subscription, with ConditionRefresh and a confirmed Acknowledge (Qt-free).
+opcua-events = "opcua_explorer.cli_events:main"
+# Headless raw-history read (Qt-free).
+opcua-history = "opcua_explorer.cli_history:main"
+# Headless guarded single write (Qt-free, needs --confirm).
+opcua-write = "opcua_explorer.cli_write:main"
+# Headless functional/interoperability checks with the Tests-tab suite (Qt-free).
+opcua-check = "opcua_explorer.cli_check:main"
+# Headless server status/diagnostics read (Qt-free, read-only).
+opcua-status = "opcua_explorer.cli_status:main"
+# Headless single-node create/delete/attribute write (Qt-free, needs --confirm).
+opcua-nodes = "opcua_explorer.cli_nodes:main"
+# Headless FindServers directory lookup (Qt-free, no session).
+opcua-directory = "opcua_explorer.cli_directory:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
@@ -39,9 +40,15 @@ from ...defaults import (
     DEFAULT_MONITOR_KEEP_ROWS,
     DEFAULT_PUBLISHING_INTERVAL_MS,
     DEFAULT_SAMPLING_INTERVAL_MS,
+    MAX_KEEP_ROWS,
+    MAX_PUBLISHING_INTERVAL_MS,
+    MIN_KEEP_ROWS,
+    MIN_PUBLISHING_INTERVAL_MS,
 )
 from ...errors import InvalidNodeIdError
 from ...models import (
+    DATA_CHANGE_TRIGGERS,
+    DEADBAND_TYPES,
     MonitorConfig,
     MonitoredItemInfo,
     MonitorNotification,
@@ -53,7 +60,9 @@ from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...project import MonitorState
 from ..async_runner import AsyncRunner
+from ..tab_notice import TabNotice
 from ..theme import ERROR, mono_font
+from .base import SessionTab
 
 _logger = logging.getLogger(__name__)
 
@@ -66,7 +75,7 @@ _VALUE_CELL_CHARS = 300
 _LATEST_CELL_CHARS = 120
 
 
-class MonitorTab(QWidget):
+class MonitorTab(SessionTab):
     """One subscription, a monitored-item list and a bounded live notification table."""
 
     #: Emitted on the GUI thread for every notification delivered to this tab.
@@ -78,6 +87,9 @@ class MonitorTab(QWidget):
         super().__init__(parent)
         self._runner = runner
         self._service = service
+        #: GUI-side connection state pushed by ``set_connected``.
+        self._connected = False
+        self._endpoint_url = ""
         self._running = False
         self._busy = False
         self._paused = False
@@ -86,6 +98,7 @@ class MonitorTab(QWidget):
         self._subscription_id: int | None = None
         self._total_notifications = 0
         self._dropped = 0
+        self._monitoring_mode = "Reporting"
         #: node_id -> last notification, used by the in-place value columns.
         self._latest: dict[str, MonitorNotification] = {}
 
@@ -101,15 +114,15 @@ class MonitorTab(QWidget):
         title = QLabel("Live monitor")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
-        subtitle = QLabel(
-            "One data-change subscription on nodes you add explicitly. The left table keeps one row per node "
-            "and overwrites it with the latest value; the notification list is an append-only log. The server "
-            "decides the effective publishing and sampling rate. Nothing is written to the server and nothing is "
-            "exported from this tab."
+        layout.addWidget(
+            TabNotice(
+                "One data-change subscription on the nodes you add; the server decides the effective rates.",
+                "One data-change subscription on nodes you add explicitly. The left table keeps one row per node "
+                "and overwrites it with the latest value; the notification list is an append-only log. The server "
+                "decides the effective publishing and sampling rate. Nothing is written to the server and nothing "
+                "is exported from this tab.",
+            )
         )
-        subtitle.setObjectName("subTitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
 
         items_row = QHBoxLayout()
         self.node_edit = QLineEdit()
@@ -130,14 +143,14 @@ class MonitorTab(QWidget):
 
         controls = QHBoxLayout()
         self.publishing_spin = QDoubleSpinBox()
-        self.publishing_spin.setRange(50.0, 60_000.0)
+        self.publishing_spin.setRange(MIN_PUBLISHING_INTERVAL_MS, MAX_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setDecimals(0)
         self.publishing_spin.setSingleStep(100.0)
         self.publishing_spin.setValue(DEFAULT_PUBLISHING_INTERVAL_MS)
         self.publishing_spin.setSuffix(" ms")
         self.publishing_spin.setToolTip("Requested publishing interval of the subscription.")
         self.sampling_spin = QDoubleSpinBox()
-        self.sampling_spin.setRange(0.0, 60_000.0)
+        self.sampling_spin.setRange(0.0, MAX_PUBLISHING_INTERVAL_MS)
         self.sampling_spin.setDecimals(0)
         self.sampling_spin.setSingleStep(100.0)
         self.sampling_spin.setValue(DEFAULT_SAMPLING_INTERVAL_MS)
@@ -155,7 +168,7 @@ class MonitorTab(QWidget):
         self.clear_log_btn = QPushButton("Clear notifications")
         self.clear_log_btn.clicked.connect(self._on_clear_notifications)
         self.max_rows_spin = QSpinBox()
-        self.max_rows_spin.setRange(100, 50_000)
+        self.max_rows_spin.setRange(MIN_KEEP_ROWS, MAX_KEEP_ROWS)
         self.max_rows_spin.setSingleStep(100)
         self.max_rows_spin.setValue(DEFAULT_MAX_ROWS)
         self.max_rows_spin.setToolTip("Rows kept in the notification table; the oldest rows are dropped first.")
@@ -174,6 +187,53 @@ class MonitorTab(QWidget):
         controls.addWidget(QLabel("Keep rows:"))
         controls.addWidget(self.max_rows_spin)
         layout.addLayout(controls)
+
+        filter_row = QHBoxLayout()
+        self.trigger_combo = QComboBox()
+        self.trigger_combo.addItems(list(DATA_CHANGE_TRIGGERS))
+        self.trigger_combo.setCurrentText("StatusValue")
+        self.trigger_combo.setToolTip(
+            "DataChangeTrigger: report on status changes, on status or value changes (default), or also "
+            "include source-timestamp changes."
+        )
+        self.deadband_combo = QComboBox()
+        self.deadband_combo.addItems(list(DEADBAND_TYPES))
+        self.deadband_combo.setToolTip(
+            "Deadband suppresses notifications while the value stays within the band. Absolute uses the "
+            "variable's engineering units; Percent needs an EURange property on the server."
+        )
+        self.deadband_combo.currentTextChanged.connect(self._on_deadband_changed)
+        self.deadband_spin = QDoubleSpinBox()
+        self.deadband_spin.setRange(0.0, 1_000_000.0)
+        self.deadband_spin.setDecimals(3)
+        self.deadband_spin.setSingleStep(0.1)
+        self.deadband_spin.setValue(0.0)
+        self.deadband_spin.setToolTip("Deadband value; ignored when the deadband type is None.")
+        self.apply_intervals_btn = QPushButton("Apply intervals")
+        self.apply_intervals_btn.setToolTip(
+            "Modify the running subscription (ModifySubscription / ModifyMonitoredItems); the server may "
+            "revise the requested intervals."
+        )
+        self.apply_intervals_btn.clicked.connect(self._on_apply_intervals)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Reporting", "Sampling", "Disabled"])
+        self.mode_combo.setToolTip(
+            "Server-side SetMonitoringMode for every monitored item: Reporting delivers notifications, "
+            "Sampling only samples, Disabled stops sampling. Rows and the log are kept."
+        )
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+
+        filter_row.addWidget(QLabel("Trigger:"))
+        filter_row.addWidget(self.trigger_combo)
+        filter_row.addWidget(QLabel("Deadband:"))
+        filter_row.addWidget(self.deadband_combo)
+        filter_row.addWidget(self.deadband_spin)
+        filter_row.addWidget(self.apply_intervals_btn)
+        filter_row.addSpacing(12)
+        filter_row.addWidget(QLabel("Server mode:"))
+        filter_row.addWidget(self.mode_combo)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         splitter = QSplitter(Qt.Horizontal)
 
@@ -247,6 +307,9 @@ class MonitorTab(QWidget):
 
     # -- connection state --------------------------------------------------
     def set_connected(self, connected: bool, connection: Any = None) -> None:
+        self._connected = bool(connected)
+        if connection is not None:
+            self._endpoint_url = str(getattr(connection, "endpoint_url", "") or "")
         if not connected:
             self._detach_listener()
             self._running = False
@@ -254,6 +317,10 @@ class MonitorTab(QWidget):
             self._subscription_id = None
             self._paused = False
             self.pause_btn.setChecked(False)
+            self._monitoring_mode = "Reporting"
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText("Reporting")
+            self.mode_combo.blockSignals(False)
             self.items_table.setRowCount(0)
             self.notifications_table.setRowCount(0)
             self.details_view.clear()
@@ -267,8 +334,8 @@ class MonitorTab(QWidget):
 
     def shutdown(self) -> None:
         """Stop receiving notifications; the service deletes the subscription on shutdown."""
-        self._closed = True
         self._detach_listener()
+        super().shutdown()
 
     def _detach_listener(self) -> None:
         if self._monitor_key is not None:
@@ -280,7 +347,18 @@ class MonitorTab(QWidget):
         return MonitorConfig(
             publishing_interval_ms=float(self.publishing_spin.value()),
             sampling_interval_ms=float(self.sampling_spin.value()),
+            trigger=self.trigger_combo.currentText(),
+            deadband_type=self.deadband_combo.currentText(),
+            deadband_value=float(self.deadband_spin.value()),
         ).normalised()
+
+    def _on_deadband_changed(self, deadband_type: str) -> None:
+        """Percent deadband is 0–100; absolute is unbounded engineering units."""
+        if deadband_type == "Percent":
+            self.deadband_spin.setRange(0.0, 100.0)
+        else:
+            self.deadband_spin.setRange(0.0, 1_000_000.0)
+        self.deadband_spin.setEnabled(deadband_type != "None" and not self._running and not self._busy)
 
     # -- monitored items ---------------------------------------------------
     def add_node(self, node_id: str) -> bool:
@@ -296,7 +374,7 @@ class MonitorTab(QWidget):
         if self._find_item_row(canonical) is not None:
             self._set_status(f"{canonical} is already in the monitored-item list.")
             return False
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return False
 
@@ -477,7 +555,7 @@ class MonitorTab(QWidget):
         if not node_ids:
             self._set_status("Add at least one NodeId before starting the monitor.", error=True)
             return
-        if not self._service.is_connected:
+        if not self._connected:
             self._set_status("Connect to a server first.", error=True)
             return
 
@@ -500,6 +578,10 @@ class MonitorTab(QWidget):
         self._busy = False
         self._running = True
         self._subscription_id = start.subscription_id
+        self._monitoring_mode = "Reporting"
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText("Reporting")
+        self.mode_combo.blockSignals(False)
         for info in start.items:
             self._apply_item_info(info)
         self._set_status(start.summary_text())
@@ -532,7 +614,11 @@ class MonitorTab(QWidget):
         self._busy = False
         self._running = False
         self._subscription_id = None
+        self._monitoring_mode = "Reporting"
         self._detach_listener()
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText("Reporting")
+        self.mode_combo.blockSignals(False)
         for row in range(self.items_table.rowCount()):
             self.items_table.setItem(row, 2, QTableWidgetItem("stopped"))
             node_item = self.items_table.item(row, 0)
@@ -614,6 +700,60 @@ class MonitorTab(QWidget):
                     status_item.setForeground(QColor(ERROR))
         self._set_status(f"Subscribing failed: {message}", error=True)
         self.items_changed.emit()
+
+    # -- runtime subscription changes --------------------------------------
+    def _on_apply_intervals(self) -> None:
+        if self._busy or not self._running:
+            return
+        publishing = float(self.publishing_spin.value())
+        sampling = float(self.sampling_spin.value())
+        self._set_status(f"Applying intervals (publishing {publishing:.0f} ms, sampling {sampling:.0f} ms)…")
+
+        def done(result: Any) -> None:
+            revised, failures = result
+            if failures:
+                self._set_status(
+                    f"Publishing interval revised to {revised:.0f} ms; sampling was refused for: "
+                    + ", ".join(failures),
+                    error=True,
+                )
+                return
+            self._set_status(
+                f"Intervals applied: publishing revised to {revised:.0f} ms, sampling {sampling:.0f} ms."
+            )
+            self._update_counters()
+
+        self._runner.submit(
+            lambda: self._service.monitor_apply_intervals(
+                publishing_interval_ms=publishing, sampling_interval_ms=sampling
+            ),
+            on_done=done,
+            on_error=lambda message: self._set_status(
+                f"Applying the intervals failed: {message}", error=True
+            ),
+        )
+
+    def _on_mode_changed(self, mode: str) -> None:
+        if self._busy or not self._running:
+            return
+        self._set_status(f"Setting the server monitoring mode to {mode}…")
+
+        def done(applied: str) -> None:
+            self._monitoring_mode = applied
+            note = " No data changes are delivered while disabled." if applied == "Disabled" else ""
+            self._set_status(f"Server monitoring mode is {applied}.{note}")
+
+        def failed(message: str) -> None:
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(self._monitoring_mode)
+            self.mode_combo.blockSignals(False)
+            self._set_status(f"Changing the monitoring mode failed: {message}", error=True)
+
+        self._runner.submit(
+            lambda: self._service.monitor_set_mode(mode),
+            on_done=done,
+            on_error=failed,
+        )
 
     # -- notifications -----------------------------------------------------
     def _on_progress(self, payload: Any) -> None:
@@ -793,7 +933,7 @@ class MonitorTab(QWidget):
 
     # -- controls ----------------------------------------------------------
     def _update_controls(self) -> None:
-        connected = self._service.is_connected
+        connected = self._connected
         has_items = self.items_table.rowCount() > 0
         has_selection = bool(self.items_table.selectedIndexes())
 
@@ -801,8 +941,18 @@ class MonitorTab(QWidget):
         self.add_btn.setEnabled(connected and not self._busy)
         self.remove_btn.setEnabled(connected and has_selection and not self._busy)
         self.clear_items_btn.setEnabled(connected and not self._running)
-        self.publishing_spin.setEnabled(not self._running)
-        self.sampling_spin.setEnabled(not self._running)
+        # The interval fields stay editable while running so "Apply intervals"
+        # can modify the live subscription; the filter is fixed at start.
+        self.publishing_spin.setEnabled(connected and not self._busy)
+        self.sampling_spin.setEnabled(connected and not self._busy)
+        filter_editable = connected and not self._running and not self._busy
+        self.trigger_combo.setEnabled(filter_editable)
+        self.deadband_combo.setEnabled(filter_editable)
+        self.deadband_spin.setEnabled(
+            filter_editable and self.deadband_combo.currentText() != "None"
+        )
+        self.apply_intervals_btn.setEnabled(self._running and not self._busy)
+        self.mode_combo.setEnabled(self._running and not self._busy)
         self.start_btn.setEnabled(connected and has_items and not self._running and not self._busy)
         self.stop_btn.setEnabled(self._running and not self._busy)
         self.pause_btn.setEnabled(self._running)
@@ -817,10 +967,3 @@ class MonitorTab(QWidget):
         if self._dropped:
             parts.append(f"{self._dropped} not added while paused")
         self.counters_label.setText(" · ".join(parts))
-
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self.status_label.setText(("⚠ " if error else "") + message)
-        self.status_label.setObjectName("errorLabel" if error else "hintLabel")
-        style = self.status_label.style()
-        style.unpolish(self.status_label)
-        style.polish(self.status_label)

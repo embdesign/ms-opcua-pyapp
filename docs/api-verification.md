@@ -62,6 +62,16 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   `QualifiedName(name, namespace_index)` works).
 * Attribute ids: NodeId 1, NodeClass 2, BrowseName 3, DisplayName 4, Description 5, Value 13, DataType 14,
   ValueRank 15, ArrayDimensions 16, AccessLevel 17, UserAccessLevel 18.
+* Attribute ids used by the details panel (verified 2026-11-16): WriteMask 6, UserWriteMask 7, IsAbstract 8,
+  Symmetric 9, InverseName 10, ContainsNoLoops 11, EventNotifier 12, MinimumSamplingInterval 19, Historizing 20,
+  DataTypeDefinition 23, RolePermissions 24, UserRolePermissions 25, AccessRestrictions 26. `NodeVersion` does
+  not exist in asyncua 2.1.0's `AttributeIds`.
+* Bit fields are modelled two different ways and must not be decoded with the same helper:
+  `ua.AccessLevel` and `ua.EventNotifier` carry bit **positions** (`EventNotifier.SubscribeToEvents == 0`) and
+  decode with `Enum.parse_bitfield(value)`; `ua.AttributeWriteMask`, `ua.AccessRestrictionType` and
+  `ua.PermissionType` carry bit **masks** (`AttributeWriteMask.AccessLevel == 1`,
+  `AttributeWriteMask.EventNotifier == 128`) and decode by testing `value & int(member)`.
+  `ua.RolePermissionType` has `RoleId` (NodeId) and `Permissions` (PermissionType mask).
 * ObjectIds used: References 31, HierarchicalReferences 33, HasChild 34, Organizes 35, HasTypeDefinition 40,
   HasSubtype 45, HasProperty 46, HasComponent 47.
 
@@ -99,9 +109,10 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
 * `await client.create_subscription(period: float | ua.CreateSubscriptionParameters, handler, publishing=True,
   queue_maxsize=1000, overflow=OverflowPolicy.DROP_OLDEST)` returns a `Subscription`; internally it creates the
   subscription, applies the server's revised parameters and registers the subscription on the client.
-* `Subscription.parameters` holds the **effective** parameters after the server's revision
-  (`Subscription.update()` copies the revised values into it), so `parameters.RequestedPublishingInterval` is
-  what the server actually uses.
+* `Subscription.parameters` holds the **effective** parameters after the server's revision: `create_subscription`
+  applies the revised values through `update(new_params)`, so `parameters.RequestedPublishingInterval` is what the
+  server actually uses. A later explicit `update(requested)` copies the **requested** values into it; the revised
+  value is in the returned `ModifySubscriptionResult` (`RevisedPublishingInterval`).
 * `Subscription.subscribe_data_change(nodes, attr=AttributeIds.Value, queuesize=0,
   monitoring=MonitoringMode.Reporting, sampling_interval=50.0)` returns **an int for a single node**, or a list
   of `int | StatusCode` for several nodes — handle both shapes.
@@ -115,6 +126,140 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   transport that is already gone and only cleans up locally.
 * `ua.CreateSubscriptionParameters: RequestedPublishingInterval, RequestedLifetimeCount,
   RequestedMaxKeepAliveCount, MaxNotificationsPerPublish, PublishingEnabled, Priority`.
+* **`subscribe_data_change()` has no filter parameter** (`nodes, attr, queuesize, monitoring, sampling_interval`).
+  A `DataChangeFilter` therefore requires the public low-level path: build
+  `ua.MonitoredItemCreateRequest` (`ItemToMonitor` = `ReadValueId(NodeId, AttributeIds.Value)`,
+  `MonitoringMode`, `RequestedParameters` = `ua.MonitoringParameters` with a unique `ClientHandle`,
+  `SamplingInterval`, `QueueSize`, `DiscardOldest` and `Filter`) and call
+  `await subscription.create_monitored_items([...])`. It returns one `int` server handle or a `StatusCode` per
+  request; those handles are what `unsubscribe()` and `modify_monitored_item()` expect.
+* `ua.DataChangeFilter: Trigger (ua.DataChangeTrigger), DeadbandType (ua.DeadbandType), DeadbandValue`;
+  `DeadbandType.None_ = 0`, `Absolute = 1`, `Percent = 2` (percent needs an `EURange` property).
+* Runtime changes: `await subscription.set_monitoring_mode(ua.MonitoringMode.Reporting | Sampling | Disabled)`
+  applies to **all** items of the subscription and returns a StatusCode list;
+  `await subscription.modify_monitored_item(handle, new_samp_time, new_queuesize, mod_filter_val=-1)` returns
+  `MonitoredItemModifyResult` objects (`-1` keeps the existing filter);
+  `await subscription.update(ua.ModifySubscriptionParameters(...))` sends `ModifySubscription` and copies the
+  requested values into `subscription.parameters` (the response carries `RevisedPublishingInterval`).
+  `Subscription.set_publishing_mode(bool)` only pauses publishing and does not change the monitoring mode.
+
+## Event subscriptions (`opcua/event_service.py`, verified 2026-11-16)
+
+* `await subscription.subscribe_events(sourcenode=ObjectIds.Server, evtypes=ObjectIds.BaseEventType,
+  evfilter=None, queuesize=0, where_clause_generation=True)` returns **one int handle** per call (the
+  `MonitoredItemId`), the same value `unsubscribe()` expects. It subscribes the source's
+  `AttributeIds.EventNotifier`, not `Value`.
+* With `evfilter=None` asyncua builds the filter **from the server's event type** by browsing its aggregate
+  children, so a custom type contributes its own properties. `WhereClause` generation is skipped automatically
+  for `BaseEventType` (long where clauses break some servers); for other types the clause restricts the
+  subscription to that type and its subtypes.
+* The async handler implements `event_notification(event: Event)` (coroutine, awaited by asyncua); status
+  changes still arrive at `status_change_notification(status)`.
+* `asyncua.common.subscription.Event` exposes each selected field as an attribute named after the clause
+  (`EventId`, `EventType`, `SourceNode`, `SourceName`, `Time`, `ReceiveTime`, `LocalTime`, `Message`,
+  `Severity`, …); `event.data_types` lists the selected names and their `VariantType`. Direct-value clauses use
+  the attribute name, browse-path clauses use the joined QualifiedName path (`Parent/Child`).
+* `EventId` is a `ByteString` (bytes), `Message` a `LocalizedText`, `LocalTime` a `TimeZoneDataType`; the
+  fields are raw values, not `Variant`s. `ua.ObjectIdNames` maps a namespace-0 numeric identifier to its
+  standard name (for example `2041 -> "BaseEventType"`).
+* Subscribing one source at a time is deliberate: the single-node path raises `UaStatusCodeError` on a bad
+  StatusCode instead of returning it, so per-source isolation needs one call per source.
+* Server side (demo/tests only): `await server.get_event_generator(etype, emitting_node)` returns an
+  `EventGenerator`; `await generator.trigger(message="…")` publishes one event. The generator sets the
+  source's `EventNotifier` and adds a `GeneratesEvent` reference. **The asyncua server (2.1.0) supports event
+  monitored items only on the Server object** — any other source is answered with `BadServiceUnsupported`,
+  which the client reports as a rejected source rather than as a failure of the subscription.
+* Condition fields (verified 2026-11-17): subscribing to `ConditionType` (`i=2782`) or a subtype selects
+  `AckedState`, `ConfirmedState`, `EnabledState`, `Retain`, `ConditionName`, `BranchId`, and appends a select
+  clause with `AttributeId.NodeId` and `TypeDefinitionId = ConditionType` whose field name is `NodeId`.
+  Condition events carry the condition node there; `SourceNode` is the emitting node.
+* `Acknowledge` is an instance method with BrowseName `Acknowledge` in **namespace 0**;
+  `Node.get_child(["Acknowledge"])` resolves it (a same-named method in another namespace is not matched).
+  Its `InputArguments` are `ByteString` (EventId) and `LocalizedText` (Comment), and the call returns a list of
+  output `Variant`s. asyncua's server has no built-in condition object; tests create one at runtime with
+  `add_object` + `add_method(..., [VariantType.ByteString, VariantType.LocalizedText], [])`.
+
+## ConditionRefresh (verified 2026-11-21)
+
+* `ConditionRefresh` is the standard method `i=3875` (`ua.ObjectIds.ConditionType_ConditionRefresh`), a
+  component of the `ConditionType` object `i=2782`, with one `UInt32` input (`SubscriptionId`) and no output.
+  `ConditionRefresh2` (`i=12912`) adds a MonitoredItemId; this project calls only `ConditionRefresh`.
+* The call is an ordinary `CallMethodRequest`: `await client.get_node(ua.NodeId(ua.ObjectIds.ConditionType))
+  .call_method(ua.NodeId(ua.ObjectIds.ConditionType_ConditionRefresh), ua.Variant(sid, ua.VariantType.UInt32))`.
+  A refused request arrives as `UaStatusCodeError` (`BadSubscriptionIdInvalid` for an unknown id,
+  `BadMonitoredItemIdInvalid` for a wrong monitored item), not as a return value.
+* **asyncua's server dispatches a method call by `MethodId` only** (`AddressSpace._call` looks up
+  `self._aspace[method.MethodId]` and passes `ObjectId` to the callback as `parent`), so the parent object
+  only has to exist. The project uses the ConditionType object, which owns the method in the standard address
+  space. `ConditionRefresh` is unavailable unless the server binds condition methods: asyncua's
+  `InternalServer.bind_condition_methods` defaults to `False` (the method node exists without a callback and
+  the call fails), and the demo server sets it to `True` before `Server.init()`.
+* The server's own evidence is a `RefreshStartEventType` (`i=2787`) / `RefreshEndEventType` (`i=2788`) event
+  pair on that subscription, plus one notification per retained condition. Both are ordinary events in the
+  subscription and appear in the event log; a server-side `WhereClause` (the tab's minimum severity) can
+  hide them, so their absence is reported and never treated as a failure of the call.
+* `ConditionRefresh` stores nothing: it re-publishes conditions the server already retains. It is therefore
+  not a write and needs no confirmation dialog, but the project still records a `WriteAuthority`
+  (`operator-dialog`) for it and sends it through `write_service.refresh_conditions`.
+
+## Server status and diagnostics (verified 2026-11-17)
+
+* Standard namespace-0 variables read by the Server tab: State 2259, CurrentTime 2258, StartTime 2257,
+  SecondsTillShutdown 2992, ShutdownReason 2993, ServerDiagnostics/EnabledFlag 2294,
+  ServerDiagnosticsSummary 2275 with counters 2276–2288/3705, ServerCapabilities limits
+  MaxNodesPerRead 11705, MaxNodesPerBrowse 11710, MaxMonitoredItemsPerCall 11714,
+  MaxBrowseContinuationPoints 2735, MaxSessions 24095, MaxSubscriptions 24096, MinSupportedSampleRate 2272.
+* `State` is a `ServerState` enum; asyncua decodes it to a number (`0` = Running). Times are `DateTime` values;
+  uptime is computed client-side from CurrentTime − StartTime.
+* **asyncua 2.1.0's demo server returns Good StatusCodes with null values** for `SecondsTillShutdown`,
+  `ShutdownReason`, `EnabledFlag`, every summary counter and several capability limits. Treat Good-null as
+  "not provided", never as zero; only Bad StatusCodes are errors.
+* The `ServerDiagnosticsSummary` object exists, so the reads succeed; the values are simply empty in this server.
+  A client that needs `GetMonitoredItems` must call a method, which this project intentionally does not add
+  (one guarded method-call path only).
+
+## Raw history (verified 2026-11-18)
+
+* `Session.history_read(params)` (`UaClient.history_read`, also on `AbstractSession`) takes
+  `ua.HistoryReadParameters` and returns one `ua.HistoryReadResult` per `NodesToRead` entry. There is **no
+  `Client.history_read`** in 2.1.0 — the call goes through the session the client owns.
+* `ua.HistoryReadParameters` carries `HistoryReadDetails`, `TimestampsToReturn`, `ReleaseContinuationPoints`
+  and `NodesToRead` (one `ua.HistoryReadValueId` with `NodeId`, `IndexRange`, `DataEncoding`,
+  `ContinuationPoint`).
+* `ua.ReadRawModifiedDetails` uses `IsReadModified` (bool), `StartTime`, `EndTime`, `NumValuesPerNode` and
+  `ReturnBounds`. An open range is `ua.get_win_epoch()` for both ends (the asyncua helper exists and is used).
+* Results arrive as `ua.HistoryReadResult` with `StatusCode`, `ContinuationPoint` (bytes, empty when there is no
+  more data) and `HistoryData.DataValues`. asyncua's server returns **newest-first** for `NumValuesPerNode`
+  caps; the client sorts ascending by source timestamp, then server timestamp.
+* **asyncua 2.1.0 has no client helper for processed, aggregate or at-time history**: `read_processed_history`,
+  `read_at_time` and `read_events` do not exist on `Client`/`Session`. `read_raw_history(node, start, end, num)` is
+  a convenience wrapper only (it builds the same raw request); the project calls `history_read` directly because
+  it needs continuation points and `ReleaseContinuationPoints`.
+* A node that is not historized yields a **Good StatusCode with zero values**; the server logs an error
+  internally. That is a server fact, so the client reports it together with the `Historizing` attribute
+  (`AttributeIds.Historizing` = 20, Boolean) instead of raising.
+* `asyncua.server.history.HistoryManager`/`HistoryDict` is the demo server's in-memory historian;
+  `Server.historize_node_data_change(node, period, count, ...)` (and `historize_node_event`) register a node.
+  The demo server uses `historize_node_data_change(..., count=2000)` behind `--history`.
+* The demo server never returns a continuation point: a capped read simply returns the newest N values. The
+  client's continuation loop is therefore exercised with a fake session in the unit tests.
+
+## Server directory / FindServers (verified 2026-11-18)
+
+* `Client.find_servers(uris=None)` builds `ua.FindServersParameters` (`EndpointUrl` = the client's server URL,
+  `ServerUris` = the given list) and calls `uaclient.find_servers(params)`; it returns
+  `list[ua.ApplicationDescription]`. There is no session involvement.
+* `ua.ApplicationDescription` fields: `ApplicationUri`, `ProductUri`, `ApplicationName` (LocalizedText),
+  `ApplicationType` (enum `ua.ApplicationType`), `GatewayServerUri`, `DiscoveryProfileUri`, `DiscoveryUrls`.
+  **`ua.LocalizedText(Text, Locale)` — text first**; `LocalizedText(None, "x")` sets Text=None.
+* `ServerUris` is a **prefix match on the application URI split by `:`** in asyncua's server implementation, so an
+  entry like `urn:vendor` matches `urn:vendor:product:instance`.
+* FindServers works on a plain `SecurityPolicyNone` secure channel: no session, no identity, no certificate
+  approval. The project reuses its endpoint-discovery channel pattern for it.
+* asyncua's demo server implements FindServers (`InternalServer.find_servers`) and returns itself
+  (`urn:opcua-explorer:demo:server`, type `ClientAndServer`, one discovery URL).
+* `Client.find_servers_on_network()` exists (signature `(self)`), but the asyncua server answers
+  `BadUserAccessDenied`; there is no verified multicast/LDS client path here, so the feature is not offered.
 
 ## Connection recovery (used by the opt-in check and the Resilience toggle)
 
@@ -146,6 +291,83 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
 7. The recovery check uses the same client. It calls `connect()` after `close_secure_channel()` when the
    supervisor is off, and otherwise waits for the supervisor to publish `connected` plus a successful read
    instead of starting a competing retry.
+
+## Node management (verified 2026-11-19)
+
+* `UaClient.add_nodes(items: list[ua.AddNodesItem]) -> list[ua.AddNodesResult]` and
+  `UaClient.delete_nodes(params: ua.DeleteNodesParameters) -> list[ua.StatusCode]`. There is **no**
+  `Client.add_nodes`/`Client.delete_nodes`; the calls go through `client.uaclient`.
+* `ua.AddNodesItem` fields: `ParentNodeId`, `ReferenceTypeId`, `RequestedNewNodeId`, `BrowseName`, `NodeClass`,
+  `NodeAttributes`, `TypeDefinition`. `ua.AddNodesResult.AddedNodeId` is the NodeId the server assigned.
+* **Leave `TypeDefinition` at its default.** Assigning `None` breaks request encoding
+  (`AttributeError: 'NoneType' object has no attribute 'NodeIdType'`); an unset field serialises as a null NodeId.
+* A `RequestedNewNodeId` with a **null identifier** (`ua.NodeId(0, namespace_index)`) asks asyncua's server to
+  generate an id in that namespace — the project's only way of choosing an id.
+* `ua.DeleteNodesParameters.NodesToDelete` is a list of **`ua.DeleteNodesItem`** (`NodeId`,
+  `DeleteTargetReferences`), not of NodeIds; the `DeleteTargetReferences` flag lives on the item.
+* asyncua's server implements both services for `UserRole.Admin` **only** (`NodeManagementService`); any other role
+  is answered with a **ServiceFault** `BadUserAccessDenied`, which surfaces as a raised `ua.UaStatusCodeError`
+  rather than a per-node StatusCode.
+* After a good delete, reading the node raises `BadNodeIdUnknown` — the project uses that as the verification.
+
+## Browse filters (verified 2026-11-18)
+
+* `ua.BrowseParameters` = `View`, `RequestedMaxReferencesPerNode`, `NodesToBrowse`; `ua.BrowseDescription` =
+  `NodeId`, `BrowseDirection`, `ReferenceTypeId`, `IncludeSubtypes`, `NodeClassMask`, `ResultMask`.
+* `ua.BrowseDirection` members: `Forward`, `Inverse`, `Both`; `ua.NodeClassMask` is a bit mask built from
+  `ua.NodeClass` values (Object=1, Variable=2, Method=4, ObjectType=8, VariableType=16, ReferenceType=32,
+  DataType=64, View=128).
+* asyncua's demo server **does** honour `ReferenceTypeId`, `IncludeSubtypes`, `NodeClassMask` and
+  `BrowseDirection` (verified: `Organizes` under `Objects`, `NodeClassMask=2` under `Line1`, `Inverse` under
+  `Plant`), unlike `IndexRange`/`TimestampsToReturn`, which it ignores.
+* `ua.NodeId.from_string()` raises `ua.UaStringParsingError` for a malformed string; the project maps that to
+  `InvalidNodeIdError` so a typo never becomes an asyncua exception at the socket layer.
+
+## Metadata attribute writes (verified 2026-11-18)
+
+* `Node.write_attribute(attr, ua.DataValue(ua.Variant(ua.LocalizedText(Text=..., Locale=...),
+  ua.VariantType.LocalizedText)))` sends one `WriteRequest`; a Bad result raises `ua.UaStatusCodeError`.
+* `Node.read_attribute(attr, indexrange=None, raise_on_bad_status=False)` is the read-back path: with
+  `raise_on_bad_status=False` the StatusCode is returned instead of raised.
+* **asyncua's server permits non-Value attribute writes for `UserRole.Admin` only**
+  (`asyncua/server/address_space.py::AttributeService.write`: any other role gets `BadUserAccessDenied` for
+  `AttributeId != Value`). The demo server's users are `UserRole.User`, so metadata writes are refused there by
+  design; a test that wants the positive path must start its own server with an Admin user manager.
+* `ua.LocalizedText(Text, Locale)` — text first; passing `None` as the first argument sets `Text = None`.
+* Writing `BrowseName`/`DisplayName` also renames the server-side reference descriptions — a client should not
+  assume the old name survives anywhere in the address space.
+
+## Value read options (verified 2026-11-18)
+
+* `ua.ReadParameters` fields: `MaxAge`, `TimestampsToReturn`, `NodesToRead`. `ua.ReadValueId` fields:
+  `NodeId`, `AttributeId`, `IndexRange`, `DataEncoding`.
+* `Node.read_attribute(attr, indexrange=None, raise_on_bad_status=True)` shows the pattern: it sets
+  `ReadValueId.IndexRange` and calls `self.session.read(params)`. It does **not** set `MaxAge` or
+  `TimestampsToReturn`, so a plain asyncua read leaves both at their defaults (`MaxAge = 0`,
+  `TimestampsToReturn = 0` = `Source`).
+* `ua.TimestampsToReturn` members: `Source`, `Server`, `Both`, `Neither`, `Invalid`.
+* `session.read(params)` returns one `ua.DataValue` per `NodesToRead` entry and does **not** raise on a Bad
+  StatusCode — the caller must inspect `DataValue.StatusCode` (the project decodes it into a status name).
+* **asyncua's demo server accepts `IndexRange` and `TimestampsToReturn` and ignores them**: asking for `1:3` on
+  `ns=2;s=Samples` returns the full array, and `Neither` still returns both timestamps. That is why the client
+  reports the requested options and lets the server be authoritative.
+* `MaxAge` is `uint32` (0 = server cache allowed, max = come from the device); a `QSpinBox` is int32, so the GUI
+  offers up to 2 147 483 647 while the model accepts the full protocol range.
+
+## Interactive write and method call (verified 2026-11-18)
+
+* `Node.write_value(ua.DataValue(ua.Variant(value, variant_type)))` sends one `WriteRequest`; a Bad result raises
+  `ua.UaStatusCodeError` whose `.code` can be turned into a StatusCode name. Reading the previous value uses
+  `Node.read_data_value()` (StatusCode + Variant + timestamps).
+* `ObjectNode.call_method(method_node, *args)` returns the method result. **asyncua unwraps a single output
+  argument** (a plain value, not a list) while multi-output methods return a list; the caller must normalise both
+  (the project stores `CallOutcome.output_values`).
+* `read_input_arguments()` returns `uaprotocol_auto.Argument` objects (not `ua.Argument`) with `Name`, `DataType`,
+  `ValueRank` and `Description` (`LocalizedText` with `Text` first in its constructor).
+* `Node.get_child(["InputArguments"])` raises when the property is absent — a method without arguments — so an
+  empty signature is a normal result, not an error.
+* A Good service result is not proof of effect: the project always reads the value back and compares it, and
+  reports a differing read-back as a failure.
 
 ## NodeSet2 export
 

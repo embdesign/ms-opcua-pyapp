@@ -16,6 +16,7 @@ interval. The values reported in :class:`MonitorStart` are the requested ones.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable, Iterable
@@ -46,6 +47,34 @@ _logger = logging.getLogger(__name__)
 _LIFETIME_COUNT = 10_000
 _MAX_KEEP_ALIVE_COUNT = 20
 _MAX_NOTIFICATIONS_PER_PUBLISH = 100
+
+_DATA_CHANGE_TRIGGERS: dict[str, ua.DataChangeTrigger] = {
+    "Status": ua.DataChangeTrigger.Status,
+    "StatusValue": ua.DataChangeTrigger.StatusValue,
+    "StatusValueTimestamp": ua.DataChangeTrigger.StatusValueTimestamp,
+}
+_DEADBAND_TYPES: dict[str, ua.DeadbandType] = {
+    "None": ua.DeadbandType.None_,
+    "Absolute": ua.DeadbandType.Absolute,
+    "Percent": ua.DeadbandType.Percent,
+}
+
+
+def build_data_change_filter(config: MonitorConfig) -> ua.DataChangeFilter | None:
+    """Build the ``DataChangeFilter`` for a config, or ``None`` for the UA default.
+
+    asyncua's ``subscribe_data_change`` cannot carry a filter, so a filtered
+    subscription creates its monitored items through ``create_monitored_items``
+    (see :meth:`LiveMonitor.add`).
+    """
+    normalised = config.normalised()
+    if not normalised.needs_filter:
+        return None
+    data_filter = ua.DataChangeFilter()
+    data_filter.Trigger = _DATA_CHANGE_TRIGGERS[normalised.trigger]
+    data_filter.DeadbandType = _DEADBAND_TYPES[normalised.deadband_type]
+    data_filter.DeadbandValue = float(normalised.deadband_value)
+    return data_filter
 
 
 def _variant_type_name(data_value: Any) -> str | None:
@@ -93,6 +122,8 @@ class LiveMonitor:
         self._config = MonitorConfig()
         self._items: dict[int, MonitoredItemInfo] = {}
         self._sequence = 0
+        self._client_handle = 0
+        self._monitoring_mode = "Reporting"
 
     # -- state -------------------------------------------------------------
     @property
@@ -107,6 +138,15 @@ class LiveMonitor:
 
     def item_count(self) -> int:
         return len(self._items)
+
+    def items_snapshot(self) -> list[MonitoredItemInfo]:
+        """Public read-only copy of the monitored items (client view)."""
+        return list(self._items.values())
+
+    @property
+    def monitoring_mode(self) -> str:
+        """Server-side monitoring mode applied to every monitored item."""
+        return self._monitoring_mode
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self, node_ids: Iterable[str], config: MonitorConfig) -> MonitorStart:
@@ -130,6 +170,8 @@ class LiveMonitor:
         subscription = await self._client.create_subscription(params, _LiveMonitorHandler(self))
         self._subscription = subscription
         self._items = {}
+        self._client_handle = 0
+        self._monitoring_mode = "Reporting"
         _logger.info("Live monitor subscription %s created", self.subscription_id)
 
         result = MonitorStart(
@@ -151,11 +193,19 @@ class LiveMonitor:
             return []
 
         nodes = [self._client.get_node(node_id) for node_id in ids]
-        results = await self._subscription.subscribe_data_change(
-            nodes,
-            queuesize=int(self._config.queue_size),
-            sampling_interval=float(self._config.sampling_interval_ms),
-        )
+        data_filter = build_data_change_filter(self._config)
+        if data_filter is None:
+            results = await self._subscription.subscribe_data_change(
+                nodes,
+                queuesize=int(self._config.queue_size),
+                sampling_interval=float(self._config.sampling_interval_ms),
+            )
+        else:
+            # asyncua's subscribe_data_change has no filter parameter; the public
+            # low-level path passes the DataChangeFilter unchanged to the server.
+            results = await self._subscription.create_monitored_items(
+                [self._monitored_item_request(node, data_filter) for node in nodes]
+            )
         if isinstance(results, int):
             results = [results]
 
@@ -195,10 +245,113 @@ class LiveMonitor:
         for handle in wanted:
             self._items.pop(handle, None)
 
+    async def set_monitoring_mode(self, mode: str) -> str:
+        """Apply ``SetMonitoringMode`` to every monitored item of this subscription."""
+        if self._subscription is None:
+            raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+        try:
+            monitoring = ua.MonitoringMode[mode]
+        except KeyError as exc:
+            raise OpcUaExplorerError(
+                f"Unknown monitoring mode {mode!r}; use Reporting, Sampling or Disabled."
+            ) from exc
+
+        statuses = await self._subscription.set_monitoring_mode(monitoring)
+        refused = [status_name(status) for status in statuses if not status.is_good()]
+        if refused:
+            raise OpcUaExplorerError(
+                f"The server refused monitoring mode {mode}: " + ", ".join(refused)
+            )
+        self._monitoring_mode = mode
+        _logger.info("Monitoring mode set to %s for subscription %s", mode, self.subscription_id)
+        return mode
+
+    async def set_publishing_interval(self, interval_ms: float) -> float:
+        """Modify the publishing interval; returns the interval the server revised to."""
+        if self._subscription is None:
+            raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+        # asyncua recreates a subscription the server has forgotten; while it does,
+        # the id is ``None`` and ``ModifySubscription`` would fail inside the encoder
+        # (``struct.error: required argument is not an integer``) instead of saying
+        # what happened. Report the dropped subscription as the domain error it is.
+        if self.subscription_id is None:
+            raise MonitorNotActiveError(
+                "The server no longer knows this subscription (it was dropped). "
+                "Start monitoring again before changing the intervals."
+            )
+
+        parameters = self._subscription.parameters
+        params = ua.ModifySubscriptionParameters()
+        params.SubscriptionId = self.subscription_id
+        params.RequestedPublishingInterval = float(interval_ms)
+        params.RequestedLifetimeCount = parameters.RequestedLifetimeCount
+        params.RequestedMaxKeepAliveCount = parameters.RequestedMaxKeepAliveCount
+        params.MaxNotificationsPerPublish = parameters.MaxNotificationsPerPublish
+        params.Priority = parameters.Priority
+        result = await self._subscription.update(params)
+        self._config.publishing_interval_ms = float(interval_ms)
+        revised = float(getattr(result, "RevisedPublishingInterval", interval_ms))
+        _logger.info(
+            "Publishing interval of subscription %s requested %s ms, revised %s ms",
+            self.subscription_id,
+            interval_ms,
+            revised,
+        )
+        return revised
+
+    async def set_sampling_interval(self, interval_ms: float) -> list[str]:
+        """Modify every monitored item's sampling interval; returns refusal texts."""
+        if self._subscription is None:
+            raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+
+        failures: list[str] = []
+        for handle in list(self._items):
+            try:
+                results = await self._subscription.modify_monitored_item(
+                    handle, float(interval_ms), int(self._config.queue_size)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - one item must not abort the rest
+                failures.append(f"{handle}: {type(exc).__name__}: {exc}")
+                continue
+            for result in results:
+                code = getattr(result, "StatusCode", None)
+                if code is not None and not code.is_good():
+                    failures.append(f"{handle}: {status_name(code)}")
+
+        self._config.sampling_interval_ms = float(interval_ms)
+        for info in self._items.values():
+            info.sampling_interval_ms = float(interval_ms)
+        return failures
+
+    def _monitored_item_request(
+        self, node: Any, data_filter: ua.DataChangeFilter
+    ) -> ua.MonitoredItemCreateRequest:
+        """One ``MonitoredItemCreateRequest`` carrying the requested filter."""
+        self._client_handle += 1
+        read_value = ua.ReadValueId()
+        read_value.NodeId = node.nodeid
+        read_value.AttributeId = ua.AttributeIds.Value
+
+        parameters = ua.MonitoringParameters()
+        parameters.ClientHandle = self._client_handle
+        parameters.SamplingInterval = float(self._config.sampling_interval_ms)
+        parameters.QueueSize = int(self._config.queue_size)
+        parameters.DiscardOldest = True
+        parameters.Filter = data_filter
+
+        request = ua.MonitoredItemCreateRequest()
+        request.ItemToMonitor = read_value
+        request.MonitoringMode = ua.MonitoringMode.Reporting
+        request.RequestedParameters = parameters
+        return request
+
     async def stop(self) -> None:
         """Delete the subscription; safe to call when nothing runs."""
         subscription, self._subscription = self._subscription, None
         self._items = {}
+        self._monitoring_mode = "Reporting"
         if subscription is None:
             return
         try:
