@@ -15,7 +15,7 @@ covered by tests, including the device-independent sequence runner for operator-
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, a trend chart of the selected node built from the notifications that arrived (receive-time axis, non-numeric values counted, bounded buffer that names what it dropped), pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
-| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event plus one unconfirmed `ConditionRefresh` call on the running subscription (no `Confirm`/`Enable`, never retried) |
+| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, the five condition methods of the selected event (one confirmed `Acknowledge`, `Confirm`, `Enable`, `Disable` or `AddComment` call each, sent once) and one unconfirmed `ConditionRefresh` call on the running subscription (never retried) |
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
 | History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below); the same suite runs headlessly through `opcua-check` and writes the same JSON/HTML report |
@@ -64,8 +64,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 800 passed, ~8–15 min
-uv run pytest tests/unit -q       # 586 passed, ~8 s
+uv run pytest -q                  # 814 passed, ~8–15 min
+uv run pytest tests/unit -q       # 592 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -89,12 +89,14 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
   history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
   returned. The History trend chart plots exactly the numbers of one read (no second read, no interpolation);
   non-numeric values are counted instead of plotted.
-- Events are notifications, not alarm management: sources are subscription-only. There are two condition
-  actions: one operator-confirmed `Acknowledge` method call for a selected condition event, and one
+- Events are notifications; the condition methods are one-shot commands. Sources are subscription-only. One
+  selected condition event can be sent to its own methods — `Acknowledge`, `Confirm`, `Enable`, `Disable` and
+  `AddComment` — each one operator-confirmed method call under `operator-dialog` authority, plus one
   `ConditionRefresh` call on the running subscription (no dialog, because it stores nothing; its
-  `RefreshStart`/`RefreshEnd` events are the only evidence). Both are reachable headlessly through
-  `opcua-events` (`--refresh`, and `--acknowledge … --confirm`). No `Confirm`/`Enable`/`AddComment`, no retry, no
-  automatic acknowledgement, no `ConditionRefresh2`, no event history. Event sources are session state.
+  `RefreshStart`/`RefreshEnd` events are the only evidence). All of them are reachable headlessly through
+  `opcua-events` (`--refresh`, `--acknowledge … --confirm`, `--condition-action ACTION --eventid … --confirm`).
+  The client keeps no condition state: it tracks no `AckedState`/`ConfirmedState`/`EnabledState`, never retries,
+  never acknowledges automatically, and has no `ConditionRefresh2`, event history or dialog creation.
 - `EventNotifier` and the other details-only attributes are read for the selected node, not downloaded; the
   JSON/CSV snapshot format is unchanged and the tree does not mark event sources.
 - Server status/diagnostics cover the standard status, summary and capability variables that the server

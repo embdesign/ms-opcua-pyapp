@@ -41,6 +41,9 @@ from .discovery import (
     ServerDiscoveryResult,
 )
 from .events import (
+    CONDITION_ACTION_LABELS,
+    CONDITION_ACTION_METHODS,
+    CONDITION_ACTIONS,
     CONDITION_REFRESH_METHOD_ID,
     CONDITION_TYPE_NODE_ID,
     EVENT_FIELD_CHAR_LIMIT,
@@ -51,6 +54,7 @@ from .events import (
     EventNotification,
     EventSourceInfo,
     EventStart,
+    condition_action_label,
 )
 from .functional_tests import (
     FUNCTIONAL_TEST_DISCLAIMER,
@@ -136,6 +140,9 @@ __all__ = [
     "BROWSE_NODE_CLASSES",
     "BROWSE_REFERENCE_TYPES",
     "BrowseOptions",
+    "CONDITION_ACTION_LABELS",
+    "CONDITION_ACTION_METHODS",
+    "CONDITION_ACTIONS",
     "CONDITION_REFRESH_METHOD_ID",
     "CONDITION_TYPE_NODE_ID",
     "CREATABLE_NODE_CLASSES",
@@ -217,6 +224,7 @@ __all__ = [
     "WRITABLE_TEXT_ATTRIBUTES",
     "WriteAuthority",
     "WriteTarget",
+    "condition_action_label",
     "iso_utc",
     "utc_now",
 ]

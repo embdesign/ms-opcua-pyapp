@@ -1,7 +1,8 @@
 """Event-subscription configuration and notification records.
 
-Condition events additionally carry the identity needed for one guarded
-Acknowledge call; this data alone never writes anything.
+Condition events additionally carry the identity needed for the guarded condition
+methods (Acknowledge, Confirm, Enable, Disable, AddComment); this data alone never
+writes anything.
 """
 
 from __future__ import annotations
@@ -23,14 +24,44 @@ from .writes import WriteAuthority
 EVENT_FIELD_CHAR_LIMIT = 2000
 
 #: The standard A&C ``ConditionRefresh`` method (a component of ConditionType) and
-#: the object that owns it. Refreshing is the only other condition method this
-#: client calls besides ``Acknowledge``, and it changes no data.
+#: the object that owns it. Refreshing changes no data; it is the only condition
+#: method this client calls without the condition identity of one event.
 CONDITION_REFRESH_METHOD_ID = "i=3875"
 CONDITION_TYPE_NODE_ID = "i=2782"
 #: Event types the server publishes around a refresh; their arrival is the only
 #: local evidence that the request was accepted.
 REFRESH_START_EVENT_TYPE_ID = "i=2787"
 REFRESH_END_EVENT_TYPE_ID = "i=2788"
+
+#: The condition methods this client may call on one selected condition event, in
+#: the order the Events tab offers them. Every one takes the same two arguments -
+#: EventId (ByteString) and Comment (LocalizedText) - and is resolved below the
+#: condition node by its standard browse name, never by a NodeId the client
+#: invented. ``Acknowledge``/``Confirm`` exist on AcknowledgeableConditionType,
+#: ``Enable``/``Disable``/``AddComment`` on ConditionType; a condition that does not
+#: expose one of them answers with the refusal, which is reported and never retried.
+CONDITION_ACTIONS = ("acknowledge", "confirm", "enable", "disable", "comment")
+#: Action key -> standard method browse name.
+CONDITION_ACTION_METHODS = {
+    "acknowledge": "Acknowledge",
+    "confirm": "Confirm",
+    "enable": "Enable",
+    "disable": "Disable",
+    "comment": "AddComment",
+}
+#: Action key -> operator-facing button/report label.
+CONDITION_ACTION_LABELS = {
+    "acknowledge": "Acknowledge",
+    "confirm": "Confirm",
+    "enable": "Enable",
+    "disable": "Disable",
+    "comment": "Add comment",
+}
+
+
+def condition_action_label(action: str) -> str:
+    """Operator-facing label of one condition action; unknown keys are shown verbatim."""
+    return CONDITION_ACTION_LABELS.get(str(action), str(action))
 
 
 @dataclass(slots=True)

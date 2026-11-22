@@ -3,15 +3,19 @@
 Creates one event subscription through the same
 :class:`~opcua_explorer.opcua.client_service.OpcUaService` the Events tab uses,
 prints every event until ``--count`` is reached or ``--seconds`` elapse, and
-stops. It is the headless twin of that page, including its two condition actions:
+stops. It is the headless twin of that page, including its condition actions:
 
 * ``--refresh`` asks the server once to re-publish the conditions it already
   retains (``ConditionRefresh``) and reports whether ``RefreshStart``/
   ``RefreshEnd`` arrived;
-* ``--acknowledge`` sends one ``Acknowledge`` call, and only with ``--confirm``.
+* ``--acknowledge EVENTID`` is the shortcut for one ``Acknowledge`` call, and
+  ``--condition-action ACTION --eventid HEX`` reaches the other condition methods
+  (``confirm``, ``enable``, ``disable``, ``comment``); every one of them needs
+  ``--condition`` and ``--confirm``.
 
-Neither action is retried, and the JSON event objects carry the EventId and
-condition NodeId needed to acknowledge a condition found by an earlier run.
+Neither action is retried, one action per run is sent, and the JSON event objects
+carry the EventId and condition NodeId needed to act on a condition found by an
+earlier run.
 
 Exit codes: ``0`` at least one event was received, ``1`` connection or
 subscription failure, ``2`` unusable arguments/configuration, ``3`` the run ended
@@ -44,10 +48,19 @@ from .cli import (
 from .config import TrustStore
 from .defaults import DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
 from .errors import OpcUaExplorerError
-from .models import STATUS_PASSED, ConditionRefreshResult, EventConfig, EventNotification, EventStart
+from .models import (
+    CONDITION_ACTIONS,
+    STATUS_PASSED,
+    ConditionRefreshResult,
+    EventConfig,
+    EventNotification,
+    EventStart,
+    condition_action_label,
+)
 from .opcua.client_service import OpcUaService
 from .opcua.event_service import SERVER_OBJECT_NODE_ID
 from .opcua.node_ids import normalise_node_id
+from .operator_text import condition_action_result_text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -122,12 +135,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="send one ConditionRefresh after the subscription starts and report its refresh events",
     )
     condition.add_argument("--acknowledge", metavar="EVENTID", help="EventId (hex) to acknowledge, sent once")
-    condition.add_argument("--condition", metavar="NODEID", help="condition node the --acknowledge call targets")
-    condition.add_argument("--comment", default="", metavar="TEXT", help="comment sent with --acknowledge")
+    condition.add_argument(
+        "--condition-action",
+        choices=list(CONDITION_ACTIONS),
+        metavar="ACTION",
+        help="one condition method to send once: " + ", ".join(CONDITION_ACTIONS),
+    )
+    condition.add_argument(
+        "--eventid", metavar="HEX", help="EventId (hex) for --condition-action"
+    )
+    condition.add_argument("--condition", metavar="NODEID", help="condition node the call targets")
+    condition.add_argument("--comment", default="", metavar="TEXT", help="comment sent with the condition call")
     condition.add_argument(
         "--confirm",
         action="store_true",
-        help="required for --acknowledge: without it nothing is sent",
+        help="required for a condition call: without it nothing is sent",
     )
 
     add_connection_arguments(parser)
@@ -151,39 +173,79 @@ def _print_refresh(result: ConditionRefreshResult, *, as_json: bool) -> None:
     print(f"condition-refresh: {result.summary_text()}", file=sys.stderr, flush=True)
 
 
-def _check_condition_arguments(args: argparse.Namespace) -> None:
-    """Refuse an incomplete or unconfirmed acknowledgement before anything connects."""
-    if not args.acknowledge:
-        if args.condition or args.comment:
-            raise CliError("--condition and --comment only apply together with --acknowledge.")
+def _condition_plan(args: argparse.Namespace) -> tuple[str, str, str] | None:
+    """The one condition call this invocation asks for: ``(action, event_id, condition)``.
+
+    Everything is validated *before* the command connects, so an incomplete or
+    unconfirmed request sends nothing. ``--acknowledge EVENTID`` stays the shortcut
+    for the acknowledge action; ``--condition-action`` covers the other four.
+    """
+    action = args.condition_action
+    if args.acknowledge and action:
+        raise CliError(
+            "--acknowledge and --condition-action both name a condition call; use one of them."
+        )
+    if action and action not in CONDITION_ACTIONS:
+        raise CliError(f"{action!r} is not a condition action; use one of {', '.join(CONDITION_ACTIONS)}.")
+    if not args.acknowledge and not action:
+        if args.condition or args.comment or args.eventid:
+            raise CliError(
+                "--condition, --comment and --eventid only apply together with --acknowledge "
+                "or --condition-action."
+            )
         if args.confirm:
-            raise CliError("--confirm only applies together with --acknowledge; nothing was sent.")
-        return
+            raise CliError(
+                "--confirm only applies together with a condition call; nothing was sent."
+            )
+        return None
+
+    label = "--acknowledge" if args.acknowledge else f"--condition-action {action}"
     if not args.condition:
-        raise CliError("--acknowledge needs --condition with the NodeId of the condition object.")
+        raise CliError(f"{label} needs --condition with the NodeId of the condition object.")
+    if args.acknowledge and args.eventid:
+        raise CliError("--eventid only applies to --condition-action; --acknowledge carries its own EventId.")
+    event_id = str(args.acknowledge or args.eventid or "")
+    if not event_id:
+        raise CliError(f"{label} needs --eventid with the EventId (hex) of the event to act on.")
     if not args.confirm:
         raise CliError(
-            "--acknowledge sends one Acknowledge method call; repeat the command with --confirm to allow it."
+            f"{label} sends one condition method call; repeat the command with --confirm to allow it."
         )
+    return str(action or "acknowledge"), event_id, str(args.condition)
 
 
-async def _acknowledge(service: OpcUaService, args: argparse.Namespace) -> int:
-    """Send the one confirmed Acknowledge call and return the exit code."""
-    outcome = await service.acknowledge_condition(
-        args.condition,
-        str(args.acknowledge),
+def _check_condition_arguments(args: argparse.Namespace) -> None:
+    """Refuse an incomplete or unconfirmed condition call before anything connects."""
+    _condition_plan(args)
+
+
+async def _condition_call(service: OpcUaService, args: argparse.Namespace) -> int:
+    """Send the one confirmed condition method call and return the exit code."""
+    plan = _condition_plan(args)
+    if plan is None:  # pragma: no cover - _run only calls this with a plan
+        return EXIT_OK
+    action, event_id, condition_node_id = plan
+    label = condition_action_label(action)
+    outcome = await service.condition_action(
+        condition_node_id,
+        event_id,
         str(args.comment or ""),
-        reference=f"opcua-events --acknowledge {args.condition}",
+        action=action,
+        reference=f"opcua-events {label.lower()} {condition_node_id}",
     )
     if args.json:
-        print(json.dumps({"acknowledge": outcome.__dict__}, ensure_ascii=False, default=str), flush=True)
+        print(
+            json.dumps({action: outcome.__dict__}, ensure_ascii=False, default=str),
+            flush=True,
+        )
     else:
-        print(f"acknowledge: {outcome.detail or outcome.status}", file=sys.stderr, flush=True)
+        print(f"{label.lower()}: {outcome.detail or outcome.status}", file=sys.stderr, flush=True)
     # Safety-relevant, so it is printed even with --quiet: --quiet silences progress,
     # not what was done.
     print(
-        "One Acknowledge call was sent; no Confirm/Enable call was made and the acknowledgement "
-        "is not proof that the condition cleared.",
+        condition_action_result_text(
+            action=action, condition_node_id=condition_node_id, event_id=event_id
+        ),
         file=sys.stderr,
         flush=True,
     )
@@ -207,7 +269,8 @@ async def _run(args: argparse.Namespace) -> int:
 
     received = 0
     refresh_result: ConditionRefreshResult | None = None
-    acknowledge_code = EXIT_OK
+    condition_plan = _condition_plan(args)
+    condition_code = EXIT_OK
 
     def emit(payload: Any) -> None:
         nonlocal received
@@ -238,8 +301,8 @@ async def _run(args: argparse.Namespace) -> int:
         if args.refresh:
             refresh_result = await service.refresh_event_conditions(reference="opcua-events --refresh")
             _print_refresh(refresh_result, as_json=args.json)
-        if args.acknowledge:
-            acknowledge_code = await _acknowledge(service, args)
+        if condition_plan is not None:
+            condition_code = await _condition_call(service, args)
 
         deadline = time.monotonic() + max(0.0, float(args.seconds))
         while time.monotonic() < deadline:
@@ -259,8 +322,8 @@ async def _run(args: argparse.Namespace) -> int:
     codes: list[int] = []
     if refresh_result is not None:
         codes.append(EXIT_OK if refresh_result.status == STATUS_PASSED else EXIT_INVALID_OUTPUT)
-    if args.acknowledge:
-        codes.append(acknowledge_code)
+    if condition_plan is not None:
+        codes.append(condition_code)
     if not codes:
         codes.append(EXIT_OK if received > 0 else EXIT_INVALID_OUTPUT)
     for code in codes:

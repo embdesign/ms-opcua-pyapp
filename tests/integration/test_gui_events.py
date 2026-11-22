@@ -119,8 +119,8 @@ def test_events_tab_streams_events_and_stops(qapp, tmp_path) -> None:
         stop_demo_server(server)
 
 
-def test_events_tab_acknowledges_only_after_confirmation(qapp, tmp_path, monkeypatch) -> None:
-    """The one action of the Events tab is an explicitly confirmed Acknowledge call."""
+def test_events_tab_condition_actions_need_a_confirmation(qapp, tmp_path, monkeypatch) -> None:
+    """Each condition method is one explicitly confirmed, single call from the selected event."""
     port = free_port()
     server = start_demo_server(port)
     runner = AsyncRunner()
@@ -151,11 +151,12 @@ def test_events_tab_acknowledges_only_after_confirmation(qapp, tmp_path, monkeyp
         tab._on_event(notification)
         tab.events_table.selectRow(0)
         qapp.processEvents()
-        assert tab.acknowledge_btn.isEnabled() is True
+        assert all(button.isEnabled() for button in tab.condition_buttons.values())
+        assert tab.condition_buttons["acknowledge"].isEnabled() is True
 
         sent: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-        async def fake_acknowledge(*args: Any, **kwargs: Any) -> CallOutcome:
+        async def fake_condition_action(*args: Any, **kwargs: Any) -> CallOutcome:
             sent.append((args, kwargs))
             return CallOutcome(
                 object_node_id=args[0],
@@ -165,11 +166,11 @@ def test_events_tab_acknowledges_only_after_confirmation(qapp, tmp_path, monkeyp
                 sent=True,
             )
 
-        monkeypatch.setattr(service, "acknowledge_condition", fake_acknowledge)
+        monkeypatch.setattr(service, "condition_action", fake_condition_action)
 
         # Cancelling the comment dialog sends nothing and asks no confirmation.
         monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("", False))
-        tab._on_acknowledge()
+        tab._on_condition_action("acknowledge")
         qapp.processEvents()
         assert sent == []
         assert "cancelled" in tab.status_label.text().lower()
@@ -177,14 +178,14 @@ def test_events_tab_acknowledges_only_after_confirmation(qapp, tmp_path, monkeyp
         # Declining the confirmation also sends nothing.
         monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("checked", True))
         monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
-        tab._on_acknowledge()
+        tab._on_condition_action("acknowledge")
         qapp.processEvents()
         assert sent == []
         assert "cancelled" in tab.status_label.text().lower()
 
         # Confirming submits exactly one Acknowledge call for the selected event.
         monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
-        tab._on_acknowledge()
+        tab._on_condition_action("acknowledge")
         deadline = time.monotonic() + 20
         while not sent and time.monotonic() < deadline:
             qapp.processEvents()
@@ -194,21 +195,47 @@ def test_events_tab_acknowledges_only_after_confirmation(qapp, tmp_path, monkeyp
         assert args[0] == "ns=2;s=Condition"
         assert args[1] == "0102ff"
         assert args[2] == "checked"
-        assert kwargs["reference"] == "events-tab ns=2;s=Condition"
+        assert kwargs["action"] == "acknowledge"
+        assert kwargs["reference"] == "events-tab acknowledge ns=2;s=Condition"
 
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             qapp.processEvents()
-            if "acknowledged" in tab.status_label.text().lower():
+            if "sent once" in tab.status_label.text().lower():
                 break
             time.sleep(0.03)
-        assert "acknowledged" in tab.status_label.text().lower(), tab.status_label.text()
-        assert tab.acknowledge_btn.isEnabled() is True
+        assert "sent once" in tab.status_label.text().lower(), tab.status_label.text()
+        assert tab.condition_buttons["acknowledge"].isEnabled() is True
         # The guarded action is recorded for the shared log, not only in the status line.
         assert len(reports) == 1, reports
         assert "ns=2;s=Condition" in reports[0]
         assert "0102ff" in reports[0]
         assert "not proof" in reports[0]
+
+        # A different action goes through the same single path with its own method.
+        sent.clear()
+        tab._on_condition_action("confirm")
+        deadline = time.monotonic() + 20
+        while not sent and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert len(sent) == 1
+        assert sent[0][1]["action"] == "confirm"
+        assert sent[0][1]["reference"] == "events-tab confirm ns=2;s=Condition"
+        # Wait for that call to be reported before the next action overwrites the line.
+        deadline = time.monotonic() + 20
+        while "confirm on condition" not in tab.status_label.text().lower() and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+        assert "confirm on condition" in tab.status_label.text().lower(), tab.status_label.text()
+
+        # AddComment without text is refused locally: an empty comment is pointless.
+        sent.clear()
+        monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("", True))
+        tab._on_condition_action("comment")
+        qapp.processEvents()
+        assert sent == []
+        assert "cannot be empty" in tab.status_label.text().lower()
     finally:
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)

@@ -136,3 +136,52 @@ async def test_cli_events_acknowledges_a_condition_once(event_model, tmp_path, c
     assert event_id.Value == b"\x01\x02\xff"
     assert comment.Value.Text == "checked by operator"
     assert "not proof" in captured.err
+
+
+async def test_cli_events_reaches_the_other_condition_methods(event_model, tmp_path, capsys) -> None:
+    """``--condition-action`` sends the named method once, with the same EventId/Comment shape."""
+    calls: list[tuple[object, object]] = []
+    objects = event_model.server.get_objects_node()
+    condition = await objects.add_object(
+        ua.NodeId("CommentCondition", 2), ua.QualifiedName("CommentCondition", 2)
+    )
+
+    async def add_comment(parent, event_id, comment):
+        calls.append((event_id, comment))
+        return [ua.Variant(b"comment-id", ua.VariantType.ByteString)]
+
+    await condition.add_method(
+        ua.NodeId("CommentConditionAddComment", 2),
+        ua.QualifiedName("AddComment"),
+        add_comment,
+        [ua.VariantType.ByteString, ua.VariantType.LocalizedText],
+        [ua.VariantType.ByteString],
+    )
+
+    code = await asyncio.to_thread(
+        cli_events.main,
+        _argv(
+            event_model.endpoint,
+            tmp_path,
+            "--condition-action",
+            "comment",
+            "--eventid",
+            "0102ff",
+            "--condition",
+            condition.nodeid.to_string(),
+            "--comment",
+            "seen it",
+            "--confirm",
+            "--seconds",
+            "0.5",
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+    assert len(calls) == 1
+    event_id, comment = calls[0]
+    assert event_id.Value == b"\x01\x02\xff"
+    assert comment.Value.Text == "seen it"
+    assert "Add comment on" in captured.err
+    assert "changes no condition state" in captured.err

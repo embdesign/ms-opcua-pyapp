@@ -51,6 +51,8 @@ from ...defaults import (
 )
 from ...errors import InvalidNodeIdError
 from ...models import (
+    CONDITION_ACTION_LABELS,
+    CONDITION_ACTIONS,
     STATUS_PASSED,
     EventConfig,
     EventNotification,
@@ -62,7 +64,11 @@ from ...models import (
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
 from ...opcua.event_service import SERVER_OBJECT_NODE_ID, event_id_bytes
-from ...operator_text import acknowledge_condition_confirmation, condition_refresh_text
+from ...operator_text import (
+    condition_action_confirmation,
+    condition_action_result_text,
+    condition_refresh_text,
+)
 from ..async_runner import AsyncRunner
 from ..selection_marker import SelectionMarker
 from ..tab_notice import OptionsRow, TabNotice
@@ -111,7 +117,7 @@ class EventsTab(SessionTab):
         self._subscription_id: int | None = None
         self._total_events = 0
         self._selected_notification: EventNotification | None = None
-        self._ack_busy = False
+        self._condition_busy = False
 
         self._build_ui()
         self.set_connected(False)
@@ -127,14 +133,15 @@ class EventsTab(SessionTab):
         layout.addWidget(title)
         layout.addWidget(
             TabNotice(
-                "One event subscription on the sources you add; a selected condition can be acknowledged or "
-                "refreshed.",
+                "One event subscription on the sources you add; a selected condition can be sent to its "
+                "own methods.",
                 "One event subscription on the source nodes you add explicitly (usually the Server object). The "
                 "server decides what it publishes; the fields come from the selected event type. For condition "
                 "events choose an event type such as ConditionType (i=2782) or AcknowledgeableConditionType "
-                "(i=2881), then a selected event can be acknowledged: one confirmed Acknowledge method call, "
-                "sent once. Refresh conditions asks the server once to publish the conditions it already "
-                "retains for this subscription. No variable is written and no other condition method is called.",
+                "(i=2881), then one selected event can be sent to the condition's own methods: Acknowledge, "
+                "Confirm, Enable, Disable and AddComment - one confirmed method call each, sent once, never "
+                "retried. Refresh conditions asks the server once to publish the conditions it already retains "
+                "for this subscription. No variable is written.",
             )
         )
 
@@ -279,14 +286,6 @@ class EventsTab(SessionTab):
         details_header = QHBoxLayout()
         details_header.addWidget(QLabel("Selected event — every field the subscription selected"))
         details_header.addStretch(1)
-        self.acknowledge_btn = QPushButton("Acknowledge condition…")
-        self.acknowledge_btn.setToolTip(
-            "Calls the condition's Acknowledge method once, after an explicit confirmation. Needs an event "
-            "subscription whose event type selects condition fields (ConditionType or a subtype)."
-        )
-        self.acknowledge_btn.clicked.connect(self._on_acknowledge)
-        self.acknowledge_btn.setEnabled(False)
-        details_header.addWidget(self.acknowledge_btn)
         self.refresh_conditions_btn = QPushButton("Refresh conditions")
         self.refresh_conditions_btn.setToolTip(
             "Calls ConditionRefresh once on this subscription so the server publishes the conditions it "
@@ -296,6 +295,35 @@ class EventsTab(SessionTab):
         self.refresh_conditions_btn.setEnabled(False)
         details_header.addWidget(self.refresh_conditions_btn)
         details_layout.addLayout(details_header)
+
+        # The condition methods of one selected event. Each is one confirmed call on
+        # the same EventId; the method is resolved below the condition node by its
+        # standard name, so a condition that does not expose one simply refuses.
+        condition_row = QHBoxLayout()
+        condition_row.addWidget(QLabel("Condition:"))
+        self.condition_buttons: dict[str, QPushButton] = {}
+        tooltips = {
+            "acknowledge": "Calls the condition's Acknowledge method once, after an explicit confirmation.",
+            "confirm": "Calls the condition's Confirm method once: confirms an acknowledged condition event.",
+            "enable": "Calls the condition's Enable method once so the server may report its events again.",
+            "disable": "Calls the condition's Disable method once; the condition stops reporting events.",
+            "comment": "Calls the condition's AddComment method once with the text you enter.",
+        }
+        for action in CONDITION_ACTIONS:
+            button = QPushButton(f"{CONDITION_ACTION_LABELS[action]}…")
+            button.setToolTip(
+                tooltips[action]
+                + " Needs an event subscription whose event type selects condition fields "
+                "(ConditionType or a subtype)."
+            )
+            button.clicked.connect(
+                lambda _checked=False, selected=action: self._on_condition_action(selected)
+            )
+            button.setEnabled(False)
+            self.condition_buttons[action] = button
+            condition_row.addWidget(button)
+        condition_row.addStretch(1)
+        details_layout.addLayout(condition_row)
         self.details_view = QPlainTextEdit()
         self.details_view.setReadOnly(True)
         self.details_view.setFont(mono_font(9))
@@ -328,7 +356,7 @@ class EventsTab(SessionTab):
             self._busy = False
             self._subscription_id = None
             self._selected_notification = None
-            self._ack_busy = False
+            self._condition_busy = False
             self.sources_table.setRowCount(0)
             self.events_table.setRowCount(0)
             self.details_view.clear()
@@ -695,7 +723,7 @@ class EventsTab(SessionTab):
         self.details_view.clear()
         self._selected_notification = None
         self._total_events = 0
-        self._update_ack_button()
+        self._update_condition_buttons()
         self._update_counters()
 
     def _on_max_rows_changed(self, value: int) -> None:
@@ -709,36 +737,35 @@ class EventsTab(SessionTab):
         if not rows:
             self.details_view.clear()
             self._selected_notification = None
-            self._update_ack_button()
+            self._update_condition_buttons()
             return
         item = self.events_table.item(min(rows), 0)
         notification = item.data(EVENT_PAYLOAD) if item is not None else None
         if not isinstance(notification, EventNotification):
             self.details_view.clear()
             self._selected_notification = None
-            self._update_ack_button()
+            self._update_condition_buttons()
             return
         self._selected_notification = notification
         payload = notification.to_dict()
         payload["received_at_local"] = notification.received_at.astimezone().isoformat(timespec="milliseconds")
         payload["received_at_utc"] = iso_utc(notification.received_at)
         self.details_view.setPlainText(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
-        self._update_ack_button()
+        self._update_condition_buttons()
 
-    # -- condition acknowledgement and refresh ----------------------------
-    def _update_ack_button(self) -> None:
+    # -- condition methods and refresh -------------------------------------
+    def _update_condition_buttons(self) -> None:
         notification = self._selected_notification
-        can_acknowledge = (
+        has_identity = (
             notification is not None
             and bool(notification.condition_node_id)
             and event_id_bytes(notification.event_id) is not None
-            and self._connected
-            and not self._ack_busy
-            and not self._busy
         )
-        self.acknowledge_btn.setEnabled(can_acknowledge)
+        can_call = has_identity and self._connected and not self._condition_busy and not self._busy
+        for button in self.condition_buttons.values():
+            button.setEnabled(can_call)
         self.refresh_conditions_btn.setEnabled(
-            self._connected and self._running and not self._ack_busy and not self._busy
+            self._connected and self._running and not self._condition_busy and not self._busy
         )
 
     def _on_refresh_conditions(self) -> None:
@@ -748,13 +775,13 @@ class EventsTab(SessionTab):
                 "Start event monitoring first: ConditionRefresh applies to one subscription.", error=True
             )
             return
-        self._ack_busy = True
-        self._update_ack_button()
+        self._condition_busy = True
+        self._update_condition_buttons()
         self._set_status("Asking the server to refresh the conditions of the running subscription…")
 
         def done(result: Any) -> None:
-            self._ack_busy = False
-            self._update_ack_button()
+            self._condition_busy = False
+            self._update_condition_buttons()
             if self._closed:
                 return
             self._set_status(result.summary_text(), error=not result.ok)
@@ -771,8 +798,8 @@ class EventsTab(SessionTab):
             )
 
         def failed(message: str) -> None:
-            self._ack_busy = False
-            self._update_ack_button()
+            self._condition_busy = False
+            self._update_condition_buttons()
             if self._closed:
                 return
             self._set_status(f"ConditionRefresh failed: {message}", error=True)
@@ -784,85 +811,101 @@ class EventsTab(SessionTab):
             on_error=failed,
         )
 
-    def _on_acknowledge(self) -> None:
+    def _on_condition_action(self, action: str) -> None:
+        """Ask for a comment and a confirmation, then send exactly one condition method call."""
         notification = self._selected_notification
         if notification is None:
             self._set_status("Select an event first.", error=True)
             return
+        label = CONDITION_ACTION_LABELS.get(action, action)
         if not notification.condition_node_id or event_id_bytes(notification.event_id) is None:
             self._set_status(
-                "This event carries no condition identity or EventId; it cannot be acknowledged. "
+                f"This event carries no condition identity or EventId; {label} cannot be called. "
                 "Use an event type such as ConditionType when starting the subscription.",
                 error=True,
             )
             return
 
-        comment = self._ask_acknowledge_comment()
+        comment = self._ask_condition_comment(label)
         if comment is None:
-            self._set_status("Acknowledging the condition was cancelled; nothing was sent.")
+            self._set_status(f"{label} was cancelled; nothing was sent.")
             return
-        text = acknowledge_condition_confirmation(
+        if action == "comment" and not comment.strip():
+            self._set_status("A comment cannot be empty; nothing was sent.", error=True)
+            return
+        text = condition_action_confirmation(
+            action=action,
             endpoint_url=self._endpoint_url,
             condition_node_id=notification.condition_node_id,
             event_id=notification.event_id,
             comment=comment,
         )
-        if not self._confirm_acknowledge(text):
-            self._set_status("Acknowledging the condition was cancelled; nothing was sent.")
+        if not self._confirm_condition_action(label, text):
+            self._set_status(f"{label} was cancelled; nothing was sent.")
             return
 
-        self._ack_busy = True
-        self._update_ack_button()
+        self._condition_busy = True
+        self._update_condition_buttons()
         condition_node_id = notification.condition_node_id
-        self._set_status(f"Calling Acknowledge on {condition_node_id}…")
+        event_id = notification.event_id
+        self._set_status(f"Calling {label} on {condition_node_id}…")
 
         def done(outcome: Any) -> None:
-            self._ack_busy = False
-            self._update_ack_button()
+            self._condition_busy = False
+            self._update_condition_buttons()
+            if self._closed:
+                return
             if outcome.status == STATUS_PASSED:
-                self._set_status(f"Condition {condition_node_id} acknowledged.")
+                self._set_status(f"{label} on condition {condition_node_id} was sent once.")
                 self.report_ready.emit(
-                    f"Acknowledge on {condition_node_id} was sent once (EventId {notification.event_id}); "
-                    "no Confirm/Enable call was made and the acknowledgement is not proof the condition cleared."
+                    condition_action_result_text(
+                        action=action, condition_node_id=condition_node_id, event_id=event_id
+                    )
                 )
                 return
             self._set_status(
-                f"Acknowledge was not accepted: {outcome.detail or outcome.status}", error=True
+                f"{label} was not accepted: {outcome.detail or outcome.status}", error=True
             )
             self.report_ready.emit(
-                f"Acknowledge on {condition_node_id} was not accepted ({outcome.status}): "
+                f"{label} on {condition_node_id} was not accepted ({outcome.status}): "
                 f"{outcome.detail or 'no detail'}."
             )
 
         def failed(message: str) -> None:
-            self._ack_busy = False
-            self._update_ack_button()
-            self._set_status(f"Acknowledge failed: {message}", error=True)
-            self.report_ready.emit(f"Acknowledge on {condition_node_id} failed: {message}.")
+            self._condition_busy = False
+            self._update_condition_buttons()
+            if self._closed:
+                return
+            self._set_status(f"{label} failed: {message}", error=True)
+            self.report_ready.emit(f"{label} on {condition_node_id} failed: {message}.")
 
         self._submit(
-            lambda: self._service.acknowledge_condition(
+            lambda: self._service.condition_action(
                 condition_node_id,
-                notification.event_id,
+                event_id,
                 comment,
-                reference=f"events-tab {condition_node_id}",
+                action=action,
+                reference=f"events-tab {label.lower()} {condition_node_id}",
             ),
             on_done=done,
             on_error=failed,
         )
 
-    def _ask_acknowledge_comment(self) -> str | None:
-        """Ask for the Acknowledge comment; ``None`` means the operator cancelled."""
+    def _ask_condition_comment(self, label: str) -> str | None:
+        """Ask for the comment argument; ``None`` means the operator cancelled."""
+        required = " (required for AddComment)" if label == "Add comment" else " (optional)"
         text, accepted = QInputDialog.getText(
-            self, "Acknowledge condition", "Comment (optional, sent as the LocalizedText argument):"
+            self,
+            f"{label} condition",
+            f"Comment{required}, sent as the LocalizedText argument:",
         )
         return str(text) if accepted else None
 
-    def _confirm_acknowledge(self, text: str) -> bool:
-        """Ask for explicit approval of the single Acknowledge call."""
+    def _confirm_condition_action(self, label: str, text: str) -> bool:
+        """Ask for explicit approval of the single method call."""
         answer = QMessageBox.question(
             self,
-            "Confirm condition acknowledgement",
+            f"Confirm {label.lower()} condition",
             text,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -898,7 +941,7 @@ class EventsTab(SessionTab):
         self.min_severity_spin.setEnabled(not self._running)
         self.start_btn.setEnabled(connected and has_sources and not self._running and not self._busy)
         self.stop_btn.setEnabled(self._running and not self._busy)
-        self._update_ack_button()
+        self._update_condition_buttons()
 
     def _update_counters(self) -> None:
         sources = self.sources_table.rowCount()

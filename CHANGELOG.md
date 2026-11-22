@@ -10,6 +10,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The five condition methods of a selected event, not only Acknowledge.** One condition event can now be sent
+  to its own `Acknowledge`, `Confirm`, `Enable`, `Disable` and `AddComment` methods from the Events tab
+  (**Acknowledge…**, **Confirm…**, **Enable…**, **Disable…**, **Add comment…**). All five take the same
+  arguments — the event's `EventId` (ByteString) and the operator's comment (LocalizedText) — and are one
+  confirmed call each through the single write path (`write_service.condition_action()`, which replaces
+  `acknowledge_condition()`), resolved below the condition node by their standard browse name, never retried.
+  `models.CONDITION_ACTION_METHODS` / `CONDITION_ACTION_LABELS` own the vocabulary, and
+  `operator_text.condition_action_confirmation` / `condition_action_result_text` state what each method does and
+  does not do (a confirmation is not an acknowledgement, a disabled condition still exists, a comment changes no
+  state). The client keeps **no condition state** — it tracks no `AckedState`/`ConfirmedState`/`EnabledState` and
+  never decides which method is legal next; the server's refusal is reported, and a method the condition does not
+  expose is reported as missing before anything is sent. `opcua-events` gained
+  `--condition-action acknowledge|confirm|enable|disable|comment --eventid HEX --condition NODEID --confirm`
+  (`--acknowledge EVENTID` stays as the shortcut); an incomplete, unconfirmed or unknown action still exits `2`
+  before connecting.
+
+### Added
+
 - **Live trend on the Live monitor.** Selecting a monitored item now draws its numbers in a chart under the item
   table (`gui/trend_chart.py`, the same widget the History tab uses; the new pure `trend.append_live_point()`
   fills the series as notifications arrive). It is a view of what that tab already received — no second read, no

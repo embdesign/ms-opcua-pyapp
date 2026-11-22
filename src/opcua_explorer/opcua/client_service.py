@@ -70,6 +70,7 @@ from ..models import (
     ValueReadResult,
     ValueSnapshot,
     WriteAuthority,
+    condition_action_label,
 )
 from .event_service import event_id_bytes
 from .event_session import EventSession
@@ -96,8 +97,8 @@ from .session_setup import normalise_url as _normalise_url
 from .test_runner import run_functional_tests
 from .traversal import download_address_space
 from .write_service import AttributeWriteOutcome, CallOutcome, Inspection, PrepareError, WriteResult
-from .write_service import acknowledge_condition as acknowledge_condition_impl
 from .write_service import call_method as invoke_method_impl
+from .write_service import condition_action as condition_action_impl
 from .write_service import inspect_call as call_preview_impl
 from .write_service import inspect_write as write_preview_impl
 from .write_service import prepare_attribute_write as attribute_write_prepare_impl
@@ -461,31 +462,41 @@ class OpcUaService:
         self._require_session()
         return await self._events.refresh_conditions(reference=reference)
 
-    async def acknowledge_condition(
+    async def condition_action(
         self,
         condition_node_id: str,
         event_id_hex: str,
         comment: str,
         *,
+        action: str = "acknowledge",
         reference: str = "",
     ) -> CallOutcome:
-        """Acknowledge one condition event: one ``Acknowledge`` call, exactly once.
+        """Call one A&C method on one condition event: exactly once, never retried.
 
-        The operator dialog is the authority; there is no retry, no automatic
-        comment and no other condition method (``Confirm``/``Enable``) is called.
+        ``action`` selects the standard method (``acknowledge``, ``confirm``,
+        ``enable``, ``disable`` or ``comment``); all of them take the event's
+        EventId and the operator's comment. The operator dialog is the authority;
+        one action per call, no second method, no automatic comment and no retry.
         """
         client = self._require_client()
         self._require_session()
         event_id = event_id_bytes(event_id_hex)
         if event_id is None:
             raise OpcUaExplorerError(
-                "The event has no usable EventId; nothing was acknowledged."
+                "The event has no usable EventId; no condition method was called."
             )
+        label = condition_action_label(action)
         authorization = WriteAuthority(
-            AUTHORITY_OPERATOR_DIALOG, reference or f"acknowledge {condition_node_id}"
+            AUTHORITY_OPERATOR_DIALOG,
+            reference or f"{label.lower()} {condition_node_id}",
         )
-        return await acknowledge_condition_impl(
-            client, condition_node_id, event_id, comment, authorization=authorization
+        return await condition_action_impl(
+            client,
+            condition_node_id,
+            event_id,
+            comment,
+            action=action,
+            authorization=authorization,
         )
 
     # -- interactive write / call ------------------------------------------

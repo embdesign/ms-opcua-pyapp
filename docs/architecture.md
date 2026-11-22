@@ -159,12 +159,15 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
   asyncio thread and emits one `EventNotification`. The tab never sees an asyncua object.
 * A source that cannot publish events (no `EventNotifier`, unknown NodeId, unsupported service) is recorded as a
   rejected `EventSourceInfo` with its StatusCode; one bad source never aborts the others or the subscription.
-* Event monitoring publishes notifications only. Its **guarded** action is a condition acknowledgement:
-  `write_service.acknowledge_condition()` resolves the instance's `Acknowledge` method below the condition node,
-  requires `InputArguments` = (ByteString, LocalizedText), and sends exactly one call through
-  `send_prepared_call` with `WriteAuthority("operator-dialog", …)`. The tab asks for an optional comment, shows
-  the confirmation text from `operator_text.acknowledge_condition_confirmation`, and never calls
-  `Confirm`/`Enable`/`AddComment` or retries.
+* Event monitoring publishes notifications only. Its **guarded** actions are the condition methods of one
+  selected event: `write_service.condition_action()` resolves the instance's `Acknowledge`, `Confirm`, `Enable`,
+  `Disable` or `AddComment` below the condition node by its standard browse name, requires `InputArguments` =
+  (ByteString, LocalizedText), and sends exactly one call through `send_prepared_call` with
+  `WriteAuthority("operator-dialog", …)`. The tab asks for an optional comment (required for `AddComment`), shows
+  the confirmation text from `operator_text.condition_action_confirmation` — one consequence text per method, so
+  an acknowledgement is never described as a confirmation — and never retries. The client tracks no condition
+  state and never decides which method is legal next; the server's refusal is reported with its StatusCode, and
+  a method the condition does not expose is reported as missing before anything is sent.
 * Its **unguarded** action is `ConditionRefresh`: `write_service.refresh_conditions()` sends one call of the
   standard method `i=3875` on the ConditionType object (`i=2782`) with the subscription id as its only `UInt32`
   input, and `LiveEvents.refresh_conditions()` composes a `ConditionRefreshResult` from that outcome plus a

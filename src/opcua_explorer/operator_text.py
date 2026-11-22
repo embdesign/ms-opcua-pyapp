@@ -12,7 +12,13 @@ sent. ``docs/architecture.md`` §11 describes the rules it implements.
 
 from __future__ import annotations
 
-from .models import ConnectionInfo, DiscoveryResult, TestConfig
+from .models import (
+    CONDITION_ACTION_METHODS,
+    ConnectionInfo,
+    DiscoveryResult,
+    TestConfig,
+    condition_action_label,
+)
 
 #: Shown before any write or method call, and repeated in the confirmation dialog.
 EQUIPMENT_WARNING = (
@@ -192,24 +198,81 @@ def node_delete_confirmation(*, endpoint_url: str, node_id: str) -> str:
     )
 
 
-def acknowledge_condition_confirmation(
-    *, endpoint_url: str, condition_node_id: str, event_id: str, comment: str
+#: What each condition method does to the condition, in the operator's words. One
+#: definition, because the GUI dialog, the CLI note and the report line all say it.
+_CONDITION_ACTION_CONSEQUENCES = {
+    "acknowledge": (
+        "This acknowledges one condition event. It does not write a variable, does not confirm or "
+        "re-enable the condition and is never retried; the server decides whether the acknowledgement "
+        "is accepted."
+    ),
+    "confirm": (
+        "This confirms one condition event. Confirming is not an acknowledgement and does not clear the "
+        "condition; a server refuses Confirm for an event that was not acknowledged first. The call is "
+        "never retried."
+    ),
+    "enable": (
+        "This re-enables a disabled condition, so the server may report its events for it again. It "
+        "acknowledges and confirms nothing, and the call is never retried."
+    ),
+    "disable": (
+        "This disables the condition: the server stops reporting its events, and the condition itself "
+        "still exists. Re-enabling it is a separate Enable call. The call is never retried."
+    ),
+    "comment": (
+        "This adds one comment to the condition. It changes no condition state - nothing is "
+        "acknowledged, confirmed, enabled or disabled - and the call is never retried."
+    ),
+}
+
+#: What a completed call proves, per action. Used by the Events tab report line and
+#: by ``opcua-events`` so a success is never described as more than it is.
+_CONDITION_ACTION_RESULTS = {
+    "acknowledge": "no Confirm/Enable call was made and the acknowledgement is not proof the condition cleared",
+    "confirm": "confirming is not proof the condition cleared",
+    "enable": "the server decides whether the condition reports its events again",
+    "disable": "the condition still exists and reports no events until it is enabled again",
+    "comment": "a comment changes no condition state",
+}
+
+
+def condition_action_confirmation(
+    *,
+    action: str,
+    endpoint_url: str,
+    condition_node_id: str,
+    event_id: str,
+    comment: str,
 ) -> str:
-    """Confirmation body for one condition acknowledgement (Acknowledge method)."""
+    """Confirmation body for one condition method call (Acknowledge/Confirm/Enable/Disable/AddComment)."""
+    method = CONDITION_ACTION_METHODS.get(str(action), str(action))
+    consequence = _CONDITION_ACTION_CONSEQUENCES.get(
+        str(action), "This calls one condition method once and is never retried."
+    )
     return "\n".join(
         [
             f"Endpoint: {endpoint_url}",
             "",
             "One method call will be sent exactly once:",
-            f"  CALL Acknowledge on {condition_node_id}",
+            f"  CALL {method} on {condition_node_id}",
             f"  EventId: {event_id}",
             f"  Comment: {comment or '(empty)'}",
             "",
-            "This acknowledges one condition event. It does not write a variable, does not confirm the "
-            "condition and is never retried; the server decides whether the acknowledgement is accepted.",
+            consequence,
             "",
             EQUIPMENT_WARNING,
         ]
+    )
+
+
+def condition_action_result_text(
+    *, action: str, condition_node_id: str, event_id: str
+) -> str:
+    """One report line describing what a completed condition method call did and did not do."""
+    label = condition_action_label(action)
+    result = _CONDITION_ACTION_RESULTS.get(str(action), "the server decides the effect")
+    return (
+        f"{label} on {condition_node_id} was sent once (EventId {event_id}); {result}."
     )
 
 

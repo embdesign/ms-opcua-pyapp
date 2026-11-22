@@ -24,6 +24,7 @@ from typing import Any
 from asyncua import ua
 
 from ..models import (
+    CONDITION_ACTION_METHODS,
     CONDITION_REFRESH_METHOD_ID,
     CONDITION_TYPE_NODE_ID,
     STATUS_FAILED,
@@ -31,6 +32,7 @@ from ..models import (
     STATUS_PASSED,
     STATUS_SKIPPED,
     WriteAuthority,
+    condition_action_label,
 )
 from . import type_support
 from .check_support import preview_value
@@ -902,36 +904,47 @@ async def call_method(
     return await send_prepared_call(prepared, authorization=authorization)
 
 
-#: Browse name of the A&C method this module calls; nothing else is ever invoked.
-ACKNOWLEDGE_METHOD_NAME = "Acknowledge"
+#: Browse names of the A&C methods this module may call. Nothing else is invoked,
+#: and every one of them is resolved below the condition node (never by a NodeId
+#: the client invents).
+CONDITION_METHOD_NAMES = tuple(CONDITION_ACTION_METHODS.values())
 
 
-async def acknowledge_condition(
+async def condition_action(
     client: Any,
     condition_node_id: str,
     event_id: bytes,
     comment: str,
     *,
+    action: str = "acknowledge",
     authorization: WriteAuthority,
 ) -> CallOutcome:
-    """Acknowledge one condition event: one ``Acknowledge`` call, exactly once.
+    """Call one condition method (Acknowledge/Confirm/Enable/Disable/AddComment) once.
 
-    The method is resolved below the condition node by browse name and its
-    ``InputArguments`` must be ``ByteString`` (EventId) and ``LocalizedText``
-    (Comment) - the A&C definition. When either does not hold, nothing is sent.
-    No retry, no ``Confirm``, no comment synthesis.
+    The method is resolved below the condition node by its standard browse name and
+    its ``InputArguments`` must be ``ByteString`` (EventId) and ``LocalizedText``
+    (Comment) - the A&C definition shared by all five. When either does not hold,
+    nothing is sent. One call, no retry, no second method, no comment synthesis.
     """
+    method_name = CONDITION_ACTION_METHODS.get(str(action), "")
     outcome = CallOutcome(
         object_node_id=condition_node_id, method_node_id="", authorization=authorization
     )
+    if not method_name:
+        outcome.status = STATUS_SKIPPED
+        outcome.detail = (
+            f"{action!r} is not a condition action this client sends; nothing was called."
+        )
+        return outcome
+    label = condition_action_label(action)
     if not event_id:
         outcome.status = STATUS_SKIPPED
-        outcome.detail = "The event has no EventId; nothing was called."
+        outcome.detail = f"The event has no EventId; {label} was not called."
         return outcome
 
     try:
         method_node_id = await resolve_method_node_id(
-            client, condition_node_id, "", ACKNOWLEDGE_METHOD_NAME
+            client, condition_node_id, "", method_name
         )
     except PrepareError as exc:
         outcome.status = STATUS_SKIPPED
@@ -960,14 +973,15 @@ async def acknowledge_condition(
         outcome.status = STATUS_SKIPPED
         outcome.detail = (
             f"{condition_node_id} exposes {method_node_id} but its arguments are {actual or 'none'}; "
-            "an Acknowledge method takes EventId (ByteString) and Comment (LocalizedText). "
+            f"a {method_name} method takes EventId (ByteString) and Comment (LocalizedText). "
             "The method was not called."
         )
         return outcome
 
     outcome = await send_prepared_call(prepared, authorization=authorization)
-    # Acknowledge reports its own result as an output StatusCode: a Good service
-    # result does not mean the acknowledgement was accepted.
+    # The A&C state methods report their own result as an output StatusCode: a Good
+    # service result does not mean the request was accepted. A ByteString output
+    # (the CommentId of AddComment) is left alone and reported as the call's output.
     if outcome.status == STATUS_PASSED and outcome.output_values:
         code = outcome.output_values[0]
         if isinstance(code, ua.Variant):
@@ -977,8 +991,8 @@ async def acknowledge_condition(
             outcome.status = STATUS_FAILED
             outcome.status_code = name
             outcome.detail = (
-                f"The server returned {name} from Acknowledge on {condition_node_id}; "
-                "the acknowledgement was not accepted."
+                f"The server returned {name} from {method_name} on {condition_node_id}; "
+                f"the {label.lower()} request was not accepted."
             )
     return outcome
 
@@ -986,6 +1000,7 @@ async def acknowledge_condition(
 __all__ = [
     "CallCancelled",
     "CallOutcome",
+    "CONDITION_METHOD_NAMES",
     "Inspection",
     "PrepareError",
     "PreparedCall",
@@ -993,8 +1008,8 @@ __all__ = [
     "RestoreOutcome",
     "WriteCancelled",
     "WriteOutcome",
-    "acknowledge_condition",
     "call_method",
+    "condition_action",
     "inspect_call",
     "inspect_write",
     "prepare_call",

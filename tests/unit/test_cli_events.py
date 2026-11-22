@@ -18,6 +18,8 @@ from opcua_explorer.opcua.event_service import SERVER_OBJECT_NODE_ID
 def _args(**overrides):
     base = {
         "acknowledge": None,
+        "condition_action": None,
+        "eventid": None,
         "condition": None,
         "comment": "",
         "confirm": False,
@@ -42,10 +44,54 @@ def test_condition_options_do_not_apply_without_an_acknowledgement() -> None:
         cli_events._check_condition_arguments(_args(condition="ns=2;s=Cond"))
     with pytest.raises(CliError, match="only apply together"):
         cli_events._check_condition_arguments(_args(comment="checked"))
+    with pytest.raises(CliError, match="only apply together"):
+        cli_events._check_condition_arguments(_args(eventid="0102ff"))
     # A bare --confirm never pretends to have confirmed anything.
     with pytest.raises(CliError, match="--confirm only applies"):
         cli_events._check_condition_arguments(_args(confirm=True))
     cli_events._check_condition_arguments(_args())
+
+
+def test_the_general_condition_action_needs_an_event_id_and_a_confirmation() -> None:
+    with pytest.raises(CliError, match="needs --eventid"):
+        cli_events._check_condition_arguments(
+            _args(condition_action="confirm", condition="ns=2;s=Cond", confirm=True)
+        )
+    with pytest.raises(CliError, match="--confirm"):
+        cli_events._check_condition_arguments(
+            _args(condition_action="confirm", condition="ns=2;s=Cond", eventid="0102ff")
+        )
+    plan = cli_events._condition_plan(
+        _args(condition_action="confirm", condition="ns=2;s=Cond", eventid="0102ff", confirm=True)
+    )
+    assert plan == ("confirm", "0102ff", "ns=2;s=Cond")
+
+
+def test_acknowledge_and_condition_action_cannot_both_be_given() -> None:
+    with pytest.raises(CliError, match="both name a condition call"):
+        cli_events._check_condition_arguments(
+            _args(
+                acknowledge="0102ff",
+                condition_action="disable",
+                condition="ns=2;s=Cond",
+                eventid="0102ff",
+                confirm=True,
+            )
+        )
+
+
+def test_an_unknown_condition_action_is_refused_before_connecting() -> None:
+    with pytest.raises(CliError, match="not a condition action"):
+        cli_events._check_condition_arguments(
+            _args(condition_action="restart", condition="ns=2;s=Cond", eventid="01", confirm=True)
+        )
+
+
+def test_eventid_belongs_to_the_general_action_only() -> None:
+    with pytest.raises(CliError, match="--eventid only applies to --condition-action"):
+        cli_events._check_condition_arguments(
+            _args(acknowledge="0102ff", eventid="0102ff", condition="ns=2;s=Cond", confirm=True)
+        )
 
 
 def test_parser_defaults_target_the_server_object_and_run_for_ten_seconds() -> None:

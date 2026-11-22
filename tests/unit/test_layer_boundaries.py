@@ -218,7 +218,7 @@ def test_every_send_requires_an_authority() -> None:
         "write_variable",
         "call_method",
         "restore_value",
-        "acknowledge_condition",
+        "condition_action",
         "refresh_conditions",
     ):
         parameter = inspect.signature(getattr(write_service, name)).parameters.get("authorization")

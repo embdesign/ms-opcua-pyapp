@@ -20,9 +20,9 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 800 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 814 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 586 passed, ~8 s
+uv run pytest tests/unit -q                # fast subset, 592 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
@@ -162,12 +162,16 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   tests can stub the dialog. Never bypass the preview: a refused value must not reach a confirmation dialog.
   `tests/unit/test_layer_boundaries.py` enforces both rules: no `write_value` / `call_method` outside
   `write_service.py` (the demo server excepted), and no default for `authorization`.
-- Condition acknowledgement is the **only guarded** action of the Events tab: one `Acknowledge` method call
-  through `write_service.acknowledge_condition` with `WriteAuthority("operator-dialog", …)`, after the explicit
-  confirmation text in `operator_text.acknowledge_condition_confirmation`. It is never retried, never calls
-  `Confirm`/`Enable`/`AddComment`, and refuses a method whose `InputArguments` are not
-  (ByteString, LocalizedText). Event notifications stay read-only; there is no automatic acknowledgement.
-- The tab's **second** condition action is unguarded on purpose: **Refresh conditions** sends one
+- The Events tab's condition methods are **guarded one-shot calls of the selected event**: `Acknowledge`,
+  `Confirm`, `Enable`, `Disable` and `AddComment` all go through the single `write_service.condition_action()`
+  with `WriteAuthority("operator-dialog", …)`, after the confirmation text in
+  `operator_text.condition_action_confirmation` (which says what that one method does and does not do). The
+  method is resolved below the condition node by its standard browse name (`models.CONDITION_ACTION_METHODS`),
+  never by a NodeId the client invents; `InputArguments` must be (ByteString, LocalizedText) or nothing is sent;
+  one action per call, never retried, and a method the condition does not expose is reported as missing. The
+  client keeps **no condition state** (`AckedState`/`ConfirmedState`/`EnabledState` are never tracked or
+  inferred), and there is no automatic acknowledgement. Event notifications stay read-only.
+- The tab's **unguarded** action is **Refresh conditions**: it sends one
   `ConditionRefresh` (`i=3875`, one `UInt32` SubscriptionId) through `write_service.refresh_conditions`, with
   `WriteAuthority("operator-dialog", …)` recorded but **no dialog**, because it stores, acknowledges and changes
   nothing. `LiveEvents.refresh_conditions` composes a `ConditionRefreshResult` from the call outcome plus a

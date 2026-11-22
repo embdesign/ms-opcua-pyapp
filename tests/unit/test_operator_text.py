@@ -13,7 +13,8 @@ from opcua_explorer.models import (
 )
 from opcua_explorer.operator_text import (
     EQUIPMENT_WARNING,
-    acknowledge_condition_confirmation,
+    condition_action_confirmation,
+    condition_action_result_text,
     condition_refresh_text,
     connection_diagnostics_text,
     guarded_operation_confirmation,
@@ -22,8 +23,9 @@ from opcua_explorer.operator_text import (
 )
 
 
-def test_acknowledge_confirmation_names_the_target_event_and_limits() -> None:
-    text = acknowledge_condition_confirmation(
+def test_condition_confirmation_names_the_target_event_and_limits() -> None:
+    text = condition_action_confirmation(
+        action="acknowledge",
         endpoint_url="opc.tcp://plant:4840",
         condition_node_id="ns=2;s=PumpCondition",
         event_id="0102ff",
@@ -39,11 +41,56 @@ def test_acknowledge_confirmation_names_the_target_event_and_limits() -> None:
     assert EQUIPMENT_WARNING in text
 
 
-def test_acknowledge_confirmation_renders_an_empty_comment() -> None:
-    text = acknowledge_condition_confirmation(
-        endpoint_url="opc.tcp://x", condition_node_id="i=1", event_id="00", comment=""
+def test_condition_confirmation_renders_an_empty_comment() -> None:
+    text = condition_action_confirmation(
+        action="acknowledge",
+        endpoint_url="opc.tcp://x",
+        condition_node_id="i=1",
+        event_id="00",
+        comment="",
     )
     assert "Comment: (empty)" in text
+
+
+def test_each_condition_action_states_its_own_consequence() -> None:
+    """A confirmation may only promise what that one method does."""
+    common = {"endpoint_url": "opc.tcp://x", "condition_node_id": "i=1", "event_id": "00", "comment": ""}
+
+    confirm = condition_action_confirmation(action="confirm", **common)
+    assert "CALL Confirm on i=1" in confirm
+    assert "not an acknowledgement" in confirm
+    assert "never retried" in confirm
+
+    enable = condition_action_confirmation(action="enable", **common)
+    assert "CALL Enable on i=1" in enable
+    assert "re-enables a disabled condition" in enable
+
+    disable = condition_action_confirmation(action="disable", **common)
+    assert "CALL Disable on i=1" in disable
+    assert "stops reporting its events" in disable
+
+    comment = condition_action_confirmation(action="comment", **common)
+    assert "CALL AddComment on i=1" in comment
+    assert "changes no condition state" in comment
+
+
+def test_condition_action_result_text_says_what_a_success_proves() -> None:
+    acknowledge = condition_action_result_text(
+        action="acknowledge", condition_node_id="ns=2;s=C", event_id="01"
+    )
+    assert "Acknowledge on ns=2;s=C was sent once" in acknowledge
+    assert "01" in acknowledge
+    assert "not proof" in acknowledge
+
+    assert "confirming is not proof" in condition_action_result_text(
+        action="confirm", condition_node_id="i=1", event_id="00"
+    )
+    assert "reports no events" in condition_action_result_text(
+        action="disable", condition_node_id="i=1", event_id="00"
+    )
+    assert "changes no condition state" in condition_action_result_text(
+        action="comment", condition_node_id="i=1", event_id="00"
+    )
 
 
 def test_condition_refresh_text_states_what_it_does_and_does_not_do() -> None:

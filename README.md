@@ -19,7 +19,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 800 tests (586 unit + 214 integration). See
+> suite has 814 tests (592 unit + 222 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -43,7 +43,7 @@ session's client.
 | **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType
-fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried), and **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
+fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be sent to the condition's own methods — **Acknowledge…**, **Confirm…**, **Enable…**, **Disable…** and **Add comment…** — each one operator-confirmed method call on that event's EventId, sent once and never retried; **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
 | **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
 | **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared), call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown) and **node management**: create one `Object` or `Variable` below a parent (the server assigns the NodeId, the new node is read back) or delete one node (one `DeleteNodes`, verified by reading it again). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery) plus optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
@@ -177,8 +177,10 @@ uv run opcua-explorer
    The **Events** tab is the corresponding page for event notifications: start the demo server with
    `uv run opcua-demo-server --event-interval 1`, add the Server object (`i=2253`) and press **Start events**;
    select a row to see every field the server published. With an event type such as `ConditionType` (`i=2782`) the
-   selected condition event can be acknowledged: **Acknowledge condition…** asks for an optional comment, shows the
-   exact target and EventId, and sends one `Acknowledge` method call after confirmation. **Refresh conditions**
+   selected condition event can be sent to the condition's own methods: **Acknowledge…**, **Confirm…**,
+   **Enable…**, **Disable…** and **Add comment…** each ask for an optional comment (AddComment needs one), show
+   the exact target and EventId, and send exactly that one method call after confirmation — never a second one
+   and never a retry. **Refresh conditions**
    asks the server once to publish the conditions it already retains for the running subscription
    (`ConditionRefresh`, no dialog because it stores and changes nothing); the server's `RefreshStart`/
    `RefreshEnd` events appear in the log as the evidence that the request arrived.
@@ -595,6 +597,8 @@ opcua-read --endpoint opc.tcp://plc:4840 --node i=85 --attribute DisplayName --j
 opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --seconds 30
 opcua-events --endpoint opc.tcp://plc:4840 --seconds 30 --refresh --json
 opcua-events --endpoint opc.tcp://plc:4840 --acknowledge 0102ff --condition ns=2;s=Pump --confirm
+opcua-events --endpoint opc.tcp://plc:4840 --condition-action comment --eventid 0102ff \
+             --condition ns=2;s=Pump --comment "seen, valve replaced" --confirm
 opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --csv
 opcua-write --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --value 42.5 --confirm
 opcua-check --endpoint opc.tcp://plc:4840 --variable ns=2;s=Temperature --report checks.html
@@ -614,10 +618,13 @@ versioned JSON document or CSV; `--aggregate average|minimum|maximum|count` with
 processed read instead (both `--from` and `--to` are then required, and the server may not support aggregates),
 and `--sparkline` adds a one-line text trend of the numeric values. `opcua-events` creates one event subscription
 (default source: the Server object) with the same server-side filtering as the Events tab (`--event-type`,
-`--select`, `--min-severity`), prints each event until `--count` or `--seconds`, and offers the tab's two condition
-actions: `--refresh` sends one `ConditionRefresh` and reports whether `RefreshStart`/`RefreshEnd` arrived, and
-`--acknowledge EVENTID --condition NODEID --confirm` sends one `Acknowledge` call (without `--confirm` it exits `2`
-and sends nothing; the JSON output carries the EventId and condition NodeId of every event). `opcua-write` always previews (server DataType/ValueRank and the parsed value),
+`--select`, `--min-severity`), prints each event until `--count` or `--seconds`, and offers the tab's condition
+actions: `--refresh` sends one `ConditionRefresh` and reports whether `RefreshStart`/`RefreshEnd` arrived;
+`--acknowledge EVENTID --condition NODEID --confirm` sends one `Acknowledge` call, and
+`--condition-action acknowledge|confirm|enable|disable|comment --eventid EVENTID --condition NODEID --confirm`
+reaches the same five methods as the tab (without `--confirm` either form exits `2` and sends nothing; the JSON
+output carries the EventId and condition NodeId of every event, and one action per run is sent). `opcua-write`
+always previews (server DataType/ValueRank and the parsed value),
 sends only with `--confirm`, sends exactly one write, reads it back and optionally restores the previous value
 with `--restore`; without `--confirm` it exits `2` and sends nothing. `opcua-check` runs the **same suite as the
 Tests tab** and prints or writes the same report (`--report checks.json` / `.html`, or `--json` for the canonical
@@ -757,7 +764,7 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 uv sync
 uv run pytest -q                          # unit + integration (starts a local demo server)
 uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
-uv run pytest tests/unit -q               # fast, no network (586 tests, ~8 s)
+uv run pytest tests/unit -q               # fast, no network (592 tests, ~8 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),
@@ -852,17 +859,21 @@ The implemented scope is complete; the following are **not** claimed:
 * **A comparison is structural evidence, not an equivalence guarantee.** The **Compare** tab and
   `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
   Neither compares behaviour under load, internal limits, or anything that requires a write.
-* **Events are notifications, not alarm management.** The **Events** tab subscribes to a source's `EventNotifier`
-  and shows the selected fields. It has exactly two condition actions. Acknowledging one selected condition event
-  is exactly one `Acknowledge` method call, after an explicit confirmation, through the single write path with
-  `operator-dialog` authority. **Refresh conditions** is one `ConditionRefresh` call on the running subscription,
-  which asks the server to publish the conditions it already retains again; it needs no confirmation because it
-  stores, acknowledges and changes nothing, and the server's `RefreshStart`/`RefreshEnd` events are reported as
-  the only evidence that it arrived. Neither action ever calls `Confirm`, `Enable` or `AddComment`, both are
-  never retried, and an acknowledgement is not proof that the process condition has gone away. Acknowledging
-  requires a condition-type subscription (`ConditionType` or a subtype such as `AcknowledgeableConditionType`) so
-  the event carries a condition identity and an EventId. There is no `ConditionRefresh2`, no event history, no
-  automatic acknowledgement and no change to a condition's enabled state. A source that cannot publish events
+* **Events are notifications, and the condition methods are one-shot calls.** The **Events** tab subscribes to a
+  source's `EventNotifier` and shows the selected fields. One selected condition event can be sent to the
+  condition's own methods: `Acknowledge`, `Confirm`, `Enable`, `Disable` and `AddComment` are five separate
+  commands, each exactly one method call, after its own explicit confirmation, through the single write path with
+  `operator-dialog` authority. The client keeps **no condition state of its own**: it does not track
+  `AckedState`/`ConfirmedState`/`EnabledState`, does not decide which method is legal next (the server refuses),
+  and the confirmation text says what that one method does — an acknowledgement is not proof that the process
+  condition has gone away, a confirmation is not an acknowledgement, and a disabled condition still exists.
+  Every action needs a condition-type subscription (`ConditionType` or a subtype such as
+  `AcknowledgeableConditionType`) so the event carries a condition identity and an EventId, and a method the
+  condition does not expose is reported as missing instead of being invented. **Refresh conditions** is one
+  `ConditionRefresh` call on the running subscription; it needs no confirmation because it stores, acknowledges
+  and changes nothing, and the server's `RefreshStart`/`RefreshEnd` events are reported as the only evidence that
+  it arrived. Nothing is retried, there is no `ConditionRefresh2`, no event history, no automatic
+  acknowledgement and no dialog-condition creation. A source that cannot publish events
   (no `EventNotifier`, unknown NodeId, unsupported service) is reported per source with its StatusCode. Event
   sources are session state, not project state: a project does not store them.
 * **`EventNotifier` is read on demand, not downloaded.** The Address space panel reads it for the selected node
