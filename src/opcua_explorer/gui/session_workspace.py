@@ -149,6 +149,13 @@ class SessionWorkspace(QWidget):
         for index in range(self.tabs.count()):
             apply_notices(self.tabs.widget(index), self._verbose_notices)
 
+    def step_page(self, step: int) -> None:
+        """Move to the next/previous page of this session, wrapping around."""
+        count = self.tabs.count()
+        if count < 2 or step == 0:
+            return
+        self.tabs.setCurrentIndex((self.tabs.currentIndex() + step) % count)
+
     def describe(self) -> str:
         """Tooltip text: endpoint, security, identity and session name."""
         info = self._connection
@@ -168,11 +175,16 @@ class SessionWorkspace(QWidget):
             name=(name or self._title).strip() or self._title,
             connection=self.connection_tab.connection_profile(),
             start_node_id=self.browser_tab.start_node(),
+            active_page=self.active_page(),
             export=self.export_tab.export_state(),
             monitor=self.monitor_tab.monitor_state(),
             tests=self.tests_tab.tests_state(),
             sequence=self.sequences_tab.sequence_state(),
         )
+
+    def active_page(self) -> str:
+        """Title of the visible page, i.e. what a project should reopen."""
+        return "" if self.tabs.count() == 0 else self.tabs.tabText(self.tabs.currentIndex())
 
     def apply_project_state(self, session: ProjectSession) -> None:
         """Restore a project session without connecting, subscribing or running anything."""
@@ -182,6 +194,18 @@ class SessionWorkspace(QWidget):
         self.monitor_tab.apply_monitor_state(session.monitor)
         self.tests_tab.apply_tests_state(session.tests)
         self.sequences_tab.apply_sequence_state(session.sequence)
+        self.show_page(session.active_page)
+
+    def show_page(self, title: str) -> bool:
+        """Select the page named ``title``; unknown or empty titles keep the current one."""
+        wanted = (title or "").strip()
+        if not wanted:
+            return False
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index).replace("&&", "&") == wanted.replace("&&", "&"):
+                self.tabs.setCurrentIndex(index)
+                return True
+        return False
 
     def set_project_title(self, title: str) -> None:
         """Use the project's own session name for the tab until a server name is known."""

@@ -56,8 +56,8 @@ _logger = logging.getLogger(__name__)
 #: What each output format carries beyond the snapshot itself. Shown in the
 #: "Export coverage" panel so the tab answers "is everything exported?".
 _FORMAT_NOTES = (
-    "JSON / CSV: contain exactly what the snapshot holds (values and descriptions only when the\n"
-    "             download included them).\n"
+    "JSON / CSV: contain exactly what the snapshot holds (values, descriptions and device attributes\n"
+    "             only when the download included them).\n"
     "NodeSet2:    writes the downloaded nodes plus parents, type definitions, encodings and method\n"
     "             arguments, reading each written node's attributes from the live session at export\n"
     "             time. The XML exporter cannot write WriteMask/UserWriteMask, AccessRestrictions,\n"
@@ -212,6 +212,14 @@ class ExportTab(QWidget):
         self.include_description_check = QCheckBox("Include node descriptions (Description attribute)")
         self.include_description_check.setChecked(True)
         content_layout.addWidget(self.include_description_check)
+        self.include_device_attributes_check = QCheckBox(
+            "Include device attributes (write masks, historizing, sampling interval, …)"
+        )
+        self.include_device_attributes_check.setToolTip(
+            "Reads the attributes that are not part of the data model, so two devices can be compared "
+            "on them (Compare tolerance 'device'). It multiplies the attribute reads of every node."
+        )
+        content_layout.addWidget(self.include_device_attributes_check)
         content_hint = QLabel(
             "Values are off by default: enabling them makes the export larger and reads live data from the "
             "process; unsupported encodings are flagged, never silently dropped. JSON/CSV contain exactly "
@@ -424,6 +432,7 @@ class ExportTab(QWidget):
             max_references_per_node=self.max_refs_spin.value(),
             include_values=self.include_values_check.isChecked(),
             include_description=self.include_description_check.isChecked(),
+            include_device_attributes=self.include_device_attributes_check.isChecked(),
             namespaces=namespaces,
             include_dependencies=self.dependencies_check.isChecked(),
             max_dependency_nodes=self.max_dependencies_spin.value(),
@@ -444,6 +453,7 @@ class ExportTab(QWidget):
         self.max_refs_spin.setValue(int(state.max_references_per_node))
         self.include_values_check.setChecked(bool(state.include_values))
         self.include_description_check.setChecked(bool(state.include_description))
+        self.include_device_attributes_check.setChecked(bool(state.include_device_attributes))
         self.dependencies_check.setChecked(bool(state.include_dependencies))
         self.max_dependencies_spin.setValue(int(state.max_dependency_nodes))
         self.schema_edit.setText(state.schema_path or "")
@@ -474,6 +484,7 @@ class ExportTab(QWidget):
             namespace_filter=namespace_filter,
             include_values=self.include_values_check.isChecked(),
             include_description=self.include_description_check.isChecked(),
+            include_device_attributes=self.include_device_attributes_check.isChecked(),
         )
 
     def _roots(self) -> list[str] | None:

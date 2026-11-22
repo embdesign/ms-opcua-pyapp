@@ -41,6 +41,7 @@ from .attributes import (
     VARIABLE_NODE_CLASSES,
     AttributeSpec,
     apply_attributes_to_record,
+    device_specs_for,
     read_attributes_bulk,
     read_values_bulk,
     specs_for,
@@ -270,7 +271,11 @@ class AddressSpaceDownloader:
                         [item.node_id for item in chunk],
                         reference_type=ua.ObjectIds.References,
                         direction=ua.BrowseDirection.Both,
-                        include_subtypes=True,
+                        # Honours the documented bound instead of a hardcoded True:
+                        # without subtypes a download follows only the exact reference
+                        # types it asks for, so it is reported as such (see the
+                        # download summary in README §7).
+                        include_subtypes=self._config.follow_subtypes,
                         max_references_per_node=self._config.max_references_per_node,
                         batch_size=len(chunk),
                     )
@@ -399,6 +404,47 @@ class AddressSpaceDownloader:
                 spec.name: type_results[(node_id, spec.name)]
                 for spec in class_specs.get(record.node_class, [])
                 if (node_id, spec.name) in type_results
+            }
+            apply_attributes_to_record(record, attributes, namespace_uri_of=self._namespace_index.get)
+
+        await self._read_device_attributes()
+
+    async def _read_device_attributes(self) -> None:
+        """Pass 3: the attributes that describe the device, not its data model.
+
+        Only when the download asks for them (``include_device_attributes``). They
+        are what tells two otherwise identical devices apart — write mask, event
+        notifier, historizing, sampling interval, abstract/symmetric flags, data type
+        definition, access restrictions and role permissions — so the comparison of a
+        device pair needs them in the snapshot instead of a live session.
+        """
+        if not self._config.include_device_attributes:
+            return
+        nodes = self._snapshot.nodes
+        device_specs: dict[str, list[Any]] = {}
+        for record in nodes.values():
+            if record.node_class not in device_specs:
+                device_specs[record.node_class] = device_specs_for(record.node_class)
+        requests = [
+            (node_id, spec)
+            for node_id, record in nodes.items()
+            for spec in device_specs.get(record.node_class, [])
+        ]
+        if not requests:
+            return
+        self._emit(
+            TraversalProgress(
+                phase="device attributes",
+                message="Reading device attributes",
+                nodes_collected=len(nodes),
+            )
+        )
+        results = await read_attributes_bulk(self._session, requests)
+        for node_id, record in nodes.items():
+            attributes = {
+                spec.name: results[(node_id, spec.name)]
+                for spec in device_specs.get(record.node_class, [])
+                if (node_id, spec.name) in results
             }
             apply_attributes_to_record(record, attributes, namespace_uri_of=self._namespace_index.get)
 

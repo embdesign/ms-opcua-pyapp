@@ -158,3 +158,64 @@ async def test_extended_read_hides_optional_attributes_the_server_rejects() -> N
     assert "RolePermissions" not in names
     assert "UserRolePermissions" not in names
     assert record.unavailable == {}
+
+
+def test_device_specs_only_contain_what_a_download_does_not_read() -> None:
+    """A device-attribute download reads every attribute exactly once."""
+    from opcua_explorer.opcua.attributes import device_specs_for
+
+    variable = [spec.name for spec in device_specs_for("Variable")]
+    assert variable == ["WriteMask", "UserWriteMask", "MinimumSamplingInterval", "Historizing",
+                        "AccessRestrictions", "RolePermissions", "UserRolePermissions"]
+    # TypeDefinition comes from the HasTypeDefinition reference, not from a Read.
+    assert "NodeClass" not in variable and "DataType" not in variable
+    object_names = [spec.name for spec in device_specs_for("Object")]
+    assert "EventNotifier" in object_names and "WriteMask" in object_names
+    # Method executable flags are part of the standard download already.
+    assert [spec.name for spec in device_specs_for("Method")] == [
+        "WriteMask",
+        "UserWriteMask",
+        "AccessRestrictions",
+        "RolePermissions",
+        "UserRolePermissions",
+    ]
+    assert device_specs_for("Unspecified") and all(
+        spec.name in ("WriteMask", "UserWriteMask", "AccessRestrictions", "RolePermissions", "UserRolePermissions")
+        for spec in device_specs_for("Unspecified")
+    )
+
+
+def test_attributes_without_a_modelled_field_are_kept_as_device_attributes() -> None:
+    """A read device attribute must not be dropped on the floor."""
+    from opcua_explorer.models import NodeRecord
+    from opcua_explorer.opcua.attributes import apply_attributes_to_record
+
+    record = NodeRecord(node_id="ns=2;s=Temperature")
+    attributes = {
+        "NodeClass": decode_attribute("NodeClass", _data_value(2, ua.VariantType.Int32)),
+        "Historizing": decode_attribute("Historizing", _data_value(True, ua.VariantType.Boolean)),
+        "WriteMask": decode_attribute("WriteMask", _data_value(3, ua.VariantType.UInt32)),
+        "MinimumSamplingInterval": decode_attribute(
+            "MinimumSamplingInterval", _data_value(100.0, ua.VariantType.Double)
+        ),
+    }
+
+    apply_attributes_to_record(record, attributes, namespace_uri_of=lambda index: "urn:test")
+
+    assert record.device_attributes == {
+        "Historizing": "True",
+        # AttributeWriteMask bits 1 and 2, decoded to member names by the reader.
+        "WriteMask": "3 (AccessLevel, ArrayDimensions)",
+        "MinimumSamplingInterval": "100.0",
+    }
+    # The modelled fields are unaffected and stay out of the device map.
+    assert "NodeClass" not in record.device_attributes
+    # A refused device attribute is reported, not silently empty.
+    refused = NodeRecord(node_id="ns=2;s=Other")
+    apply_attributes_to_record(
+        refused,
+        {"Historizing": decode_attribute("Historizing", _bad_data_value())},
+        namespace_uri_of=lambda index: "urn:test",
+    )
+    assert refused.device_attributes == {}
+    assert "Historizing" in refused.unavailable

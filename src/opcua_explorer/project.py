@@ -88,6 +88,7 @@ class ExportState:
     max_references_per_node: int = 0
     include_values: bool = False
     include_description: bool = True
+    include_device_attributes: bool = False
     #: Checked namespace indexes; ``None`` means "all namespaces".
     namespaces: list[int] | None = None
     include_dependencies: bool = True
@@ -123,6 +124,9 @@ class ExportState:
             ),
             include_values=bool(data.get("include_values", defaults.include_values)),
             include_description=bool(data.get("include_description", defaults.include_description)),
+            include_device_attributes=bool(
+                data.get("include_device_attributes", defaults.include_device_attributes)
+            ),
             namespaces=namespaces,
             include_dependencies=bool(data.get("include_dependencies", defaults.include_dependencies)),
             max_dependency_nodes=_as_int(
@@ -277,6 +281,8 @@ class ProjectSession:
         default_factory=lambda: ConnectionProfile(name="Session", endpoint_url="opc.tcp://127.0.0.1:4840")
     )
     start_node_id: str = "i=85"
+    #: Title of the page that was open when the project was saved ("" = the first page).
+    active_page: str = ""
     export: ExportState = field(default_factory=ExportState)
     monitor: MonitorState = field(default_factory=MonitorState)
     tests: TestsState = field(default_factory=TestsState)
@@ -287,6 +293,7 @@ class ProjectSession:
             "name": self.name,
             "connection": self.connection.to_dict(),
             "start_node_id": self.start_node_id,
+            "active_page": self.active_page,
             "export": self.export.to_dict(),
             "monitor": self.monitor.to_dict(),
             "tests": self.tests.to_dict(),
@@ -305,6 +312,7 @@ class ProjectSession:
             name=str(data.get("name") or connection.name or "Session"),
             connection=connection,
             start_node_id=str(data.get("start_node_id") or "i=85"),
+            active_page=str(data.get("active_page") or ""),
             export=ExportState.from_dict(data.get("export", {})),
             monitor=MonitorState.from_dict(data.get("monitor", {})),
             tests=TestsState.from_dict(data.get("tests", {})),

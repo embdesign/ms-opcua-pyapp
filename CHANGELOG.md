@@ -8,6 +8,106 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`device` comparison tolerance: compare what tells two devices apart.** A structural comparison
+  could not see write masks, `EventNotifier`, `Historizing`, `MinimumSamplingInterval`, abstract/symmetric
+  flags, `DataTypeDefinition`, access restrictions or role permissions, because no snapshot contained
+  them. `TraversalConfig.include_device_attributes` (Export tab *Include device attributes*, 
+  `opcua-export --device-attributes`, implied by `opcua-compare --tolerance device`) now reads them into
+  `NodeRecord.device_attributes`, `opcua/attributes.py::device_specs_for` keeps every attribute read
+  exactly once, and the JSON document stores them (`format_version` 2; version 1 files keep loading).
+  The tolerance ladder is now `functional` → `strict` (display text) → `device` (device attributes), and
+  a comparison whose snapshots were downloaded without them reports
+  `device_attributes_compared: false` plus a warning instead of claiming equality.
+- **The comparison reports reference edges it could not compare.** An edge whose source or target is
+  not part of that download was dropped silently, so a reference that existed on only one device but
+  pointed outside the downloaded subtree was invisible. `ComparisonResult.reference_edges_not_compared`
+  now counts them (per side, in `summary()`), a warning names them and suggests downloading a wider
+  scope, and the HTML report shows the count as a note rather than as a difference.
+
+- **Headless `opcua-check` command.** The Tests tab's suite over the same `run_functional_tests()` call, with the
+  same JSON/HTML report writers: read-only by default (`--include-recovery` adds the disruptive reconnection
+  check), `--include-writes --confirm --write NODEID=VALUE [--restore]` / `--call OBJECT|METHOD|ARGS` add the
+  guarded checks for explicitly named targets, and it exits `3` when a check failed so a CI job reads the verdict
+  from the exit code. `--json` prints the run's canonical document (not a second format).
+- **Keyboard navigation for the two navigation levels.** **View → Next page / Previous page**
+  (`Ctrl+PgDown`/`Ctrl+PgUp`) walk the ten pages of the visible session, and **Next session / Previous session**
+  (`Ctrl+Tab`/`Ctrl+Shift+Tab`) walk the open sessions while skipping the shared tabs; both wrap around.
+- **Headless `opcua-status`, `opcua-nodes` and `opcua-directory`.** The last three GUI-only actions now have a
+  Qt-free twin: `opcua-status` prints the Server tab's one-shot ServerStatus/diagnostics snapshot (`--limits-only`,
+  `--json`); `opcua-nodes` performs one `AddNodes`, one `DeleteNodes` or one `DisplayName`/`Description` write per
+  invocation and refuses without `--confirm` (one node, no batch, no undo, exit `3` when the server refuses);
+  `opcua-directory` prints what a discovery endpoint advertises with one `FindServers` call, opening no session.
+  With them, every capability of the GUI is reachable headlessly.
+- **`AttributeWriteOutcome` gained `summary_text()`/`to_dict()`**, so the attribute-write result prints and
+  serialises like every other outcome record instead of needing a special case.
+- **Drift guard for the headless front ends** (`tests/unit/test_cli_registration.py`): every `cli_*.py` needs a
+  `[project.scripts]` entry point and vice versa, every entry point must resolve to a callable `main(argv)`, and
+  every command must be named in `README.md` and `AGENTS.md`. It found `opcua-check` undocumented while it was
+  being written, which is exactly the drift it exists for.
+- **Headless `opcua-events` command.** The Events tab's counterpart over the same services: one event
+  subscription (default source: the Server object) with the same server-side filtering (`--event-type`,
+  `--select`, `--min-severity`), events printed as text or as JSON lines until `--count`/`--seconds`, and both
+  condition actions — `--refresh` sends one `ConditionRefresh` and reports whether `RefreshStart`/`RefreshEnd`
+  arrived, `--acknowledge EVENTID --condition NODEID --confirm` sends one `Acknowledge` call (without `--confirm`
+  it exits `2` before connecting and sends nothing). The JSON objects carry the EventId and condition NodeId, so a
+  condition found by one run can be acknowledged by the next. Exit codes match the other read commands (`3` when
+  no event arrived and no condition action was asked for).
+
+- **The project file remembers which page a session was on.** `ProjectSession` g
+ained an optional
+  `active_page` (`format` 2, extra key), so reopening a session continues on the p
+age the operator was
+  working on instead of always starting at Connection. Files without the key keep
+ loading unchanged, and an
+  unknown page title falls back to the first page.
+- **Recent-endpoint picker on the Connection page.** `AppSettings` keeps the last
+ ten successfully connected
+  endpoints (`recent_endpoints`, newest first, deduplicated) and the Connection p
+age offers them in a combobox
+  next to the URL field. Selecting one only fills the field - it never connects,
+ never discovers and sends
+  nothing - and the picker is disabled while the list is empty.
+- **Local filter box for the loaded address-space rows.** A "Filter loaded rows…
+"
+  field next to the browse filter hides the rows already in the tree whose name d
+oes not match and keeps
+  their ancestors visible. It browses nothing, so the status line states that unl
+oaded branches are not
+  searched (Search/Find remains the whole-address-space path), a branch loaded wh
+ile the filter is active
+  obeys it immediately, and the start node itself is never hidden - otherwise the
+ filtered tree would look
+  like an unloaded or childless node.
+
+### Fixed
+
+- **Attribute reads that were thrown away are kept.** `Executable`/`UserExecutable` were read for every
+  method and then dropped because `NodeRecord` had no field for them; any device attribute read for the
+  details panel had the same fate. `apply_attributes_to_record` now stores every attribute without a
+  modelled field in `device_attributes`, and a refused one still lands in `unavailable` (test:
+  `test_attributes.py::test_attributes_without_a_modelled_field_are_kept_as_device_attributes`).
+- **A dropped live-monitor subscription is reported, not mis-encoded.** asyncua recreates a subscription the
+  server has forgotten and briefly leaves its id as `None`; a following *Apply intervals* packed that `None` into
+  `ModifySubscription` and raised `struct.error: required argument is not an integer` from inside the library.
+  `LiveMonitor.set_publishing_interval` now refuses with `MonitorNotActiveError` ("the server no longer knows
+  this subscription … start monitoring again") and sends nothing, which is what the operator needs to know.
+- **The refresh observation window follows the publishing rate.** After a `ConditionRefresh` the client
+  waited a fixed 2 s for `RefreshStart`/`RefreshEnd`, which is less than two publishing cycles when the
+  subscription publishes slowly and was missed altogether on a loaded host. The window is now
+  `max(3 s, 3 × publishing interval)` and the reported detail names the window and the interval, so a
+  missing event stays a reported observation rather than a wrong verdict.
+- **Address-space reload could look finished while it was still running.** A browse result
+  belonging to a replaced tree cleared the in-flight marker of the *new* browse, so a filter
+  change made right after another one could leave the tree unloaded and the page silent about
+  it. A stale result now only drops itself, the completion status names the filter the result
+  was produced with (`7 child node(s) read from ns=2;s=Line1 with Hierarchical references,
+  Forward, Variable.`), and `tests/integration/test_gui_browse_filters.py` waits for the root's
+  loaded flag instead of for an empty tree — an empty tree is also what a browse in flight
+  looks like, which is what made that test report a wrong "Organizes returns nothing"
+  expectation and fail intermittently under load.
+
 ### Changed
 
 - **Layout: working area first.** The description at the top of every page is now one line (`TabNotice`); the
@@ -27,6 +127,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   splitter instead of the second table having a fixed 150 px cap, and the Write & call page is laid out in two
   columns with its status line as a fixed footer, so all four confirmed actions are reachable at the minimum
   window size without scrolling.
+- **`TraversalConfig.follow_subtypes` is now honoured.** The field was stored in every export document and
+  restored by the snapshot loader while the downloader hardcoded `include_subtypes=True`, so a saved bound never
+  shaped a request. The download passes the configured value to `browse_many`, and
+  `tests/unit/test_traversal.py` asserts the bound reaches the browse call. The default stays `True`, so no
+  existing download changes.
+
+### Removed
+
+- **Settings field `credentials_in_profiles`** — persisted as a constant `False` and never read; the rule it
+  named is enforced where it matters, by `assert_no_secrets()` in `ConnectionProfile.to_dict()`. Older settings
+  files keep loading (unknown keys are ignored).
+- **Code nothing called**: `OptionsRow.add_layout` / `is_visible` / `active_summary`,
+  `SecretRedactor.forget_all` / `secret_count`, `logging_setup.get_redactor()`,
+  `theme.ACCENT_DARK` / `theme.SUCCESS` / `theme.WARNING` and the write-once `ProgressPrinter._last_written`.
+  They documented a surface that had no caller; `uvx vulture src/opcua_explorer --min-confidence 70` now reports
+  nothing (at 60 % only Qt overrides and the demo server's framework hooks remain).
+- **Invalid documentation claims**: the maintenance notes claimed 626/633/472 tests (now 796 = 583 unit + 213
+  integration), a fixed 2 s refresh window, `nodeset2.py` as the largest module (it is `write_service.py`) and a
+  longest-test list naming a file that no longer exists; `docs/architecture.md` said node management was out of
+  scope although `opcua/node_management.py` implements it.
 
 ### Added
 
@@ -464,7 +584,9 @@ functional checks and a Qt-free export command.
 - Concurrent sessions share one window and one asyncio loop and do not compare
   or merge data; a server that limits sessions can refuse a second one, in which
   case the StatusCode is shown and nothing is retried silently.
-- A project file is a configuration snapshot, not a session restore.
+- A project file is a configuration snapshot, not a session restore: it records the
+  endpoints, the sequence document and the page each session was on, but it never
+  re-opens a connection, restores a subscription or replays a write.
 - Not included by policy: unrestricted stress testing, automatic
   production-network scanning, automatic writes or method invocation, automatic
   value restoration, and any OPC UA certification claim.

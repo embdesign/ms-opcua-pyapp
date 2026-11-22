@@ -388,3 +388,20 @@ async def test_refresh_conditions_reports_a_refused_call() -> None:
     assert result.sent is True
     assert result.refresh_started is False
     await events.stop()
+
+
+def test_the_refresh_observation_window_follows_the_publishing_interval(tmp_path) -> None:
+    """A slow publishing rate needs a longer observation, not a faster server."""
+    from opcua_explorer.models import EventConfig
+    from opcua_explorer.opcua.event_service import (
+        REFRESH_OBSERVATION_TIMEOUT_S,
+        LiveEvents,
+    )
+
+    events = LiveEvents(client=None, emit=lambda notification: None)
+
+    events._config = EventConfig(publishing_interval_ms=200).normalised()
+    assert events._refresh_observation_timeout() == REFRESH_OBSERVATION_TIMEOUT_S
+
+    events._config = EventConfig(publishing_interval_ms=2000).normalised()
+    assert events._refresh_observation_timeout() == 6.0

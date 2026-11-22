@@ -259,3 +259,109 @@ def test_every_writing_page_marks_its_target(qapp, tmp_path) -> None:
         window.shutdown()
         runner.run_until_complete(service.shutdown, timeout=8.0)
         runner.stop()
+
+
+def test_view_menu_offers_page_and_session_navigation(qapp, tmp_path, monkeypatch) -> None:
+    """Ten pages per session need a keyboard path, not only the tab bar."""
+    monkeypatch.setattr(AppSettings, "save", lambda self, path=None: None)
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        workspace = window.workspaces[0]
+        assert window.next_page_action.shortcut().toString() == "Ctrl+PgDown"
+        assert window.previous_page_action.shortcut().toString() == "Ctrl+PgUp"
+        assert window.next_session_action.shortcut().toString() == "Ctrl+Tab"
+        assert window.previous_session_action.shortcut().toString() == "Ctrl+Shift+Tab"
+
+        workspace.tabs.setCurrentIndex(0)
+        window.next_page_action.trigger()
+        assert workspace.tabs.currentIndex() == 1
+        window.previous_page_action.trigger()
+        assert workspace.tabs.currentIndex() == 0
+        # Wraps around instead of stopping at the ends.
+        window.previous_page_action.trigger()
+        assert workspace.tabs.currentIndex() == workspace.tabs.count() - 1
+        window.next_page_action.trigger()
+        assert workspace.tabs.currentIndex() == 0
+
+        second = window.add_session()
+        window.tabs.setCurrentWidget(workspace)
+        window.next_session_action.trigger()
+        assert window.tabs.currentWidget() is second
+        window.previous_session_action.trigger()
+        assert window.tabs.currentWidget() is workspace
+
+        # From a shared tab the pair continues at the first/last session.
+        window.tabs.setCurrentWidget(window.logs_tab)
+        window.next_session_action.trigger()
+        assert window.tabs.currentWidget() is workspace
+        window.tabs.setCurrentWidget(window.logs_tab)
+        window.previous_session_action.trigger()
+        assert window.tabs.currentWidget() is second
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+
+
+def test_connection_page_offers_recent_endpoints_without_connecting(qapp, tmp_path) -> None:
+    """A remembered endpoint fills the field; it never opens a session by itself."""
+    from opcua_explorer.gui.tabs.connection_tab import ConnectionTab
+
+    settings = AppSettings()
+    settings.remember_endpoint("opc.tcp://plant:4840")
+    settings.remember_endpoint("opc.tcp://line2:4840")
+    runner = AsyncRunner()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    tab = ConnectionTab(runner, service, settings)
+    try:
+        # "choose…" plus the two remembered endpoints, newest first.
+        assert tab.recent_combo.count() == 3
+        assert tab.recent_combo.itemData(1) == "opc.tcp://line2:4840"
+        assert tab.recent_combo.isEnabled() is True
+
+        tab._on_recent_activated(2)
+        assert tab.url_edit.text() == "opc.tcp://plant:4840"
+        assert service.is_connected is False
+        assert "Discover endpoints" in tab.status_chip.text()
+
+        # An empty list disables the picker instead of offering a dead control.
+        settings.recent_endpoints.clear()
+        tab._refresh_recent()
+        assert tab.recent_combo.count() == 1
+        assert tab.recent_combo.isEnabled() is False
+    finally:
+        tab.shutdown()
+
+
+def test_the_export_page_offers_device_attributes_and_the_compare_page_uses_them(qapp, tmp_path) -> None:
+    """The device tolerance must make the download read what it compares."""
+    from opcua_explorer.gui.tabs.compare_tab import TOLERANCE_LABELS
+    from opcua_explorer.gui.tabs.export_tab import ExportTab
+
+    settings = AppSettings()
+    runner = AsyncRunner()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    export = ExportTab(runner, service, settings)
+    try:
+        # Off by default: the extra reads stay opt-in.
+        assert export.include_device_attributes_check.isChecked() is False
+        assert export._collect_config().include_device_attributes is False
+
+        export.include_device_attributes_check.setChecked(True)
+        assert export._collect_config().include_device_attributes is True
+        # The project keeps the choice.
+        state = export.export_state()
+        assert state.include_device_attributes is True
+        export.include_device_attributes_check.setChecked(False)
+        export.apply_export_state(state)
+        assert export.include_device_attributes_check.isChecked() is True
+    finally:
+        export.shutdown()
+
+    # The tolerance ladder names the device level and the download follows it.
+    values = [value for value, _label in TOLERANCE_LABELS]
+    assert values == ["functional", "strict", "device"]
+    assert all(label for _value, label in TOLERANCE_LABELS)

@@ -41,4 +41,10 @@ async def test_two_demo_servers_compare_without_differences(tmp_path) -> None:
     assert document["format"] == "opcua-comparison"
     assert document["matched"] > 5
     assert document["difference_count"] == 0
-    assert document["warnings"] == []
+    # A bounded download keeps references to nodes it did not include (types in
+    # namespace 0, nodes under another root). They cannot be compared, so the
+    # comparison names them as a scope warning and counts them - that is the only
+    # warning two identical servers may produce.
+    assert document["reference_edges_not_compared"] > 0
+    assert len(document["warnings"]) == 1, document["warnings"]
+    assert "outside that download" in document["warnings"][0]

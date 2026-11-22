@@ -118,6 +118,8 @@ class BrowserTab(SessionTab):
         #: NodeIds in this session's live-monitor list, marked with ●/○ in the tree.
         self._monitored: set[str] = set()
         self._monitor_active = False
+        #: (shown, total) rows of the last local filter run, for the status text.
+        self._row_filter_counts: tuple[int, int] = (0, 0)
 
         self._build_ui()
         self._on_start_changed()
@@ -204,6 +206,20 @@ class BrowserTab(SessionTab):
         filter_row.addWidget(QLabel("Node class:"))
         filter_row.addWidget(self.browse_class_combo)
         filter_row.addWidget(self.browse_apply_btn)
+        filter_row.addSpacing(16)
+        # A local filter over the rows that already exist. It is deliberately not
+        # called "search": it never asks the server and never loads a branch.
+        self.row_filter_edit = QLineEdit()
+        self.row_filter_edit.setPlaceholderText("Filter loaded rows…")
+        self.row_filter_edit.setClearButtonEnabled(True)
+        self.row_filter_edit.setMaximumWidth(220)
+        self.row_filter_edit.setToolTip(
+            "Hides already loaded rows whose name does not match. It browses nothing, so "
+            "an unloaded branch is not searched - use Search downloaded nodes… / Find for "
+            "the whole address space. Clearing the box shows every row again."
+        )
+        self.row_filter_edit.textChanged.connect(self._on_row_filter_changed)
+        filter_row.addWidget(self.row_filter_edit)
         filter_row.addStretch(1)
         layout.addLayout(filter_row)
 
@@ -454,6 +470,7 @@ class BrowserTab(SessionTab):
             self._set_status(f"{count} live-monitor target(s) marked in the address space ({state}).")
 
     def is_monitored(self, node_id: str) -> bool:
+        """True when the row of ``node_id`` carries a live-monitor mark."""
         return str(node_id) in self._monitored
 
     def _apply_monitored_marks(self) -> None:
@@ -512,10 +529,17 @@ class BrowserTab(SessionTab):
             return
         self._loading.add(node_id)
         generation = self._tree_generation
+        # The options are fixed here, so the result is reported with the filter it was
+        # actually requested with even if the combo boxes change while it is in flight.
+        options = self._browse_options()
         self._submit(
-            lambda: self._service.browse_children(str(node_id), options=self._browse_options()),
-            on_done=lambda children: self._on_children(item, str(node_id), children, generation=generation),
-            on_error=lambda message: self._on_children_error(item, str(node_id), message, generation=generation),
+            lambda: self._service.browse_children(str(node_id), options=options),
+            on_done=lambda children: self._on_children(
+                item, str(node_id), children, generation=generation, label=options.label()
+            ),
+            on_error=lambda message: self._on_children_error(
+                item, str(node_id), message, generation=generation
+            ),
         )
 
     def _is_stale(self, generation: int) -> bool:
@@ -523,11 +547,20 @@ class BrowserTab(SessionTab):
         return generation != self._tree_generation
 
     def _on_children(
-        self, item: QTreeWidgetItem, node_id: str, children: list[Any], *, generation: int | None = None
+        self,
+        item: QTreeWidgetItem,
+        node_id: str,
+        children: list[Any],
+        *,
+        generation: int | None = None,
+        label: str = "",
     ) -> None:
-        self._loading.discard(node_id)
+        # A stale result belongs to a tree that no longer exists: it must not clear the
+        # in-flight marker, because that marker now belongs to the browse of the newer
+        # generation. Clearing it here made a reload look finished while it was not.
         if generation is not None and self._is_stale(generation):
             return
+        self._loading.discard(node_id)
         try:
             if not item or item.data(0, ITEM_NODE_ID) != node_id:
                 return
@@ -550,7 +583,62 @@ class BrowserTab(SessionTab):
             # The tree (and with it this item) was replaced while the browse was
             # in flight - a filter change or a reload. The result is obsolete.
             return
-        self._set_status(f"{len(children)} child node(s) read from {node_id}.")
+        # The status names the filter this result was produced with, not the one the
+        # combo boxes carry now: the operator typed a filter, so the answer says which.
+        # A branch loaded while the filter is active must obey it immediately.
+        self._apply_row_filter(quiet=True)
+        with_options = f" with {label}" if label else ""
+        self._set_status(f"{len(children)} child node(s) read from {node_id}{with_options}.")
+
+    # -- local row filter ---------------------------------------------------
+    def _on_row_filter_changed(self, _text: str) -> None:
+        """Filter the loaded rows and say what that filter can and cannot see."""
+        self._apply_row_filter()
+        needle = self.row_filter_edit.text().strip()
+        if not needle:
+            self._set_status("Row filter cleared; every loaded row is shown again.")
+            return
+        shown, total = self._row_filter_counts
+        self._set_status(
+            f"Showing {shown} of {total} loaded row(s) containing {needle!r}. "
+            "Unloaded branches are not searched."
+        )
+
+    def _apply_row_filter(self, *, quiet: bool = False) -> None:
+        """Hide loaded rows that do not match, keeping the ancestors of matches.
+
+        Only rows that exist are considered: filtering never browses, so it can
+        never claim a node is absent from the server. The start node itself is
+        never hidden - a blank tree would read as "unloaded" or "no children" and
+        hide the fact that a filter is active. ``quiet`` is used when a browse
+        result re-applies the filter and the status already reports that result.
+        """
+        needle = self.row_filter_edit.text().strip().lower()
+        shown = 0
+        total = 0
+
+        def visit(item: QTreeWidgetItem, *, root: bool) -> bool:
+            nonlocal shown, total
+            total += 1
+            matches = not needle or needle in item.text(0).lower()
+            child_matches = False
+            for index in range(item.childCount()):
+                child_matches = visit(item.child(index), root=False) or child_matches
+            visible = root or matches or child_matches
+            item.setHidden(not visible)
+            if visible:
+                shown += 1
+            return visible
+
+        try:
+            for index in range(self.tree.topLevelItemCount()):
+                visit(self.tree.topLevelItem(index), root=True)
+        except RuntimeError:
+            # The tree was cleared while this ran; nothing left to filter.
+            return
+        self._row_filter_counts = (shown, total)
+        if quiet:
+            return
 
     @staticmethod
     def _child_tooltip(child: Any) -> str:
@@ -564,9 +652,9 @@ class BrowserTab(SessionTab):
     def _on_children_error(
         self, item: QTreeWidgetItem, node_id: str, message: str, *, generation: int | None = None
     ) -> None:
-        self._loading.discard(node_id)
         if generation is not None and self._is_stale(generation):
             return
+        self._loading.discard(node_id)
         try:
             if item:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)

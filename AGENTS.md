@@ -20,17 +20,22 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 633 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 796 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 472 passed, ~4 s
+uv run pytest tests/unit -q                # fast subset, 583 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
 uv run opcua-compare --help                # headless comparison of two servers (Qt-free, read-only)
 uv run opcua-read --help                   # headless attribute read (Qt-free)
 uv run opcua-monitor --help                # headless live data-change monitor (Qt-free)
+uv run opcua-events --help                 # headless events + ConditionRefresh/confirmed Acknowledge (Qt-free)
 uv run opcua-history --help                # headless raw-history read (Qt-free)
 uv run opcua-write --help                  # headless guarded single write (Qt-free, needs --confirm)
+uv run opcua-check --help                  # headless functional checks + Reports tab suite (Qt-free)
+uv run opcua-status --help                 # headless ServerStatus/diagnostics read (Qt-free, read-only)
+uv run opcua-nodes --help                  # headless single-node create/delete/attribute write (needs --confirm)
+uv run opcua-directory --help              # headless FindServers directory lookup (Qt-free, no session)
 uv run opcua-run-sequence --help           # headless run of a sequence document (Qt-free)
 uv run opcua-demo-server                   # demo server on a free/selected port
 uv run python scripts/generate_example_exports.py
@@ -94,12 +99,30 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   field; it is visible **only** while that field differs from the browser selection (the workspace refreshes all
   markers from `BrowserTab.selection_changed`), so a stale target is never silent and no space is spent while
   they agree. `tests/integration/test_gui_layout.py` enforces the notice, options and marker rules.
+  Two further honesty rules: the Address space **row filter** only hides rows that are already loaded,
+  never browses, says so in its status line, keeps the start node visible and re-applies itself to a
+  branch that is loaded later (`Search downloaded nodes…`/Find stays the whole-address-space path); and
+  the Connection page's **recent-endpoint picker** (`AppSettings.recent_endpoints`/`remember_endpoint`)
+  only fills the URL field — selecting an entry never discovers, connects or sends anything.
 - The shared **Compare** tab (`gui/tabs/compare_tab.py`) owns no client and no subscription: it downloads
   through the two selected sessions' `OpcUaService` and calls `compare_address_spaces()`. Keep it read-only and
   do not add a second comparison implementation — GUI and `opcua-compare` share the config, the comparison and
   the report writers.
 - Shared value/name conversions live in `opcua/ua_names.py`; do not add another local copy of
   `node_class_name` / `status_name` / `variant_type_name`.
+- Snapshots stay two-tiered: `NodeRecord` models the data model, and
+  `NodeRecord.device_attributes` holds the details-panel attributes (write masks, `EventNotifier`,
+  `Historizing`, sampling interval, type flags, `DataTypeDefinition`, access restrictions, role
+  permissions) as text. They are read **only** when `TraversalConfig.include_device_attributes` is set
+  (Export tab checkbox, `opcua-export --device-attributes`, implied by `--tolerance device`), because
+  they multiply the reads of a download; `opcua/attributes.py::device_specs_for` guarantees every
+  attribute is read exactly once. The comparison's `device` tolerance is the only consumer and must say
+  when a side was downloaded without them (`ComparisonResult.device_attributes_compared`) instead of
+  reporting equality.
+- The reference comparison only compares edges whose two endpoints are nodes of that snapshot
+  (`compare.py::_reference_differences`); the others are counted in
+  `ComparisonResult.reference_edges_not_compared` and reported as a warning. Never drop them silently
+  again — a reference to a node outside the download was previously invisible.
 - Explicit Value reads with options live in `opcua/value_read.py`
   (`build_read_parameters` → `read_value_with_options`), reached through
   `OpcUaService.read_value_with_options`. The Address space panel must not build `ReadParameters` itself, and a
@@ -107,7 +130,10 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Browse filters live in `models.BrowseOptions` and `opcua/browse.py::browse_children(..., options=...)`;
   `OpcUaService.browse_children(node, options=...)` is the only path the tree uses. Keep the
   `BrowserTab._tree_generation` guard: a cleared `QTreeWidget` deletes its items, so a late browse result must be
-  dropped instead of touched.
+  dropped instead of touched — and a dropped result must **not** clear `_loading`, because that marker belongs to
+  the newer generation's browse. A GUI test that switches filters must wait for the root item's `ITEM_LOADED`
+  flag (`tests/integration/test_gui_browse_filters.py::_root_loaded`), never for an empty tree: `load_node`
+  clears the tree, so "no rows" also means "still browsing".
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.
@@ -184,7 +210,9 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   files under `examples/` when their format changes.
 - Do not change persisted formats without a version bump: project files (`format`/`version`), report JSON,
   CSV columns, NodeSet2 output, sequence documents (`opcua-explorer-sequence` + `version`). The project format is
-  now **version 2** (a session stores the sequence document path and inputs); version 1 files must keep loading.
+  now **version 2** (a session stores the sequence document path, its inputs and `active_page`); version 1 files
+  must keep loading, and a missing/unknown `active_page` falls back to the first page. Restoring a page is not a
+  session restore: no project load may connect, subscribe or replay anything.
 - Keep the PySide6 shutdown sequence in `gui/app.py` (`close`, `deleteLater`, `processEvents`); it prevents
   the interpreter-exit abort seen with live widgets.
 
@@ -212,7 +240,9 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - `compare.py` is a pure function over two `AddressSpace` snapshots: namespace **URI** + identifier identity,
   browse-path fallback only when unambiguous, values only for nodes named in the config, and a separate
   `not_comparable` bucket. Do not make it read, connect, or import asyncua/Qt; the front end does that.
-- `cli.py` (`opcua-export`), `cli_compare.py` (`opcua-compare`) and `cli_sequence.py` (`opcua-run-sequence`)
+- `cli.py` (`opcua-export`), `cli_compare.py` (`opcua-compare`), `cli_read.py`, `cli_monitor.py`,
+  `cli_events.py`, `cli_history.py`, `cli_write.py`, `cli_check.py`, `cli_status.py`, `cli_nodes.py`,
+  `cli_directory.py` and `cli_sequence.py` (`opcua-run-sequence`)
   are Qt-free front ends, not second implementations: they must keep calling `OpcUaService.download()` /
   `export_nodeset2()` / `compare_address_spaces()` / `run_sequence()` and print the existing summary texts.
   `cli_compare.py` and `cli_sequence.py` import the connection, traversal and certificate-approval helpers from

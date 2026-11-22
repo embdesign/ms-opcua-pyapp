@@ -171,6 +171,26 @@ class AttributeWriteOutcome:
     duration_ms: float = 0.0
     authorization: WriteAuthority | None = None
 
+    def summary_text(self) -> str:
+        head = f"Write {self.attribute_name} on {self.node_id}"
+        return f"{head}: {self.detail or self.status}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "attribute_name": self.attribute_name,
+            "status": self.status,
+            "detail": self.detail,
+            "text": self.text,
+            "previous_text": self.previous_text,
+            "write_status_code": self.write_status_code,
+            "read_back_text": self.read_back_text,
+            "read_back_status_code": self.read_back_status_code,
+            "sent": self.sent,
+            "duration_ms": round(self.duration_ms, 3),
+            "authorization": self.authorization.describe() if self.authorization else "",
+        }
+
 
 def _localized_text(data_value: ua.DataValue) -> str:
     """Plain text of a LocalizedText DataValue (empty when it carries none)."""

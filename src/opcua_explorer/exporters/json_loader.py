@@ -33,7 +33,7 @@ from ..models import (
     TraversalConfig,
     ValueSnapshot,
 )
-from .json_exporter import FORMAT_NAME, FORMAT_VERSION
+from .json_exporter import FORMAT_NAME, READABLE_FORMAT_VERSIONS
 
 
 def _as_mapping(value: Any, what: str) -> Mapping[str, Any]:
@@ -104,6 +104,9 @@ def _traversal_config(raw: Any) -> TraversalConfig:
         include_values=bool(data.get("include_values", defaults.include_values)),
         include_description=bool(data.get("include_description", defaults.include_description)),
         follow_subtypes=bool(data.get("follow_subtypes", defaults.follow_subtypes)),
+        include_device_attributes=bool(
+            data.get("include_device_attributes", defaults.include_device_attributes)
+        ),
     )
 
 
@@ -132,6 +135,9 @@ def _node_record(node_id: str, raw: Any) -> NodeRecord:
         str(name): str(status) for name, status in (data.get("unavailable_attributes") or {}).items()
     }
     record.errors = [str(item) for item in data.get("errors") or ()]
+    record.device_attributes = {
+        str(name): str(value) for name, value in (data.get("device_attributes") or {}).items()
+    }
     return record
 
 
@@ -147,9 +153,10 @@ def snapshot_from_document(document: Any, *, name: str | None = None) -> Address
             f"Not an OPC UA address-space document (format={data.get('format')!r}, expected {FORMAT_NAME!r})."
         )
     version = data.get("format_version")
-    if version != FORMAT_VERSION:
+    if version not in READABLE_FORMAT_VERSIONS:
+        readable = ", ".join(str(item) for item in READABLE_FORMAT_VERSIONS)
         raise ExportError(
-            f"Unsupported format_version {version!r}; this build reads version {FORMAT_VERSION}."
+            f"Unsupported format_version {version!r}; this build reads version(s) {readable}."
         )
 
     nodes_document = data.get("nodes")

@@ -270,6 +270,15 @@ class LiveMonitor:
         """Modify the publishing interval; returns the interval the server revised to."""
         if self._subscription is None:
             raise MonitorNotActiveError("No live monitor is running. Start monitoring first.")
+        # asyncua recreates a subscription the server has forgotten; while it does,
+        # the id is ``None`` and ``ModifySubscription`` would fail inside the encoder
+        # (``struct.error: required argument is not an integer``) instead of saying
+        # what happened. Report the dropped subscription as the domain error it is.
+        if self.subscription_id is None:
+            raise MonitorNotActiveError(
+                "The server no longer knows this subscription (it was dropped). "
+                "Start monitoring again before changing the intervals."
+            )
 
         parameters = self._subscription.parameters
         params = ua.ModifySubscriptionParameters()

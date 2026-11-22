@@ -263,11 +263,28 @@ class AppSettings:
     last_export_dir: str | None = None
     #: Last opened/saved project file, used as the dialog starting point.
     last_project_path: str | None = None
-    credentials_in_profiles: bool = False  # explicit, always False for now
     #: Keep retrying when the link drops instead of releasing the session.
     auto_reconnect: bool = True
     #: Show each page's full description instead of its one-line summary.
     show_tab_descriptions: bool = False
+    #: Endpoints that were connected to successfully, newest first (bounded).
+    recent_endpoints: list[str] = field(default_factory=list)
+
+    #: How many endpoints the Connection page offers as "recent".
+    MAX_RECENT_ENDPOINTS = 10
+
+    def remember_endpoint(self, url: str) -> None:
+        """Record a successful endpoint: newest first, no duplicates, bounded.
+
+        ``last_endpoint`` stays the single "what the field starts with" value; this
+        list is the pick list next to it.
+        """
+        cleaned = (url or "").strip()
+        if not cleaned:
+            return
+        recent = [item for item in self.recent_endpoints if item != cleaned]
+        recent.insert(0, cleaned)
+        self.recent_endpoints = recent[: self.MAX_RECENT_ENDPOINTS]
     profiles: list[ConnectionProfile] = field(default_factory=list)
 
     # -- persistence ------------------------------------------------------
@@ -303,9 +320,13 @@ class AppSettings:
             log_level=str(data.get("log_level", "INFO")),
             last_export_dir=data.get("last_export_dir"),
             last_project_path=data.get("last_project_path"),
-            credentials_in_profiles=False,
             auto_reconnect=bool(data.get("auto_reconnect", True)),
             show_tab_descriptions=bool(data.get("show_tab_descriptions", False)),
+            recent_endpoints=[
+                str(item)
+                for item in data.get("recent_endpoints", [])
+                if isinstance(item, str) and item.strip()
+            ][: cls.MAX_RECENT_ENDPOINTS],
             profiles=profiles,
         )
 
@@ -320,6 +341,7 @@ class AppSettings:
             "last_project_path": self.last_project_path,
             "auto_reconnect": self.auto_reconnect,
             "show_tab_descriptions": self.show_tab_descriptions,
+            "recent_endpoints": list(self.recent_endpoints),
             "profiles": [profile.to_dict() for profile in self.profiles],
         }
         assert_no_secrets(payload, context=str(target))

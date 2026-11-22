@@ -66,7 +66,12 @@ _MAX_NOTIFICATIONS_PER_PUBLISH = 1_000
 
 #: How long a ``ConditionRefresh`` waits for the server's RefreshStart/RefreshEnd
 #: events after the call returned; the subscription publishes on its own interval.
-REFRESH_OBSERVATION_TIMEOUT_S = 2.0
+#: Minimum observation window after a ``ConditionRefresh`` call. The actual
+#: window also covers three publishing intervals of the running subscription (see
+#: ``LiveEvents._refresh_observation_timeout``): a refresh event can only be
+#: delivered with a publish response, so a slow or busy server needs more than a
+#: fixed two seconds without anything being wrong.
+REFRESH_OBSERVATION_TIMEOUT_S = 3.0
 #: Poll interval while waiting; the publish loop runs on this same event loop.
 _REFRESH_POLL_INTERVAL_S = 0.05
 
@@ -375,7 +380,7 @@ class LiveEvents:
         *,
         authorization: WriteAuthority,
         object_node_id: str = "",
-        observation_timeout_s: float = REFRESH_OBSERVATION_TIMEOUT_S,
+        observation_timeout_s: float | None = None,
     ) -> ConditionRefreshResult:
         """Ask the server to re-publish this subscription's retained Conditions.
 
@@ -396,7 +401,12 @@ class LiveEvents:
             object_node_id=object_node_id,
             authorization=authorization,
         )
-        observed_ms = await self._await_refresh_events(ended_before, observation_timeout_s)
+        window = (
+            self._refresh_observation_timeout()
+            if observation_timeout_s is None
+            else max(0.0, float(observation_timeout_s))
+        )
+        observed_ms = await self._await_refresh_events(ended_before, window)
 
         result = ConditionRefreshResult(
             subscription_id=subscription_id,
@@ -416,10 +426,16 @@ class LiveEvents:
             hint = (
                 "The server accepted ConditionRefresh but published no RefreshStart event on this "
                 "subscription within "
-                f"{observation_timeout_s:.1f} s; a server-side severity filter can hide it."
+                f"{window:.1f} s (publishing interval {self._config.publishing_interval_ms:.0f} ms); "
+                "a server-side severity filter can hide it."
             )
             result.detail = f"{result.detail} {hint}".strip()
         return result
+
+    def _refresh_observation_timeout(self) -> float:
+        """Observation window that also fits the subscription's publishing rate."""
+        publishing_s = max(0.0, float(self._config.publishing_interval_ms)) / 1000.0
+        return max(REFRESH_OBSERVATION_TIMEOUT_S, 3.0 * publishing_s)
 
     async def _await_refresh_events(self, ended_before: int, timeout_s: float) -> float:
         """Wait bounded for a *new* RefreshEnd event; returns the observed wait in ms."""

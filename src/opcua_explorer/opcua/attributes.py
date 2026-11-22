@@ -165,6 +165,31 @@ def specs_for(node_class: str, *, extended: bool = False) -> list[AttributeSpec]
     return specs
 
 
+def device_specs_for(node_class: str) -> list[AttributeSpec]:
+    """The attributes that describe the device's behaviour, not its data model.
+
+    These are the details-panel attributes (write masks, ``EventNotifier``,
+    ``Historizing``, ``MinimumSamplingInterval``, type flags, ``DataTypeDefinition``,
+    access restrictions and role permissions) plus ``Executable``/``UserExecutable``
+    for methods, minus anything :func:`specs_for` already delivers: a download that
+    stores them reads every attribute exactly once. They are only read when the
+    traversal is asked for device attributes, because they multiply the attribute
+    reads of every node.
+    """
+    standard = {spec.name for spec in specs_for(node_class)}
+    wanted = [*_WRITE_MASK_SPECS, *_class_extra_specs(node_class), *_COMMON_EXTRA_SPECS]
+    if node_class in METHOD_NODE_CLASSES:
+        wanted.extend(_METHOD_SPECS)
+    ordered: list[AttributeSpec] = []
+    seen: set[str] = set()
+    for spec in wanted:
+        if spec.name in standard or spec.name in seen:
+            continue
+        seen.add(spec.name)
+        ordered.append(spec)
+    return ordered
+
+
 def decode_attribute(name: str, data_value: ua.DataValue) -> AttributeResult:
     """Decode one DataValue into a display/export-friendly AttributeResult.
 
@@ -540,6 +565,11 @@ def apply_attributes_to_record(
         elif name == "UserAccessLevel":
             record.user_access_level = int(value) if value is not None else None
             record.user_access_level_names = decode_access_level(record.user_access_level)
+        else:
+            # A device attribute (write mask, historizing, sampling interval, type
+            # flag, definition, role permissions, Executable, …). Kept as text so a
+            # comparison compares what the server reported without re-decoding it.
+            record.device_attributes[name] = result.display if result.display is not None else format_attribute_value(value)
     if record.namespace_uri is None:
         try:
             index = to_node_id(record.node_id).NamespaceIndex

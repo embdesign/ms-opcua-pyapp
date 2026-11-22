@@ -202,6 +202,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also read variable values (off by default; makes the file larger and reads live process data)",
     )
+    scope.add_argument(
+        "--device-attributes",
+        action="store_true",
+        help=(
+            "also read the attributes that are not part of the data model (write masks, historizing, "
+            "sampling interval, type flags, access restrictions, role permissions) so opcua-compare "
+            "--tolerance device can compare them"
+        ),
+    )
 
     nodeset = parser.add_argument_group("NodeSet2 output")
     nodeset.add_argument(
@@ -298,6 +307,7 @@ def traversal_config_from_args(args: argparse.Namespace) -> TraversalConfig:
         batch_size=int(args.batch_size),
         namespace_filter=frozenset(args.namespace) if args.namespace else None,
         include_values=bool(args.values),
+        include_device_attributes=bool(getattr(args, "device_attributes", False)),
     ).normalised()
 
 
@@ -338,7 +348,6 @@ class ProgressPrinter:
         self._quiet = quiet
         self._phase = ""
         self._last_count = 0
-        self._last_written = 0
 
     def __call__(self, update: TraversalProgress) -> None:
         if self._quiet:

@@ -210,3 +210,19 @@ def test_secure_profile_without_certificate_is_rejected(tmp_path) -> None:
     with pytest.raises(ProjectError, match="certificate"):
         project.save(path)
     assert not path.exists(), "a rejected project must not leave a partial file"
+
+
+def test_a_project_remembers_the_open_page_and_old_files_still_load(tmp_path) -> None:
+    session = ProjectSession(name="Plant", active_page="History")
+    document = ProjectFile(sessions=[session]).to_dict()
+
+    assert document["sessions"][0]["active_page"] == "History"
+
+    path = tmp_path / "page.opcua-project.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert ProjectFile.load(path).sessions[0].active_page == "History"
+
+    # A project written before this key exists simply has no page recorded.
+    document["sessions"][0].pop("active_page")
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert ProjectFile.load(path).sessions[0].active_page == ""

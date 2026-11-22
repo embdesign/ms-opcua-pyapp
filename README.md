@@ -18,7 +18,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 626 tests. See
+> suite has 796 tests (583 unit + 213 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -37,9 +37,9 @@ session's client.
 
 | Page | Capability |
 |---|---|
-| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics |
+| **Connection** | Enter an endpoint URL, **Find servers…** in a directory (FindServers on an LDS/GDS or any server, with an optional application-URI filter) and take an advertised URL, discover the server's advertised endpoints, choose policy + message security mode, authenticate anonymously / username-password / certificate, configure client certificate & key, configure timeouts, keep reconnecting when the link drops (on by default), connect/disconnect, read diagnostics; the last ten successfully used endpoints are offered in a picker that only fills the URL field |
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
-| **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
+| **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log; optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, and bounded row retention |
 | **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType
 fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be acknowledged with one confirmed `Acknowledge` method call (no `Confirm`/`Enable`, never retried), and **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived |
@@ -49,7 +49,7 @@ fields and a minimum severity), add/remove sources while running, and a clear re
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / verification checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
 | **Export** | Download whole address space or a subtree with namespace filter, depth/node budget, request concurrency and batch size, progress and cancellation; explicit content switches for variable values and node descriptions; an **Export coverage** panel that states what the snapshot contains, what it never contains (details-panel-only attributes) and what each format can carry; write JSON, CSV or NodeSet2 XML (with dependency closure, missing-dependency report and optional XSD validation) |
 | **Logs & reports** | Live log with secret redaction, save/copy, operational summaries and written report paths |
-| **Compare** | Structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report |
+| **Compare** | Structural comparison of two sessions, or of a session and a saved JSON export: pick reference and candidate, download the live side(s) with one scope, then review differences (missing / extra / changed / not comparable) with a filter and a per-node attribute detail; export the JSON or HTML report. The tolerance ladder is `functional` → `strict` (display text) → `device` (+ write masks, historizing, sampling interval, permissions — the download reads them too), and the result states when reference edges outside the downloaded nodes could not be compared |
 
 **File → Save project… / Open project…** stores and restores every session's configuration and editor state in
 one versioned JSON file — never credentials.
@@ -191,7 +191,10 @@ uv run opcua-explorer
    non-numeric values are counted in the summary instead of being plotted, and nothing is interpolated.
 5. **Export** tab: keep *whole address space*, set *Maximum nodes* to e.g. 500, press **Download**. Progress,
    counters and cancellation are available. The *Export content* group decides whether variable values and node
-   descriptions become part of the snapshot (values are off by default), and *Export coverage* lists exactly
+   descriptions become part of the snapshot (values are off by default) and whether the **device
+   attributes** are read as well (write masks, event notifier, historizing, sampling interval, type flags,
+   access restrictions, role permissions — off by default because they multiply the reads; needed to
+   compare two devices with the `device` tolerance). *Export coverage* lists exactly
    what was collected, which options were off and what a snapshot can never contain. Then **Export JSON…**,
    **Export CSV…** or **Export NodeSet2…**.
 6. **Tests** tab: optionally put a variable NodeId (e.g. `ns=2;s=Temperature`) in *Variable node*, press
@@ -537,7 +540,7 @@ that one side was cut short instead of reporting the missing nodes as difference
 | `--reference ENDPOINT`, `--candidate ENDPOINT` | Baseline and replacement |
 | `--reference-file FILE`, `--candidate-file FILE` | Use a saved JSON export for that side instead of a live endpoint |
 | `--node NODEID` (repeatable) | Roots to download on **both** sides; default `i=85` (Objects) |
-| `--tolerance functional\|strict` | `functional` (default): node class, data type, value rank, array dimensions, access levels, type definition. `strict`: also display name and description |
+| `--tolerance functional\|strict\|device` | `functional` (default): node class, data type, value rank, array dimensions, access levels, type definition. `strict`: also display name and description. `device`: also write masks, event notifier, historizing, sampling interval, type flags, access restrictions and role permissions — the download then reads them automatically |
 | `--compare-value NODEID` (repeatable) | Compare status, variant type and payload of exactly these nodes (values are read only for them) |
 | `--ignore NODEID` (repeatable) | Nodes expected to differ (current time, counters, serial numbers) |
 | `--float-tolerance X` | Absolute tolerance for compared numbers (default `0` = exact) |
@@ -577,16 +580,24 @@ uv run python scripts/generate_example_comparison.py
 The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
 servers behave identically under load, and it sends no write or method call.
 
-### Headless read, monitor, history and write: `opcua-read` / `opcua-monitor` / `opcua-history` / `opcua-write`
+### Headless commands: `opcua-read`, `opcua-monitor`, `opcua-events`, `opcua-history`, `opcua-write`, `opcua-check`, `opcua-status`, `opcua-nodes`, `opcua-directory`
 
-Four Qt-free front ends over the same services as the GUI:
+Nine Qt-free front ends over the same services as the GUI — one per page that does something an
+operator or a script needs, so nothing the tool can do is GUI-only:
 
 ```bash
 opcua-read --endpoint opc.tcp://192.168.1.100:4840 --node ns=2;s=Temperature
 opcua-read --endpoint opc.tcp://plc:4840 --node i=85 --attribute DisplayName --json
 opcua-monitor --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --seconds 30
+opcua-events --endpoint opc.tcp://plc:4840 --seconds 30 --refresh --json
+opcua-events --endpoint opc.tcp://plc:4840 --acknowledge 0102ff --condition ns=2;s=Pump --confirm
 opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --csv
 opcua-write --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --value 42.5 --confirm
+opcua-check --endpoint opc.tcp://plc:4840 --variable ns=2;s=Temperature --report checks.html
+opcua-status --endpoint opc.tcp://plc:4840 --json
+opcua-nodes --endpoint opc.tcp://plc:4840 --create Variable --parent ns=2;s=Line1 --name Setpoint \
+            --data-type i=11 --value 21.5 --confirm
+opcua-directory --discovery-url opc.tcp://192.168.1.10:4840 --json
 ```
 
 `opcua-read` reads **Value** by default and any attribute shown by the Address space panel with `--attribute`
@@ -597,11 +608,26 @@ one JSON object per line, and it exits `3` if no notification arrived. `opcua-hi
 `HistoryRead` for one variable (`--from` / `--to` ISO-8601, `--max-values`) and prints summary + values, a
 versioned JSON document or CSV; `--aggregate average|minimum|maximum|count` with `--interval MS` requests a
 processed read instead (both `--from` and `--to` are then required, and the server may not support aggregates),
-and `--sparkline` adds a one-line text trend of the numeric values. `opcua-write` always previews (server DataType/ValueRank and the parsed value),
+and `--sparkline` adds a one-line text trend of the numeric values. `opcua-events` creates one event subscription
+(default source: the Server object) with the same server-side filtering as the Events tab (`--event-type`,
+`--select`, `--min-severity`), prints each event until `--count` or `--seconds`, and offers the tab's two condition
+actions: `--refresh` sends one `ConditionRefresh` and reports whether `RefreshStart`/`RefreshEnd` arrived, and
+`--acknowledge EVENTID --condition NODEID --confirm` sends one `Acknowledge` call (without `--confirm` it exits `2`
+and sends nothing; the JSON output carries the EventId and condition NodeId of every event). `opcua-write` always previews (server DataType/ValueRank and the parsed value),
 sends only with `--confirm`, sends exactly one write, reads it back and optionally restores the previous value
-with `--restore`; without `--confirm` it exits `2` and sends nothing. All four use the same security flags as
-`opcua-export` (passwords from `--password-env` or a prompt, explicit certificate approval, no downgrade) and none
-is included in the standalone bundles.
+with `--restore`; without `--confirm` it exits `2` and sends nothing. `opcua-check` runs the **same suite as the
+Tests tab** and prints or writes the same report (`--report checks.json` / `.html`, or `--json` for the canonical
+document): read-only by default, `--include-recovery` adds the disruptive reconnection check, and
+`--include-writes --confirm --write NODEID=VALUE [--restore]` / `--call OBJECT|METHOD|ARGS` add the guarded checks
+for explicitly named targets (without `--confirm` it exits `2` before connecting). It exits `3` when a check
+failed, so a CI job gets the verdict from the exit code. `opcua-status` reads the same one-shot
+ServerStatus/ServerDiagnostics snapshot as the Server tab (`--limits-only` for just the capability limits).
+`opcua-nodes` performs **one** structural change per invocation — `--create` (server-assigned NodeId, read back) or
+`--delete` (verified by reading the node again), or `--attribute DisplayName|Description` — and never without
+`--confirm`. `opcua-directory` asks a discovery endpoint (LDS/GDS or any server) with one `FindServers` call and
+prints what it advertises; it opens no session and contacts no found server. All nine use the same security flags
+as `opcua-export` (passwords from `--password-env` or a prompt, explicit certificate approval, no downgrade) and
+none is included in the standalone bundles.
 
 ### Operator sequences: the Sequences tab
 
@@ -727,7 +753,7 @@ StatusCodes and the restore outcome, so a change can always be traced afterwards
 uv sync
 uv run pytest -q                          # unit + integration (starts a local demo server)
 uv run pytest -n auto --dist loadscope    # parallel run (qapp is module-scoped)
-uv run pytest tests/unit -q               # fast, no network (472 tests, ~4 s)
+uv run pytest tests/unit -q               # fast, no network (583 tests, ~8 s)
 ```
 
 * **Unit**: value serialization/flagging, certificate summaries and endpoint selection (no downgrade),

@@ -27,7 +27,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-626 tests pass (463 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+796 tests pass (583 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -179,7 +179,12 @@ bundles are built now (GUI, export, compare).
 - Entry points: `opcua_explorer.gui.app:main` (`opcua-explorer`), `opcua_explorer.demo.demo_server:main`
   (`opcua-demo-server`), `opcua_explorer.cli:main` (`opcua-export`, Qt-free headless NodeSet2 export),
   `opcua_explorer.cli_compare:main` (`opcua-compare`, Qt-free comparison) and
-  `opcua_explorer.cli_sequence:main` (`opcua-run-sequence`, Qt-free sequence runner).
+  `opcua_explorer.cli_sequence:main` (`opcua-run-sequence`, Qt-free sequence runner). The eight read/write
+  front ends `cli_read` (`opcua-read`), `cli_monitor` (`opcua-monitor`), `cli_events` (`opcua-events`),
+  `cli_history` (`opcua-history`), `cli_write` (`opcua-write`), `cli_check` (`opcua-check`),
+  `cli_status` (`opcua-status`), `cli_nodes` (`opcua-nodes`) and `cli_directory` (`opcua-directory`) follow the
+  same rule: an adapter over one service call, never a second implementation.
+  `tests/unit/test_cli_registration.py` enforces the `cli_*.py` ↔ `[project.scripts]` ↔ docs mapping.
 - `cli.py` is an adapter only: it maps arguments to `TraversalConfig` / `NodeSet2Config`, calls
   `OpcUaService.download()` and `export_nodeset2()`, prints `NodeSet2Result.summary_text()` and optionally writes
   `to_dict()` as a manifest. No traversal, dependency, writing, validation or certificate logic may be copied
@@ -207,8 +212,8 @@ Latest run: 2026-11-16, Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **463 passed** |
-| Full suite | `uv run pytest -q` | **626 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **583 passed** |
+| Full suite | `uv run pytest -q` | **796 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -222,17 +227,20 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 626 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 796 tests
   pass; the variance is scheduling/IO contention, not failures.
-- **111 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
+- **128 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).
   Most are deliberate boundaries (best-effort
   teardown, diagnostics for arbitrary server values); do not remove them wholesale without checking the failure
   semantics.
-- **`opcua/nodeset2.py` is 771 lines** — the largest source module; its dependency collector is a single
-  coherent algorithm, so split further only if a new concern appears.
+- **Module sizes (verified 2026-11-22)**: `opcua/write_service.py` 1008 lines is the largest source module — it is
+  the single write/call implementation and deliberately holds prepare/send/verify in one place; then
+  `compare.py` 896, `opcua/test_runner.py` 816 and `opcua/nodeset2.py` 815. Split further only when a new
+  concern appears, not to move the number.
 - **Longest test modules**: `tests/unit/test_sequence_runner.py` (~684 lines) and `tests/unit/test_compare.py`
-  (~520 lines), then `test_cli_compare.py` (~344) and `test_client_service.py` (~322); grouped by concern, not
+  (~520), then `tests/unit/test_event_service.py` (~407), `tests/integration/test_client_service.py` (~352) and
+  `tests/integration/test_gui_monitor.py` (~350); grouped by concern, not
   by accident.
 - **A manual two-session run on a real desktop is still worthwhile**: the selection-isolation and monitor
   behaviour are covered headless only.

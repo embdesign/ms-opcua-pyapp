@@ -1,7 +1,7 @@
 {
   "format": "opcua-nodeset2-export",
   "format_version": 1,
-  "generated_at_utc": "2026-11-16T12:26:32.322Z",
+  "generated_at_utc": "2026-11-22T10:50:59.160Z",
   "path": "demo-nodeset2.xml",
   "configuration": {
     "include_values": false,
@@ -848,6 +848,8 @@
     "Namespace 0 nodes are referenced, not redefined: the target server's standard information model is required for the file to be importable.",
     "An export from a live server contains what this session was allowed to browse; it is not guaranteed to be a complete, independently importable information model.",
     "Validation checks XML well-formedness and structure. XSD validation against the official NodeSet2 schema only runs when a schema file and lxml are available.",
+    "WriteMask and UserWriteMask are not written for any node: the XML exporter does not export them, so importers apply their own defaults.",
+    "AccessRestrictions, RolePermissions and UserRolePermissions are not written for any node: the XML exporter does not export them.",
     "Values are not included except for 2 method argument property (InputArguments / OutputArguments) required to call the methods."
   ],
   "summary": {
@@ -861,6 +863,6 @@
     "validation": "not-validated",
     "schema_validation": "not-requested",
     "bytes_written": 12350,
-    "duration_seconds": 0.167
+    "duration_seconds": 0.19
   }
 }

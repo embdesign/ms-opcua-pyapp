@@ -11,10 +11,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QLabel
 
 ACCENT = "#14639e"
-ACCENT_DARK = "#0f5286"
 ERROR = "#b3261e"
-WARNING = "#8a5a00"
-SUCCESS = "#17603a"
 
 STYLESHEET = """
 QWidget {

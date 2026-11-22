@@ -40,8 +40,9 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py · cli_read · cli_monitor · cli_history · cli_write · cli_compare │
-│ opcua-export · opcua-compare · opcua-run-sequence                    │
+│ cli.py · cli_read · cli_monitor · cli_events · cli_history           │
+│ cli_write · cli_check · cli_status · cli_nodes · cli_directory      │
+│ cli_compare · cli_sequence  (opcua-* console scripts, Qt-free)       │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -79,7 +80,8 @@ Rules that keep the layers honest:
   `Sequences`, `Export`) and injects that session's browser selection into the Export and Tests tabs;
   `gui/main_window.py` is only the tab bar, menus and status bar, and never touches a client.
 * Only `gui/async_runner.py` touches asyncio from the GUI side; widgets never `await`.
-* `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_history.py`, `cli_write.py`, `cli_compare.py` and
+* `cli.py`, `cli_read.py`, `cli_monitor.py`, `cli_events.py`, `cli_history.py`, `cli_write.py`,
+  `cli_check.py`, `cli_status.py`, `cli_nodes.py`, `cli_directory.py`, `cli_compare.py` and
   `cli_sequence.py` are the Qt-free front ends:
   each owns its own event loop
   through `asyncio.run`, calls `OpcUaService` and the shared helpers, and never touches asyncua directly. They
@@ -159,7 +161,8 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
 * Its **unguarded** action is `ConditionRefresh`: `write_service.refresh_conditions()` sends one call of the
   standard method `i=3875` on the ConditionType object (`i=2782`) with the subscription id as its only `UInt32`
   input, and `LiveEvents.refresh_conditions()` composes a `ConditionRefreshResult` from that outcome plus a
-  bounded (2 s) wait for the server's `RefreshStart`/`RefreshEnd` events. The call stores nothing, so the tab
+  bounded wait for the server's `RefreshStart`/`RefreshEnd` events — `max(3 s, 3 × publishing interval)`, because
+  a refresh event can only arrive with a publish response. The call stores nothing, so the tab
   shows no dialog; an authority is still recorded and a missing refresh event is reported rather than claimed.
   There is no `ConditionRefresh2`, no second parent object and no retry.
 
@@ -450,7 +453,23 @@ and prints `ComparisonResult.summary_text()`. `compare.py` itself is a pure func
 objects: node identity is namespace URI + identifier, a renumbered NodeId is matched by its unambiguous
 qualified browse path, values are compared only for nodes named in the config, and results land in the four
 buckets `missing` / `extra` / `changed` / `not comparable`. Partial snapshots (cancelled, limits hit,
-inaccessible nodes, a different identity) produce warnings instead of a false "equal". Either side can also come
+inaccessible nodes, a different identity) produce warnings instead of a false "equal".
+
+The tolerance ladder is monotonic: `functional` (model attributes) ⊂ `strict` (+ display name and description)
+⊂ `device` (+ the attributes that are not part of the data model — write masks, `EventNotifier`,
+`Historizing`, `MinimumSamplingInterval`, abstract/symmetric flags, `DataTypeDefinition`, access
+restrictions, role permissions, method executable flags). The device level is why
+`TraversalConfig.include_device_attributes` exists: those attributes are read into
+`NodeRecord.device_attributes` (as text) only when a download asks for them, so an ordinary export stays
+small. `attributes.device_specs_for()` excludes everything `specs_for()` already reads, so every attribute
+is read exactly once; the JSON document keeps the map (`format_version` 2, version 1 still loads) and the
+comparison reports `device_attributes_compared: false` plus a warning when a side was downloaded without it —
+"not looked at" is never reported as equality.
+
+The reference comparison mirrors the same honesty rule: an edge is comparable only when both of its endpoints
+are nodes of that snapshot, and the rest are counted in `reference_edges_not_compared` and named in a warning
+instead of being dropped. A bounded download keeps many such edges (type definitions in namespace 0, nodes
+under another root), so a comparison of two identical devices normally carries exactly that one warning. Either side can also come
 from a JSON export (`exporters/json_loader.py`), which restores the download's `limits_hit` flags so a truncated
 document is reported as partial rather than as "nodes missing on the other side".
 
@@ -537,7 +556,9 @@ the **Write & call** page (`OpcUaService.attribute_write_preview` / `write_attri
   comparison — a differing read-back is a failure, an unreadable one `outcome_unknown`.
 * Servers restrict non-Value writes: asyncua's attribute service answers `BadUserAccessDenied` for every non-Admin
   user, which is why the demo server refuses and an admin-role test server accepts. Structural attributes
-  (`WriteMask`, `AccessLevel`, `DataType`, …) and node management stay out of scope.
+  (`WriteMask`, `AccessLevel`, `DataType`, …) stay out of scope; node management
+  (`opcua/node_management.py`: one `AddNodes`, one `DeleteNodes`) is a separate guarded path with its own
+  authority, never a structural write.
 
 Condition acknowledgement is the only guarded operation outside a run: the Events tab builds its confirmation
 text from `operator_text.acknowledge_condition_confirmation()` and sends one `Acknowledge` call through

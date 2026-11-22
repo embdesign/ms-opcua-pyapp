@@ -320,12 +320,54 @@ class MainWindow(QMainWindow):
         self.show_descriptions_action.toggled.connect(self._on_show_descriptions_toggled)
         view_menu.addAction(self.show_descriptions_action)
 
+        # Navigation without the mouse: ten pages per session and any number of
+        # sessions are two levels, so both get a shortcut pair.
+        view_menu.addSeparator()
+        self.next_page_action = QAction("Next page", self)
+        self.next_page_action.setShortcut(QKeySequence("Ctrl+PgDown"))
+        self.next_page_action.triggered.connect(lambda: self.step_page(1))
+        view_menu.addAction(self.next_page_action)
+
+        self.previous_page_action = QAction("Previous page", self)
+        self.previous_page_action.setShortcut(QKeySequence("Ctrl+PgUp"))
+        self.previous_page_action.triggered.connect(lambda: self.step_page(-1))
+        view_menu.addAction(self.previous_page_action)
+
+        view_menu.addSeparator()
+        self.next_session_action = QAction("Next session", self)
+        self.next_session_action.setShortcut(QKeySequence("Ctrl+Tab"))
+        self.next_session_action.triggered.connect(lambda: self.step_session(1))
+        view_menu.addAction(self.next_session_action)
+
+        self.previous_session_action = QAction("Previous session", self)
+        self.previous_session_action.setShortcut(QKeySequence("Ctrl+Shift+Tab"))
+        self.previous_session_action.triggered.connect(lambda: self.step_session(-1))
+        view_menu.addAction(self.previous_session_action)
+
         help_menu = self.menuBar().addMenu("&Help")
         about = QAction("About OPC UA Explorer", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
 
     # -- page descriptions -------------------------------------------------
+    def step_page(self, step: int) -> None:
+        """Move to the next/previous page of the visible session (wraps around)."""
+        workspace = self.active_workspace
+        if workspace is not None:
+            workspace.step_page(step)
+
+    def step_session(self, step: int) -> None:
+        """Move to the next/previous session tab, skipping the shared tabs."""
+        if len(self.workspaces) < 2:
+            return
+        indices = [self.tabs.indexOf(workspace) for workspace in self.workspaces]
+        current = self.tabs.currentIndex()
+        if current in indices:
+            position = indices.index(current) + (1 if step > 0 else -1)
+        else:  # a shared tab is visible: continue from the nearest session
+            position = 0 if step > 0 else len(indices) - 1
+        self.tabs.setCurrentIndex(indices[position % len(indices)])
+
     def _on_show_descriptions_toggled(self, checked: bool) -> None:
         """One switch for every page description in every session, persisted in the settings."""
         self._settings.show_tab_descriptions = bool(checked)

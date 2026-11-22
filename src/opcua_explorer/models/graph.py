@@ -149,6 +149,12 @@ class NodeRecord:
     #: attribute name -> OPC UA StatusCode name for attributes the server refused
     unavailable: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    #: Attributes that are not part of the data model (write masks, historizing,
+    #: sampling interval, type flags, definitions, role permissions) as stable
+    #: text. Read only when the download enables device attributes — except
+    #: ``Executable``/``UserExecutable``, which a download always reads. The
+    #: comparison is the only consumer, which is why these are text.
+    device_attributes: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,6 +177,7 @@ class NodeRecord:
             "type_definition_name": self.type_definition_name,
             "value": None if self.value is None else self.value.to_dict(),
             "unavailable_attributes": dict(self.unavailable),
+            "device_attributes": dict(self.device_attributes),
             "errors": list(self.errors),
         }
 
@@ -278,6 +285,11 @@ class TraversalConfig:
     include_values: bool = False
     include_description: bool = True
     follow_subtypes: bool = True
+    #: Also read the attributes that describe the device's behaviour rather than
+    #: its data model (write masks, EventNotifier, Historizing, sampling interval,
+    #: type flags, DataTypeDefinition, access restrictions, role permissions).
+    #: Off by default: it multiplies the attribute reads of a download.
+    include_device_attributes: bool = False
 
     def normalised(self) -> TraversalConfig:
         return TraversalConfig(
@@ -290,6 +302,7 @@ class TraversalConfig:
             include_values=bool(self.include_values),
             include_description=bool(self.include_description),
             follow_subtypes=bool(self.follow_subtypes),
+            include_device_attributes=bool(self.include_device_attributes),
         )
 
 
@@ -429,6 +442,10 @@ class AddressSpace:
             included.append("node descriptions")
         else:
             excluded.append("node descriptions")
+        if self.config.include_device_attributes:
+            included.append("device attributes (write masks, historizing, sampling interval, …)")
+        else:
+            excluded.append("device attributes (write masks, historizing, sampling interval, …)")
 
         lines = [
             f"Nodes:          {len(self.nodes)}",
@@ -438,7 +455,8 @@ class AddressSpace:
         if excluded:
             lines.append(f"NOT included:   {', '.join(excluded)}")
         lines.append(
-            "Never in a snapshot (details panel only): " + ", ".join(DETAILS_ONLY_ATTRIBUTES) + "."
+            "Details panel only: " + ", ".join(DETAILS_ONLY_ATTRIBUTES) + "."
+            " They are part of a snapshot only when 'device attributes' is enabled for its download."
         )
         if self.cancelled:
             lines.append("State:          CANCELLED (partial snapshot)")

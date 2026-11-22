@@ -70,7 +70,6 @@ def test_settings_roundtrip_without_credentials(tmp_path) -> None:
     reloaded = AppSettings.load(path)
     assert reloaded.last_endpoint == "opc.tcp://plant:4840"
     assert reloaded.profiles[0].username == "operator"
-    assert reloaded.credentials_in_profiles is False
 
 
 def test_settings_roundtrip_keeps_auto_reconnect(tmp_path) -> None:
@@ -251,3 +250,24 @@ def test_settings_roundtrip_keeps_the_tab_description_switch(tmp_path) -> None:
     legacy = tmp_path / "legacy.json"
     legacy.write_text(json.dumps({"last_endpoint": "opc.tcp://old:4840"}), encoding="utf-8")
     assert AppSettings.load(legacy).show_tab_descriptions is False
+
+
+def test_recent_endpoints_are_newest_first_deduplicated_and_bounded(tmp_path) -> None:
+    settings = AppSettings()
+    settings.remember_endpoint("opc.tcp://a:4840")
+    settings.remember_endpoint("opc.tcp://b:4840")
+    # Reconnecting to an old endpoint moves it to the front instead of duplicating it.
+    settings.remember_endpoint("opc.tcp://a:4840")
+    assert settings.recent_endpoints == ["opc.tcp://a:4840", "opc.tcp://b:4840"]
+
+    for index in range(20):
+        settings.remember_endpoint(f"opc.tcp://host{index}:4840")
+    assert len(settings.recent_endpoints) == AppSettings.MAX_RECENT_ENDPOINTS
+    assert settings.recent_endpoints[0] == "opc.tcp://host19:4840"
+
+    settings.remember_endpoint("   ")
+    assert settings.recent_endpoints[0] == "opc.tcp://host19:4840"
+
+    path = tmp_path / "settings.json"
+    settings.save(path)
+    assert AppSettings.load(path).recent_endpoints == settings.recent_endpoints

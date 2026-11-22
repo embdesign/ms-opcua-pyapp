@@ -17,8 +17,6 @@ Both are layout-only: nothing here sends, reads or decides.
 
 from __future__ import annotations
 
-from typing import Any
-
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 #: Arrow glyphs of the options toggle (collapsed / expanded).
@@ -94,9 +92,6 @@ class OptionsRow:
     def add_widget(self, widget: QWidget, stretch: int = 0) -> None:
         self.layout.addWidget(widget, stretch)
 
-    def add_layout(self, layout: Any) -> None:
-        self.layout.addLayout(layout)
-
     def add_spacing(self, width: int) -> None:
         self.layout.addSpacing(width)
 
@@ -104,11 +99,8 @@ class OptionsRow:
         self.layout.addStretch(stretch)
 
     # -- state -------------------------------------------------------------
-    @property
-    def is_visible(self) -> bool:
-        return self.toggle.isChecked()
-
     def set_visible(self, visible: bool) -> None:
+        """Open or close the row without going through the toggle button."""
         self.toggle.setChecked(bool(visible))
 
     def set_active(self, summary: str) -> None:
@@ -118,10 +110,6 @@ class OptionsRow:
             return
         self._summary = cleaned
         self._refresh()
-
-    @property
-    def active_summary(self) -> str:
-        return self._summary
 
     def toggle_text(self) -> str:
         arrow = _EXPANDED if self.toggle.isChecked() else _COLLAPSED

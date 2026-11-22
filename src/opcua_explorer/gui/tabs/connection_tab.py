@@ -147,7 +147,21 @@ class ConnectionTab(QWidget):
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("opc.tcp://192.168.0.10:4840")
         self.url_edit.returnPressed.connect(self._on_discover)
-        endpoint_layout.addWidget(self.url_edit)
+        # The endpoints this window connected to successfully before; picking one
+        # only fills the field, it never connects by itself.
+        self.recent_combo = QComboBox()
+        self.recent_combo.setMinimumWidth(220)
+        self.recent_combo.setToolTip(
+            "Endpoints connected to successfully in this profile. Selecting one fills the field; "
+            "nothing connects until you press Discover endpoints."
+        )
+        self.recent_combo.activated.connect(self._on_recent_activated)
+        self._refresh_recent()
+        url_row = QHBoxLayout()
+        url_row.addWidget(self.url_edit, 1)
+        url_row.addWidget(QLabel("Recent:"))
+        url_row.addWidget(self.recent_combo)
+        endpoint_layout.addLayout(url_row)
         row = QHBoxLayout()
         self.discover_btn = QPushButton("Discover endpoints")
         self.discover_btn.clicked.connect(self._on_discover)
@@ -416,6 +430,28 @@ class ConnectionTab(QWidget):
 
         QApplication.clipboard().setText(text)
 
+    def _refresh_recent(self) -> None:
+        """Rebuild the recent-endpoint pick list from the settings."""
+        current = self.recent_combo.currentText() if hasattr(self, "recent_combo") else ""
+        self.recent_combo.blockSignals(True)
+        self.recent_combo.clear()
+        self.recent_combo.addItem("recent…" if not self._settings.recent_endpoints else "choose…", "")
+        for url in self._settings.recent_endpoints:
+            self.recent_combo.addItem(url, url)
+        self.recent_combo.setCurrentIndex(0)
+        self.recent_combo.blockSignals(False)
+        self.recent_combo.setEnabled(bool(self._settings.recent_endpoints))
+        if current and self.recent_combo.findText(current) >= 0:
+            self.recent_combo.setCurrentText(current)
+
+    def _on_recent_activated(self, index: int) -> None:
+        """Fill the endpoint field from the pick list; never connects."""
+        url = self.recent_combo.itemData(index)
+        if not url:
+            return
+        self.url_edit.setText(str(url))
+        self.status_chip.setText("Endpoint selected — press Discover endpoints to connect")
+
     def _load_settings(self, settings: AppSettings) -> None:
         self.url_edit.setText(settings.last_endpoint)
         self.connect_timeout_spin.setValue(10.0)
@@ -654,6 +690,8 @@ class ConnectionTab(QWidget):
         )
         self.status_chip.setText(self._connected_chip_text())
         self._settings.last_endpoint = info.endpoint_url
+        self._settings.remember_endpoint(info.endpoint_url)
+        self._refresh_recent()
         self._render_diagnostics(info=info)
 
         if self.clear_password_check.isChecked():

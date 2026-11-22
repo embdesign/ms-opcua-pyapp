@@ -56,10 +56,20 @@ opcua-compare = "opcua_explorer.cli_compare:main"
 opcua-read = "opcua_explorer.cli_read:main"
 # Headless live data-change monitor (Qt-free).
 opcua-monitor = "opcua_explorer.cli_monitor:main"
+# Headless event subscription, with ConditionRefresh and a confirmed Acknowledge (Qt-free).
+opcua-events = "opcua_explorer.cli_events:main"
 # Headless raw-history read (Qt-free).
 opcua-history = "opcua_explorer.cli_history:main"
 # Headless guarded single write (Qt-free, needs --confirm).
 opcua-write = "opcua_explorer.cli_write:main"
+# Headless functional/interoperability checks with the Tests-tab suite (Qt-free).
+opcua-check = "opcua_explorer.cli_check:main"
+# Headless server status/diagnostics read (Qt-free, read-only).
+opcua-status = "opcua_explorer.cli_status:main"
+# Headless single-node create/delete/attribute write (Qt-free, needs --confirm).
+opcua-nodes = "opcua_explorer.cli_nodes:main"
+# Headless FindServers directory lookup (Qt-free, no session).
+opcua-directory = "opcua_explorer.cli_directory:main"
 # Headless run of an operator-written sequence document (Qt-free).
 opcua-run-sequence = "opcua_explorer.cli_sequence:main"
 

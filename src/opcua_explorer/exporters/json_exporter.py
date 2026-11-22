@@ -44,7 +44,11 @@ from ..errors import ExportError
 from ..models import AddressSpace, iso_utc, utc_now
 
 FORMAT_NAME = "opcua-address-space-snapshot"
-FORMAT_VERSION = 1
+# Version 2 adds the optional ``device_attributes`` map per node and
+# ``traversal.include_device_attributes``. Version 1 documents keep loading.
+FORMAT_VERSION = 2
+#: Versions this build can still read.
+READABLE_FORMAT_VERSIONS = (1, 2)
 
 
 @dataclass(slots=True)
@@ -108,6 +112,7 @@ def snapshot_to_document(snapshot: AddressSpace) -> dict[str, Any]:
                 "include_values": snapshot.config.include_values,
                 "include_description": snapshot.config.include_description,
                 "follow_subtypes": snapshot.config.follow_subtypes,
+                "include_device_attributes": snapshot.config.include_device_attributes,
             },
             "limitations": list(snapshot.limitations),
         },

@@ -1,6 +1,6 @@
 {
   "format": "opcua-comparison",
-  "version": 1,
+  "version": 2,
   "reference_endpoint": "opc.tcp://127.0.0.1:4840",
   "candidate_endpoint": "synthetic variant of the candidate snapshot",
   "config": {
@@ -28,8 +28,12 @@
     "truncated": 0
   },
   "reference_differences": 1,
+  "reference_edges_not_compared": 1145,
+  "device_attributes_compared": false,
   "namespace_differences": [],
-  "warnings": [],
+  "warnings": [
+    "572 reference(s) on the reference side and 573 on the candidate side point to nodes outside that download (types in another namespace, nodes under a different root); they are not part of the reference comparison. Download a wider scope to include them."
+  ],
   "limitations": [
     "A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically."
   ],
@@ -49,9 +53,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.464,
-    "started_at_utc": "2026-11-16T12:27:27.049Z",
-    "finished_at_utc": "2026-11-16T12:27:27.513Z"
+    "duration_seconds": 0.643,
+    "started_at_utc": "2026-11-22T10:52:08.809Z",
+    "finished_at_utc": "2026-11-22T10:52:09.452Z"
   },
   "candidate": {
     "nodes": 696,
@@ -69,9 +73,9 @@
     "inaccessible_nodes": 0,
     "unsupported_value_encodings": 0,
     "errors": 0,
-    "duration_seconds": 0.389,
-    "started_at_utc": "2026-11-16T12:27:27.519Z",
-    "finished_at_utc": "2026-11-16T12:27:27.908Z"
+    "duration_seconds": 0.539,
+    "started_at_utc": "2026-11-22T10:52:09.460Z",
+    "finished_at_utc": "2026-11-22T10:52:09.999Z"
   },
   "differences": [
     {
@@ -142,6 +146,6 @@
       "reference_type": "HasProperty"
     }
   ],
-  "generated_at_utc": "2026-11-16T12:27:28.268Z",
+  "generated_at_utc": "2026-11-22T10:52:11.906Z",
   "disclaimer": "A comparison reflects what each session was allowed to browse and read with the identity it used. It is evidence of structural agreement for that scope, not proof that both servers behave identically."
 }

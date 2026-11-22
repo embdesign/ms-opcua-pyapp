@@ -72,7 +72,11 @@ FILTER_ALL = "all"
 #: Combo value that selects a saved JSON export instead of a live session.
 FILE_SOURCE = "__saved_document__"
 
-TOLERANCE_LABELS = (("functional", "functional (structure)"), ("strict", "strict (+ display text)"))
+TOLERANCE_LABELS = (
+    ("functional", "functional (structure)"),
+    ("strict", "strict (+ display text)"),
+    ("device", "device (+ masks, historizing, permissions)"),
+)
 
 _COLUMNS = ("Kind", "Browse path", "Node class", "Reference NodeId", "Candidate NodeId", "Attributes")
 
@@ -456,6 +460,10 @@ class CompareTab(QWidget):
             concurrency=DEFAULT_CONCURRENCY,
             batch_size=DEFAULT_BATCH_SIZE,
             include_values=bool(values),
+            # The device tolerance compares attributes that are not part of the data
+            # model, so the download has to read them - otherwise the comparison would
+            # report "not compared" for every node.
+            include_device_attributes=str(self.tolerance_combo.currentData() or "") == "device",
         ).normalised()
 
     def _comparison_config(self) -> ComparisonConfig:

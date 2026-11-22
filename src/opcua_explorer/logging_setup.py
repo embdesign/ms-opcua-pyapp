@@ -45,14 +45,6 @@ class SecretRedactor:
         with self._lock:
             self._secrets.add(secret)
 
-    def forget_all(self) -> None:
-        with self._lock:
-            self._secrets.clear()
-
-    @property
-    def secret_count(self) -> int:
-        return len(self._secrets)
-
     def redact(self, text: str) -> str:
         if not text:
             return text
@@ -187,7 +179,3 @@ def setup_logging(level: str | int = "INFO", *, quiet_libraries: Iterable[str] =
 
 def get_log_bus() -> LogBus:
     return LOG_BUS
-
-
-def get_redactor() -> SecretRedactor:
-    return REDACTOR

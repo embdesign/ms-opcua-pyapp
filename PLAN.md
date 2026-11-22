@@ -16,13 +16,13 @@ covered by tests, including the device-independent sequence runner for operator-
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log, pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
 | Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail, add/remove sources while running, per-source StatusCode reporting, and one confirmed `Acknowledge` method call for a selected condition event plus one unconfirmed `ConditionRefresh` call on the running subscription (no `Confirm`/`Enable`, never retried) |
-| Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided |
+| Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
 | History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
-| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below) |
-| Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page; admin-only on `UserRole.Admin` servers |
+| Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below); the same suite runs headlessly through `opcua-check` and writes the same JSON/HTML report |
+| Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page, and headlessly through `opcua-nodes` (also for a `DisplayName`/`Description` write); admin-only on `UserRole.Admin` servers |
 | Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
 | Reports | Versioned JSON and self-contained HTML reports with security configuration, environment, StatusCodes, durations, coverage limitations |
-| Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict tolerance, value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
+| Model comparison | `compare.py` (Qt/asyncua-free), the shared **Compare** tab and the `opcua-compare` command: structural comparison of two address spaces — namespace-URI identity, browse-path fallback for renumbered NodeIds, functional/strict/device tolerance (device adds write masks, historizing, sampling interval, permissions), value comparison for named nodes, ignore list, warnings for partial snapshots, versioned JSON/HTML reports, exit code 3 as a CI gate. Either side may be a saved JSON export (`exporters/json_loader.py`), so a retired device stays comparable |
 | Sessions & projects | Several independent sessions per window, shared trust store and asyncio loop; versioned project files (version 2) with per-session configuration and editor state, never secrets |
 | Sequences | Operator-written sequence documents (`opcua-explorer-sequence` v1): preconditions, user-defined gate (acquire / verify / keepalive / release) and body (`write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`), `${name}` inputs, dry run, browse-path addressing, run timeline, and the Qt-free `opcua-run-sequence` command |
 | Demo & examples | Local demo server with a graph-shaped model; example JSON/CSV/NodeSet2 exports and sample reports |
@@ -64,8 +64,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 626 passed, ~8–15 min
-uv run pytest tests/unit -q       # 463 passed, ~4 s
+uv run pytest -q                  # 796 passed, ~8–15 min
+uv run pytest tests/unit -q       # 583 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -92,7 +92,8 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 - Events are notifications, not alarm management: sources are subscription-only. There are two condition
   actions: one operator-confirmed `Acknowledge` method call for a selected condition event, and one
   `ConditionRefresh` call on the running subscription (no dialog, because it stores nothing; its
-  `RefreshStart`/`RefreshEnd` events are the only evidence). No `Confirm`/`Enable`/`AddComment`, no retry, no
+  `RefreshStart`/`RefreshEnd` events are the only evidence). Both are reachable headlessly through
+  `opcua-events` (`--refresh`, and `--acknowledge … --confirm`). No `Confirm`/`Enable`/`AddComment`, no retry, no
   automatic acknowledgement, no `ConditionRefresh2`, no event history. Event sources are session state.
 - `EventNotifier` and the other details-only attributes are read for the selected node, not downloaded; the
   JSON/CSV snapshot format is unchanged and the tree does not mark event sources.

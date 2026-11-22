@@ -13,7 +13,8 @@ def test_json_document_structure(sample_snapshot: AddressSpace) -> None:
     document = snapshot_to_document(sample_snapshot)
 
     assert document["format"] == "opcua-address-space-snapshot"
-    assert document["format_version"] == 1
+    # Version 2 adds the optional per-node ``device_attributes`` map.
+    assert document["format_version"] == 2
     assert document["generator"]["name"] == "opcua-explorer"
     assert document["source"]["endpoint_url"] == "opc.tcp://demo:4840"
     assert document["source"]["values_included"] is False
@@ -63,6 +64,7 @@ def test_json_records_the_full_traversal_configuration(sample_snapshot: AddressS
         "include_values": True,
         "include_description": False,
         "follow_subtypes": False,
+        "include_device_attributes": False,
     }
 
 

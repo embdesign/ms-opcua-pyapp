@@ -22,7 +22,8 @@ def test_coverage_reports_disabled_options_as_not_included():
     not_included = text.split("NOT included:", 1)[1].splitlines()[0]
     assert "variable values (Value, SourceTimestamp, ServerTimestamp)" in not_included
     assert "node descriptions" in not_included
-    assert "Never in a snapshot (details panel only)" in text
+    assert "Details panel only:" in text
+    assert "device attributes" in not_included
     assert "EventNotifier" in text and "RolePermissions" in text
 
 
@@ -31,7 +32,13 @@ def test_coverage_lists_values_and_descriptions_when_enabled():
 
     assert "variable values (Value, SourceTimestamp, ServerTimestamp)" in text
     assert "node descriptions" in text
-    assert "NOT included:" not in text
+    # Device attributes stay opt-in, so they are still listed as not included.
+    assert "NOT included:" in text
+    assert "device attributes" in text.split("NOT included:", 1)[1].splitlines()[0]
+
+    with_device = _snapshot(include_values=True, include_description=True, include_device_attributes=True).coverage_text()
+    assert "NOT included:" not in with_device
+    assert "device attributes" in with_device
 
 
 def test_coverage_reports_a_partial_snapshot():

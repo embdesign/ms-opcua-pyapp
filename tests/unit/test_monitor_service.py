@@ -336,3 +336,24 @@ async def test_intervals_can_be_modified_while_running() -> None:
     failures = await monitor.set_sampling_interval(400)
     assert len(failures) == 2
     assert all("BadMonitoredItemIdInvalid" in failure for failure in failures)
+
+
+async def test_a_dropped_subscription_is_reported_instead_of_encoding_none() -> None:
+    """A subscription the server forgot must not reach the ModifySubscription encoder.
+
+    asyncua recreates such a subscription and leaves ``subscription_id`` as ``None``;
+    packing the id then raised ``struct.error: required argument is not an integer``
+    from inside asyncua, so the operator saw an encoder error instead of the fact that
+    the subscription was gone.
+    """
+    client = _FakeClient()
+    monitor = LiveMonitor(client, lambda _event: None)
+    await monitor.start(["ns=2;s=A"], MonitorConfig(publishing_interval_ms=200))
+
+    client.subscription.subscription_id = None
+    client.subscription.updated = None
+    with pytest.raises(MonitorNotActiveError) as raised:
+        await monitor.set_publishing_interval(300)
+    assert "no longer knows this subscription" in str(raised.value)
+    # Nothing was sent with a None id.
+    assert client.subscription.updated is None

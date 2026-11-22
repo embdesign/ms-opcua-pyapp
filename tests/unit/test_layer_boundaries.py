@@ -184,7 +184,21 @@ def test_only_async_runner_imports_asyncio_in_the_gui() -> None:
 
 
 def test_cli_front_ends_do_not_import_asyncua() -> None:
-    for front_end in ("cli.py", "cli_compare.py", "cli_sequence.py"):
+    front_ends = (
+        "cli.py",
+        "cli_compare.py",
+        "cli_sequence.py",
+        "cli_read.py",
+        "cli_monitor.py",
+        "cli_events.py",
+        "cli_history.py",
+        "cli_write.py",
+        "cli_check.py",
+        "cli_status.py",
+        "cli_nodes.py",
+        "cli_directory.py",
+    )
+    for front_end in front_ends:
         tree = ast.parse((_PACKAGE_ROOT / front_end).read_text(encoding="utf-8"))
         imported: set[str] = set()
         for node in ast.walk(tree):
