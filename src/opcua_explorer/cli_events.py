@@ -3,7 +3,9 @@
 Creates one event subscription through the same
 :class:`~opcua_explorer.opcua.client_service.OpcUaService` the Events tab uses,
 prints every event until ``--count`` is reached or ``--seconds`` elapse, and
-stops. It is the headless twin of that page, including its condition actions:
+stops. ``--history`` reads one source's stored events instead (one bounded
+``ReadEventDetails``, no subscription). It is the headless twin of that page,
+including its condition actions:
 
 * ``--refresh`` asks the server once to re-publish the conditions it already
   retains (``ConditionRefresh``) and reports whether ``RefreshStart``/
@@ -43,10 +45,15 @@ from .cli import (
     add_connection_arguments,
     add_output_arguments,
     approve_server_certificate,
+    parse_iso_time,
     settings_from_args,
 )
 from .config import TrustStore
-from .defaults import DEFAULT_EVENT_PUBLISHING_INTERVAL_MS
+from .defaults import (
+    DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_HISTORY_MAX_VALUES,
+    MAX_HISTORY_MAX_VALUES,
+)
 from .errors import OpcUaExplorerError
 from .exporters.observation_log import write_observation_log
 from .models import (
@@ -54,6 +61,7 @@ from .models import (
     STATUS_PASSED,
     ConditionRefreshResult,
     EventConfig,
+    EventHistoryConfig,
     EventNotification,
     EventStart,
     condition_action_label,
@@ -62,6 +70,8 @@ from .opcua.client_service import OpcUaService
 from .opcua.event_service import SERVER_OBJECT_NODE_ID
 from .opcua.node_ids import normalise_node_id
 from .operator_text import condition_action_result_text
+
+HISTORY_FORMAT = "opcua-event-history"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--min-severity 500 --refresh --json\n"
             "  opcua-events --endpoint opc.tcp://plc:4840 --acknowledge 0102ff "
             "--condition ns=2;s=PumpCondition --comment checked --confirm\n"
+            "  opcua-events --endpoint opc.tcp://plc:4840 --history "
+            "--from 2026-11-21T00:00:00Z --to 2026-11-21T12:00:00Z --json\n"
             "\n"
             "Passwords are read from --password-env or prompted on a terminal; they are never "
             "accepted as command-line arguments."
@@ -132,6 +144,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         metavar="FILE",
         help="also write the received events to FILE when the run ends (.csv or versioned JSON)",
+    )
+
+    history = parser.add_argument_group("stored events")
+    history.add_argument(
+        "--history",
+        action="store_true",
+        help="read the stored events of one source (ReadEventDetails) instead of subscribing",
+    )
+    history.add_argument("--from", dest="start", metavar="ISO", help="start of the stored-event range")
+    history.add_argument("--to", dest="end", metavar="ISO", help="end of the stored-event range")
+    history.add_argument(
+        "--max-events",
+        type=int,
+        default=DEFAULT_HISTORY_MAX_VALUES,
+        metavar="N",
+        help=f"hard cap on stored events, at most {MAX_HISTORY_MAX_VALUES} (default: {DEFAULT_HISTORY_MAX_VALUES})",
     )
 
     condition = parser.add_argument_group("condition actions")
@@ -225,6 +253,29 @@ def _check_condition_arguments(args: argparse.Namespace) -> None:
     _condition_plan(args)
 
 
+def _check_history_mode(args: argparse.Namespace) -> None:
+    """Validate ``--history`` and its exclusive options before connecting."""
+    if not args.history:
+        if args.start or args.end or args.max_events != DEFAULT_HISTORY_MAX_VALUES:
+            raise CliError("--from, --to and --max-events only apply together with --history.")
+        return
+    if args.refresh or args.acknowledge or args.condition_action or args.confirm:
+        raise CliError(
+            "--history reads stored events; it cannot also refresh, acknowledge or call a condition method."
+        )
+    if args.condition or args.comment or args.eventid:
+        raise CliError("--condition, --comment and --eventid only apply to a condition action.")
+    if args.count:
+        raise CliError("--count applies to a live subscription; use --max-events with --history.")
+    if len(args.source or [SERVER_OBJECT_NODE_ID]) != 1:
+        raise CliError("Stored-event reads target one source; pass exactly one --source.")
+    if args.start and args.end:
+        start = parse_iso_time(args.start, "--from")
+        end = parse_iso_time(args.end, "--to")
+        if start and end and start > end:
+            raise CliError("--from must not be after --to.")
+
+
 async def _condition_call(service: OpcUaService, args: argparse.Namespace) -> int:
     """Send the one confirmed condition method call and return the exit code."""
     plan = _condition_plan(args)
@@ -260,6 +311,9 @@ async def _condition_call(service: OpcUaService, args: argparse.Namespace) -> in
 
 async def _run(args: argparse.Namespace) -> int:
     _check_condition_arguments(args)
+    _check_history_mode(args)
+    if args.history:
+        return await _run_history(args)
     settings = settings_from_args(args)
     trust_store = TrustStore(args.trust_store) if args.trust_store else TrustStore()
     service = OpcUaService(trust_store=trust_store)
@@ -346,6 +400,45 @@ async def _run(args: argparse.Namespace) -> int:
         if code != EXIT_OK:
             return code
     return EXIT_OK
+
+
+async def _run_history(args: argparse.Namespace) -> int:
+    """Read one source's stored events; no subscription and no write."""
+    settings = settings_from_args(args)
+    trust_store = TrustStore(args.trust_store) if args.trust_store else TrustStore()
+    service = OpcUaService(trust_store=trust_store)
+    progress = ProgressPrinter(sys.stderr, quiet=args.quiet)
+    source = normalise_node_id((args.source or [SERVER_OBJECT_NODE_ID])[0])
+    config = EventHistoryConfig(
+        start=parse_iso_time(args.start, "--from"),
+        end=parse_iso_time(args.end, "--to"),
+        max_values=int(args.max_events),
+        event_type_node_id=str(args.event_type or ""),
+        select_fields=[str(text) for text in (args.select or [])],
+        min_severity=None if args.min_severity is None else int(args.min_severity),
+    ).normalised()
+    try:
+        if settings.is_secure:
+            await approve_server_certificate(service, settings, args, trust_store, progress)
+        await service.connect(settings)
+        result = await service.read_event_history(source, config)
+    finally:
+        await service.shutdown()
+
+    if args.json:
+        print(
+            json.dumps(
+                {"format": HISTORY_FORMAT, "version": 1, "result": result.to_dict()},
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+    else:
+        print(result.summary_text())
+        for notification in result.events:
+            print(_event_line(notification))
+    return EXIT_OK if result.status == "Good" else EXIT_INVALID_OUTPUT
 
 
 def main(argv: list[str] | None = None) -> int:

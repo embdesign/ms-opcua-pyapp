@@ -1,11 +1,16 @@
-"""Live event subscriptions on an existing OPC UA session.
+"""Live event subscriptions and stored-event reads on an OPC UA session.
 
 One :class:`LiveEvents` owns exactly one subscription whose monitored items
 listen to the ``EventNotifier`` attribute of one or more source nodes (usually
 the Server object). Every event the server publishes is reduced to display-safe
-text and handed to ``emit``. This module never writes: the one action of event
-monitoring, a condition acknowledgement, is a separate guarded call in
-:mod:`opcua_explorer.opcua.write_service`.
+text and handed to ``emit``. :func:`read_event_history` does the same for a
+server's stored events: one bounded ``HistoryRead`` with ``ReadEventDetails``,
+the same field mapping and the same continuation-point handling as the live path.
+
+This module never writes: the one action of event monitoring, a condition
+acknowledgement, is a separate guarded call in
+:mod:`opcua_explorer.opcua.write_service`. Condition *state* is read on demand in
+:mod:`opcua_explorer.opcua.condition_state`.
 
 Threading contract
 ------------------
@@ -21,6 +26,7 @@ contributes its own properties without this module hard-coding a field list.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -29,6 +35,7 @@ from datetime import datetime
 from typing import Any
 
 from asyncua import ua
+from asyncua.common.events import Event as UaEvent
 from asyncua.common.subscription import EventNotificationHandlerAsync
 
 from ..errors import InvalidNodeIdError, MonitorNotActiveError, OpcUaExplorerError
@@ -39,15 +46,19 @@ from ..models import (
     STATUS_PASSED,
     ConditionRefreshResult,
     EventConfig,
+    EventHistoryConfig,
+    EventHistoryResult,
     EventNotification,
     EventSourceInfo,
     EventStart,
     MonitorStatusEvent,
     WriteAuthority,
     iso_utc,
+    utc_now,
 )
 from . import write_service
 from .attributes import status_name
+from .browse import to_node_id
 from .path_support import parse_browse_name
 from .serialize import SerializationContext, serialize_value
 
@@ -63,6 +74,8 @@ _LIFETIME_COUNT = 10_000
 _MAX_KEEP_ALIVE_COUNT = 20
 #: Events arrive in bursts far more readily than data changes; keep more per publish.
 _MAX_NOTIFICATIONS_PER_PUBLISH = 1_000
+#: Safety bound for stored-event continuation points; the count is the primary limit.
+_MAX_HISTORY_PAGES = 50
 
 #: How long a ``ConditionRefresh`` waits for the server's RefreshStart/RefreshEnd
 #: events after the call returned; the subscription publishes on its own interval.
@@ -88,22 +101,11 @@ DEFAULT_EVENT_FIELDS = (
 )
 
 
-def build_event_filter(event_type: ua.NodeId, config: EventConfig) -> ua.EventFilter | None:
-    """Build the server-side filter for ``config``; ``None`` keeps asyncua's default.
-
-    The standard fields are always selected so the summary columns never depend
-    on what the operator typed. Extra fields are added to the select clauses;
-    ``min_severity`` becomes a ``WhereClause`` (Severity >= n), so the server
-    discards low-severity events instead of the client receiving and dropping
-    them.
-    """
-    settings = config.normalised()
-    if not settings.select_fields and settings.min_severity is None:
-        return None
-
+def _select_names(config: EventConfig) -> list[ua.QualifiedName]:
+    """Standard plus extra field names, deduplicated in request order."""
     names: list[ua.QualifiedName] = []
     seen: set[tuple[str, int]] = set()
-    for text in (*DEFAULT_EVENT_FIELDS, *settings.select_fields):
+    for text in (*DEFAULT_EVENT_FIELDS, *config.select_fields):
         try:
             name = parse_browse_name(text)
         except ValueError:  # pragma: no cover - normalised() removed empty entries
@@ -113,31 +115,89 @@ def build_event_filter(event_type: ua.NodeId, config: EventConfig) -> ua.EventFi
             continue
         seen.add(key)
         names.append(name)
+    return names
 
+
+def _event_filter(event_type: ua.NodeId, config: EventConfig) -> ua.EventFilter:
     select = [
         ua.SimpleAttributeOperand(
             TypeDefinitionId=event_type,
             BrowsePath=[name],
             AttributeId=ua.AttributeIds.Value,
         )
-        for name in names
+        for name in _select_names(config)
     ]
 
     where = ua.ContentFilter(Elements=[])
-    if settings.min_severity is not None:
+    if config.min_severity is not None:
         severity = ua.SimpleAttributeOperand(
             TypeDefinitionId=event_type,
             BrowsePath=[ua.QualifiedName("Severity", 0)],
             AttributeId=ua.AttributeIds.Value,
         )
-        literal = ua.LiteralOperand(Value=ua.Variant(int(settings.min_severity), ua.VariantType.UInt16))
+        literal = ua.LiteralOperand(Value=ua.Variant(int(config.min_severity), ua.VariantType.UInt16))
         element = ua.ContentFilterElement(
             FilterOperator=ua.FilterOperator.GreaterThanOrEqual,
             FilterOperands=[severity, literal],
         )
         where = ua.ContentFilter(Elements=[element])
-
     return ua.EventFilter(SelectClauses=select, WhereClause=where)
+
+
+def build_event_filter(event_type: ua.NodeId, config: EventConfig) -> ua.EventFilter | None:
+    """Build the server-side filter for ``config``; ``None`` keeps asyncua's default.
+
+    The standard fields are always selected so the summary columns never depend
+    on what the operator typed. Extra fields are added to the select clauses;
+    ``min_severity`` becomes a ``WhereClause`` (Severity >= n), so the server
+    discards low-severity events instead of the client receiving and dropping
+    them. A plain default subscription keeps ``None`` because asyncua then asks
+    the server for the event type's own fields.
+    """
+    settings = config.normalised()
+    if not settings.select_fields and settings.min_severity is None:
+        return None
+    return _event_filter(event_type, settings)
+
+
+def build_event_history_filter(event_type: ua.NodeId, config: EventHistoryConfig) -> ua.EventFilter:
+    """Filter for a stored-event read; ``ReadEventDetails`` always needs one."""
+    settings = EventConfig(
+        event_type_node_id=config.event_type_node_id,
+        select_fields=list(config.select_fields),
+        min_severity=config.min_severity,
+    ).normalised()
+    return _event_filter(event_type, settings)
+
+
+def build_event_history_request(
+    node_id: Any,
+    config: EventHistoryConfig,
+    *,
+    continuation_point: bytes = b"",
+    release: bool = False,
+) -> ua.HistoryReadParameters:
+    """Build one ``HistoryRead`` for the stored events of a single source node."""
+    settings = config.normalised()
+    event_type = _parse_event_type(settings.event_type_node_id)
+    details = ua.ReadEventDetails()
+    details.StartTime = settings.start or ua.get_win_epoch()
+    details.EndTime = settings.end or ua.get_win_epoch()
+    details.NumValuesPerNode = int(settings.max_values)
+    details.Filter = build_event_history_filter(event_type, settings)
+
+    read_value = ua.HistoryReadValueId()
+    read_value.NodeId = to_node_id(node_id)
+    read_value.IndexRange = ""
+    read_value.DataEncoding = ua.QualifiedName()
+    read_value.ContinuationPoint = continuation_point
+
+    params = ua.HistoryReadParameters()
+    params.HistoryReadDetails = details
+    params.TimestampsToReturn = ua.TimestampsToReturn.Both
+    params.ReleaseContinuationPoints = bool(release)
+    params.NodesToRead = [read_value]
+    return params
 
 
 #: Attributes of ``asyncua.common.subscription.Event`` that are bookkeeping, not fields.
@@ -148,7 +208,16 @@ _INTERNAL_EVENT_ATTRIBUTES = frozenset(
 #: Top-level event-type properties that only a condition subtype selects. Their
 #: presence in the accepted filter proves the subscription is a condition one.
 _CONDITION_SELECTIONS = frozenset(
-    {"AckedState", "ConfirmedState", "EnabledState", "Retain", "ConditionName", "BranchId"}
+    {
+        "AckedState",
+        "ConfirmedState",
+        "EnabledState",
+        "Retain",
+        "ConditionName",
+        "BranchId",
+        "ConditionId",
+        "NodeId",
+    }
 )
 
 
@@ -164,10 +233,17 @@ def event_id_bytes(text: str) -> bytes | None:
 
 
 def _selects_condition_fields(event: Any) -> bool:
-    """True when the filter selected a condition-only property."""
+    """True when the filter selected a condition-only property.
+
+    A subscription built from a condition type selects components such as
+    ``EnabledState/Id``; the first path element is what identifies the condition.
+    """
     for clause in getattr(event, "select_clauses", None) or []:
         browse_path = getattr(clause, "BrowsePath", None) or []
-        if browse_path and getattr(browse_path[0], "Name", "") in _CONDITION_SELECTIONS:
+        if not browse_path:
+            continue
+        name = str(getattr(browse_path[0], "Name", "") or "")
+        if name in _CONDITION_SELECTIONS or name.split("/", 1)[0] in _CONDITION_SELECTIONS:
             return True
     return False
 
@@ -231,6 +307,62 @@ def _field_text(value: Any) -> str:
     except Exception:  # pragma: no cover - the encoder is designed not to raise
         _logger.debug("Encoding an event field failed", exc_info=True)
         return f"<unrepresentable {type(value).__name__}>"
+
+
+def build_notification(event: Any, sequence: int = 0) -> EventNotification:
+    """Reduce one asyncua ``Event`` (live or from history) to display-safe text.
+
+    Live notifications and stored events use the same mapping, so a field is
+    never named one way in the log and another way in a history read.
+    """
+    fields: dict[str, str] = {}
+    names = getattr(event, "data_types", None) or {}
+    for name in names:
+        if name in _INTERNAL_EVENT_ATTRIBUTES:
+            continue
+        fields[str(name)] = event_field_text(getattr(event, name, None))
+
+    event_type_value = getattr(event, "EventType", None)
+    severity_value = getattr(event, "Severity", None)
+    if isinstance(severity_value, ua.Variant):
+        severity_value = severity_value.Value
+    try:
+        severity = int(severity_value) if severity_value is not None else None
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        severity = None
+
+    condition_node_id = ""
+    if _selects_condition_fields(event):
+        # ConditionId/NodeId identify the condition; the demo server leaves both
+        # empty, where SourceNode is the condition object by definition.
+        condition_node_id = (
+            fields.get("ConditionId") or fields.get("NodeId") or fields.get("SourceNode", "")
+        )
+
+    return EventNotification(
+        sequence=sequence,
+        event_type=event_type_name(event_type_value),
+        event_type_id=event_type_id(event_type_value),
+        source_node=fields.get("SourceNode", ""),
+        source_name=fields.get("SourceName", ""),
+        severity=severity,
+        message=fields.get("Message", ""),
+        time=fields.get("Time") or None,
+        receive_time=fields.get("ReceiveTime") or None,
+        event_id=fields.get("EventId", ""),
+        condition_node_id=condition_node_id,
+        fields=fields,
+    )
+
+
+def _parse_event_type(text: str) -> ua.NodeId:
+    """Parse an event-type NodeId; empty means the standard BaseEventType."""
+    if not text:
+        return ua.NodeId(ua.ObjectIds.BaseEventType)
+    try:
+        return ua.NodeId.from_string(text)
+    except Exception as exc:
+        raise InvalidNodeIdError(f"The event type NodeId {text!r} cannot be parsed.") from exc
 
 
 class _LiveEventsHandler(EventNotificationHandlerAsync):
@@ -471,44 +603,7 @@ class LiveEvents:
             self._refresh_ended += 1
 
     def _build_notification(self, event: Any) -> EventNotification:
-        fields: dict[str, str] = {}
-        names = getattr(event, "data_types", None) or {}
-        for name in names:
-            if name in _INTERNAL_EVENT_ATTRIBUTES:
-                continue
-            fields[str(name)] = event_field_text(getattr(event, name, None))
-
-        event_type_value = getattr(event, "EventType", None)
-        severity_value = getattr(event, "Severity", None)
-        if isinstance(severity_value, ua.Variant):
-            severity_value = severity_value.Value
-        try:
-            severity = int(severity_value) if severity_value is not None else None
-        except (TypeError, ValueError):  # pragma: no cover - defensive
-            severity = None
-
-        condition_node_id = ""
-        if _selects_condition_fields(event):
-            # ConditionId/NodeId identify the condition; the demo server leaves
-            # both empty, where SourceNode is the condition object by definition.
-            condition_node_id = (
-                fields.get("ConditionId") or fields.get("NodeId") or fields.get("SourceNode", "")
-            )
-
-        return EventNotification(
-            sequence=0,
-            event_type=event_type_name(event_type_value),
-            event_type_id=event_type_id(event_type_value),
-            source_node=fields.get("SourceNode", ""),
-            source_name=fields.get("SourceName", ""),
-            severity=severity,
-            message=fields.get("Message", ""),
-            time=fields.get("Time") or None,
-            receive_time=fields.get("ReceiveTime") or None,
-            event_id=fields.get("EventId", ""),
-            condition_node_id=condition_node_id,
-            fields=fields,
-        )
+        return build_notification(event)
 
     def _handle_status_change(self, status: Any) -> None:
         code = getattr(status, "Status", status)
@@ -524,20 +619,123 @@ class LiveEvents:
     # -- configuration -----------------------------------------------------
     @staticmethod
     def _parse_event_type(text: str) -> ua.NodeId:
-        if not text:
-            return ua.NodeId(ua.ObjectIds.BaseEventType)
-        try:
-            return ua.NodeId.from_string(text)
-        except Exception as exc:
-            raise InvalidNodeIdError(f"The event type NodeId {text!r} cannot be parsed.") from exc
+        return _parse_event_type(text)
+
+
+async def read_event_history(
+    session: Any, node_id: Any, config: EventHistoryConfig
+) -> EventHistoryResult:
+    """Read the stored events of one source node, oldest first.
+
+    One ``ReadEventDetails`` request per page, continuation points followed up to
+    a fixed cap and released when they are not followed. The server decides what
+    it kept and in which order; this client only bounds the range and the count
+    and sorts the decoded events chronologically for display.
+    """
+    settings = config.normalised()
+    if settings.start and settings.end and settings.start > settings.end:
+        raise OpcUaExplorerError("The event-history start time must not be after the end time.")
+
+    node_id_string = to_node_id(node_id).to_string()
+    event_type = _parse_event_type(settings.event_type_node_id)
+    select_clauses = build_event_history_filter(event_type, settings).SelectClauses
+    started = time.perf_counter()
+    events: list[EventNotification] = []
+    status = "Good"
+    detail = ""
+    truncated = False
+    pages = 0
+    continuation = b""
+
+    try:
+        while True:
+            params = build_event_history_request(
+                node_id_string, settings, continuation_point=continuation
+            )
+            results = await session.history_read(params)
+            pages += 1
+            if not results:
+                status = "BadNoResult"
+                detail = "The server returned no HistoryRead result."
+                break
+
+            result = results[0]
+            if not result.StatusCode.is_good():
+                status = status_name(result.StatusCode)
+                detail = f"HistoryRead returned {status}."
+                break
+
+            history_data = getattr(result, "HistoryData", None)
+            field_lists = getattr(history_data, "Events", None) or []
+            for field_list in field_lists:
+                fields = list(getattr(field_list, "EventFields", None) or [])
+                event = UaEvent.from_event_fields(select_clauses, fields)
+                events.append(build_notification(event, sequence=len(events) + 1))
+
+            continuation = getattr(result, "ContinuationPoint", b"") or b""
+            if not continuation:
+                break
+
+            if len(events) >= settings.max_values:
+                await _release_event_continuation(session, node_id_string, settings, continuation)
+                continuation = b""
+                truncated = True
+                detail = "Stopped at the requested maximum number of events."
+                break
+
+            if pages >= _MAX_HISTORY_PAGES:
+                await _release_event_continuation(session, node_id_string, settings, continuation)
+                continuation = b""
+                truncated = True
+                detail = f"Stopped after {pages} pages."
+                break
+    finally:
+        if continuation:  # pragma: no cover - best effort on cancellation
+            await _release_event_continuation(session, node_id_string, settings, continuation)
+
+    events.sort(key=lambda event: event.time or event.receive_time or "")
+    if len(events) > settings.max_values:
+        events = events[-settings.max_values :]
+        truncated = True
+        detail = detail or "Stopped at the requested maximum number of events."
+
+    if status == "Good" and not events:
+        detail = detail or "The server returned no stored events for this source and range."
+
+    return EventHistoryResult(
+        node_id=node_id_string,
+        events=events,
+        status=status,
+        truncated=truncated,
+        requested_max_values=settings.max_values,
+        pages=pages,
+        detail=detail,
+        duration_ms=round((time.perf_counter() - started) * 1000.0, 2),
+        received_at=utc_now(),
+    )
+
+
+async def _release_event_continuation(
+    session: Any, node_id: str, config: EventHistoryConfig, continuation: bytes
+) -> None:
+    with contextlib.suppress(Exception):
+        await session.history_read(
+            build_event_history_request(
+                node_id, config, continuation_point=continuation, release=True
+            )
+        )
 
 
 __all__ = [
     "BASE_EVENT_TYPE_NODE_ID",
     "SERVER_OBJECT_NODE_ID",
     "LiveEvents",
+    "build_event_history_filter",
+    "build_event_history_request",
+    "build_notification",
     "event_field_text",
     "event_id_bytes",
     "event_type_id",
     "event_type_name",
+    "read_event_history",
 ]

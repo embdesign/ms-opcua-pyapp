@@ -18,6 +18,11 @@ DEFAULT_EVENT_KEEP_ROWS = 2_000
 DEFAULT_HISTORY_MAX_VALUES = 1_000
 MAX_HISTORY_MAX_VALUES = 10_000
 
+#: Values one ``HistoryUpdate`` request may carry. One request, one node, no batch
+#: over nodes; the bound keeps a typed list from becoming an unbounded upload.
+DEFAULT_HISTORY_UPDATE_ENTRIES = 100
+MAX_HISTORY_UPDATE_ENTRIES = 1_000
+
 DEFAULT_PUBLISHING_INTERVAL_MS = 500.0
 DEFAULT_SAMPLING_INTERVAL_MS = 250.0
 #: Event subscriptions publish whole event fields, so a slower default than a

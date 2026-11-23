@@ -19,6 +19,42 @@ from opcua_explorer.opcua.write_service import CallOutcome
 from .gui_support import connect_window, free_port, start_demo_server, stop_demo_server
 
 
+def test_events_tab_reads_stored_events_and_marks_them(qapp, tmp_path) -> None:
+    port = free_port()
+    server = start_demo_server(port, "--event-history", "--event-interval", "0.3", "--no-updates")
+    runner = AsyncRunner()
+    runner.start()
+    service = OpcUaService(trust_store=TrustStore(tmp_path / "trust.json"))
+    window = MainWindow(runner, service, AppSettings())
+    try:
+        connect_window(window, port, qapp)
+        tab = window.events_tab
+        window.show_tab(tab)
+        # Give the demo a moment to historize a few events.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        tab.history_options.set_visible(True)
+        tab.read_history_btn.click()
+        deadline = time.monotonic() + 30
+        while tab._stored_events == 0 and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.03)
+
+        assert tab._stored_events > 0, tab.status_label.text()
+        assert tab.events_table.rowCount() > 0
+        assert tab.events_table.item(0, 0).text() == "stored"
+        assert "stored event" in tab.status_label.text().lower()
+        assert "stored" in tab.counters_label.text()
+    finally:
+        window.shutdown()
+        runner.run_until_complete(service.shutdown, timeout=8.0)
+        runner.stop()
+        stop_demo_server(server)
+
+
 def test_events_tab_streams_events_and_stops(qapp, tmp_path) -> None:
     port = free_port()
     server = start_demo_server(port, "--event-interval", "0.3", "--no-updates")

@@ -198,6 +198,63 @@ def node_delete_confirmation(*, endpoint_url: str, node_id: str) -> str:
     )
 
 
+def history_update_confirmation(
+    *,
+    endpoint_url: str,
+    action: str,
+    node_id: str,
+    count: int = 0,
+    entries_preview: str = "",
+    start: str = "",
+    end: str = "",
+) -> str:
+    """Confirmation body for one ``HistoryUpdate`` from the History tab or CLI.
+
+    A history update is not a Write: it changes what the server's historian
+    stores. The text says so, names the exact node/range/values, and never
+    promises that a read-back proves persistence.
+    """
+    action_key = str(action or "").strip().lower()
+    if action_key == "delete":
+        operation = f"DELETE the stored values of {node_id} between {start or '(open)'} and {end or '(open)'}"
+    elif action_key == "replace":
+        operation = f"REPLACE {count} stored value(s) of {node_id}"
+    else:
+        operation = f"INSERT {count} stored value(s) into {node_id}"
+    lines = [
+        f"Endpoint: {endpoint_url}",
+        "",
+        "Exactly one HistoryUpdate request will be sent:",
+        f"  {operation}",
+    ]
+    if entries_preview:
+        lines.append(f"  Values: {entries_preview}")
+    lines.extend(
+        [
+            "",
+            "This writes into the server's history store, not the variable's live value: it does not change "
+            "what the device currently reports. The values were parsed with the server's DataType/ValueRank "
+            "and are sent once, never retried. There is no undo. Servers usually allow history updates only "
+            "for privileged users, so a refusal is reported with its StatusCode. A read-back afterwards "
+            "reports which requested timestamps are present; it is evidence, not proof that the historian "
+            "kept them.",
+            "",
+            EQUIPMENT_WARNING,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def condition_state_text() -> str:
+    """What the alarm summary's state read does and does not do."""
+    return (
+        "The alarm summary reads each condition object's own AckedState, ConfirmedState, EnabledState and "
+        "Retain variables once, when you ask for it. Nothing is inferred from an event, no state is tracked "
+        "between reads, and no method is called: an acknowledgement is still a separate, confirmed action. A "
+        "state the condition does not expose is shown as not exposed, never as False."
+    )
+
+
 #: What each condition method does to the condition, in the operator's words. One
 #: definition, because the GUI dialog, the CLI note and the report line all say it.
 _CONDITION_ACTION_CONSEQUENCES = {

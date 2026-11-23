@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlsplit
@@ -58,6 +59,24 @@ from .opcua.security import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def parse_iso_time(text: str | None, name: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp; a bare value is taken as UTC.
+
+    Shared by the history and event front ends, so ``--from``/``--to`` mean the
+    same thing in both and neither accepts a local-time guess.
+    """
+    if not text:
+        return None
+    value = text.strip()
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise CliError(f"{name} must be an ISO-8601 timestamp, for example 2026-11-21T10:00:00Z.") from exc
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
 
 #: Objects folder: the useful default root (Root itself is mostly the type system).
 DEFAULT_ROOT = "i=85"

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_explorer.opcua import node_management, write_service
+from opcua_explorer.opcua import history_service, node_management, write_service
 
 #: Modules documented as importing neither asyncua nor Qt (``docs/architecture.md`` §2).
 _PURE_MODULES = (
@@ -55,10 +55,23 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "opcua_explorer"
 _SEND_MODULE = "opcua/write_service.py"
 #: The only module that may send AddNodes/DeleteNodes.
 _STRUCTURE_MODULE = "opcua/node_management.py"
+#: The only module that may send a HistoryUpdate.
+_HISTORY_UPDATE_MODULE = "opcua/history_service.py"
 #: The demo server writes its own local model and is never a client.
 _SEND_EXEMPT_PREFIXES = ("demo/",)
 _SEND_ATTRIBUTES = ("write_value", "call_method")
 _STRUCTURE_ATTRIBUTES = ("add_nodes", "delete_nodes")
+_HISTORY_UPDATE_ATTRIBUTES = ("history_update",)
+#: Calls the read-only condition-state reader must never make.
+_MUTATING_ATTRIBUTES = (
+    "write_value",
+    "call_method",
+    "history_update",
+    "add_nodes",
+    "delete_nodes",
+    "condition_action",
+    "refresh_conditions",
+)
 
 
 def _send_call_sites() -> dict[str, list[int]]:
@@ -117,6 +130,33 @@ def _structure_call_sites() -> dict[str, list[int]]:
 def test_only_node_management_sends_add_or_delete_nodes() -> None:
     sites = _structure_call_sites()
     assert sites == {}, f"send AddNodes/DeleteNodes through opcua/node_management.py instead: {sites}"
+
+
+def _attribute_call_sites(attributes: tuple[str, ...]) -> dict[str, list[int]]:
+    sites: dict[str, list[int]] = {}
+    for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
+        relative = path.relative_to(_PACKAGE_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr in attributes:
+                sites.setdefault(relative, []).append(node.lineno)
+    return sites
+
+
+def test_only_history_service_sends_a_history_update() -> None:
+    sites = _attribute_call_sites(_HISTORY_UPDATE_ATTRIBUTES)
+    assert set(sites) == {_HISTORY_UPDATE_MODULE}, (
+        "send a HistoryUpdate only through opcua/history_service.py: " f"{sites}"
+    )
+
+
+def test_condition_state_reader_is_read_only() -> None:
+    sites = _attribute_call_sites(_MUTATING_ATTRIBUTES)
+    assert "opcua/condition_state.py" not in sites, (
+        "opcua/condition_state.py must only browse and read: " f"{sites.get('opcua/condition_state.py')}"
+    )
 
 
 def test_node_management_requires_an_authority() -> None:
@@ -192,6 +232,7 @@ def test_cli_front_ends_do_not_import_asyncua() -> None:
         "cli_read.py",
         "cli_monitor.py",
         "cli_events.py",
+        "cli_conditions.py",
         "cli_history.py",
         "cli_write.py",
         "cli_check.py",
@@ -226,3 +267,11 @@ def test_every_send_requires_an_authority() -> None:
         assert parameter is not None, f"{name} must state the authority it sends under"
         assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, f"{name}: authorization must be keyword-only"
         assert parameter.default is inspect.Parameter.empty, f"{name}: authorization must not have a default"
+
+
+@pytest.mark.parametrize("name", ["history_update", "send_prepared_history_update"])
+def test_history_update_requires_an_authority(name: str) -> None:
+    parameter = inspect.signature(getattr(history_service, name)).parameters.get("authorization")
+    assert parameter is not None, f"{name} must state the authority it sends under"
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, f"{name}: authorization must be keyword-only"
+    assert parameter.default is inspect.Parameter.empty, f"{name}: authorization must not have a default"

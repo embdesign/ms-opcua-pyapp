@@ -64,3 +64,51 @@ def test_text_output_starts_with_the_summary(capsys) -> None:
     lines = capsys.readouterr().out.splitlines()
     assert "2 value(s)" in lines[0]
     assert "21.5" in lines[1]
+
+
+def _update_args(*extra: str):
+    return cli_history.build_parser().parse_args(
+        ["--endpoint", ENDPOINT, "--node", "ns=2;s=Temperature", *extra]
+    )
+
+
+def test_update_requires_confirm_before_anything_connects() -> None:
+    args = _update_args("--update", "insert", "--entry", "2026-11-21T10:00:00Z=21.5")
+
+    with pytest.raises(CliError, match="--confirm"):
+        cli_history._update_config(args)
+
+
+def test_update_insert_needs_entries_and_delete_needs_a_range() -> None:
+    with pytest.raises(CliError, match="at least one --entry"):
+        cli_history._update_config(_update_args("--update", "replace", "--confirm"))
+    with pytest.raises(CliError, match="needs --from and --to"):
+        cli_history._update_config(_update_args("--update", "delete", "--confirm"))
+    with pytest.raises(CliError, match="not --entry"):
+        cli_history._update_config(
+            _update_args(
+                "--update",
+                "delete",
+                "--from",
+                "2026-11-21T10:00:00Z",
+                "--to",
+                "2026-11-21T11:00:00Z",
+                "--entry",
+                "2026-11-21T10:00:00Z=1",
+                "--confirm",
+            )
+        )
+
+
+def test_update_entries_keep_an_equals_sign_in_the_value() -> None:
+    config = cli_history._update_config(
+        _update_args("--update", "insert", "--entry", "2026-11-21T10:00:00Z=a=b", "--confirm")
+    )
+
+    assert config is not None
+    assert config.entries[0].value_text == "a=b"
+
+
+def test_entries_without_update_are_refused() -> None:
+    with pytest.raises(CliError, match="only apply together with --update"):
+        cli_history._update_config(_update_args("--entry", "2026-11-21T10:00:00Z=1"))

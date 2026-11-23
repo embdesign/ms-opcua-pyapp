@@ -1,8 +1,9 @@
-"""Event-subscription configuration and notification records.
+"""Event-subscription, stored-event and condition-state records.
 
 Condition events additionally carry the identity needed for the guarded condition
 methods (Acknowledge, Confirm, Enable, Disable, AddComment); this data alone never
-writes anything.
+writes anything. Condition *state* is read on demand from the condition object's
+own variables - never inferred from an event and never cached as client state.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from typing import Any
 
 from ..defaults import (
     DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_HISTORY_MAX_VALUES,
+    MAX_HISTORY_MAX_VALUES,
     MAX_PUBLISHING_INTERVAL_MS,
     MIN_EVENT_PUBLISHING_INTERVAL_MS,
 )
@@ -57,6 +60,14 @@ CONDITION_ACTION_LABELS = {
     "disable": "Disable",
     "comment": "Add comment",
 }
+
+#: State variables the alarm summary reads from a condition object, in display
+#: order. They are resolved by standard browse name below the condition node; the
+#: client never invents a NodeId for them. A condition that does not expose one is
+#: reported as "not exposed", never as False.
+CONDITION_STATE_PROPERTIES = ("AckedState", "ConfirmedState", "EnabledState", "Retain")
+#: Optional descriptive properties read together with the states.
+CONDITION_SUMMARY_PROPERTIES = ("ConditionName", "LastSeverity")
 
 
 def condition_action_label(action: str) -> str:
@@ -247,3 +258,185 @@ class EventStart:
             f"Subscription {self.subscription_id}: {accepted} of {len(self.sources)} event source(s) active; "
             f"requested publishing interval {self.requested_publishing_interval_ms:.0f} ms."
         )
+
+
+@dataclass(slots=True)
+class EventHistoryConfig:
+    """Bounds and filter of one ``HistoryRead`` of stored events.
+
+    ``event_type_node_id`` selects the fields, exactly as for a live subscription;
+    the same standard fields are always selected so the summary columns work.
+    ``min_severity`` is a server-side ``WhereClause``.
+    """
+
+    start: datetime | None = None
+    end: datetime | None = None
+    max_values: int = DEFAULT_HISTORY_MAX_VALUES
+    event_type_node_id: str = ""
+    select_fields: list[str] = field(default_factory=list)
+    min_severity: int | None = None
+
+    def normalised(self) -> EventHistoryConfig:
+        fields: list[str] = []
+        for name in self.select_fields:
+            cleaned = str(name).strip()
+            if cleaned and cleaned not in fields:
+                fields.append(cleaned)
+        return EventHistoryConfig(
+            start=self.start,
+            end=self.end,
+            max_values=min(MAX_HISTORY_MAX_VALUES, max(1, int(self.max_values))),
+            event_type_node_id=str(self.event_type_node_id or "").strip(),
+            select_fields=fields,
+            min_severity=None if self.min_severity is None else max(0, min(int(self.min_severity), 65_535)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start": iso_utc(self.start),
+            "end": iso_utc(self.end),
+            "max_values": self.max_values,
+            "event_type_node_id": self.event_type_node_id,
+            "select_fields": list(self.select_fields),
+            "min_severity": self.min_severity,
+        }
+
+
+@dataclass(slots=True)
+class EventHistoryResult:
+    """Stored events of one source node, oldest first.
+
+    A Good StatusCode with no events is normal: the source may not be historized,
+    or the range may be empty. The server decides what it kept.
+    """
+
+    node_id: str
+    events: list[EventNotification] = field(default_factory=list)
+    status: str = "Good"
+    truncated: bool = False
+    requested_max_values: int = 0
+    pages: int = 0
+    detail: str = ""
+    duration_ms: float = 0.0
+    received_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        parts = [f"Stored events of {self.node_id}: {len(self.events)} event(s)"]
+        if self.status != "Good":
+            parts.append(f"HistoryRead {self.status}")
+        if self.truncated:
+            parts.append("truncated at the requested maximum")
+        if self.detail:
+            parts.append(self.detail)
+        return "; ".join(parts) + "."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "status": self.status,
+            "truncated": self.truncated,
+            "requested_max_values": self.requested_max_values,
+            "pages": self.pages,
+            "detail": self.detail,
+            "duration_ms": self.duration_ms,
+            "events": [event.to_dict() for event in self.events],
+            "received_at_utc": iso_utc(self.received_at),
+        }
+
+
+@dataclass(slots=True)
+class ConditionState:
+    """The state variables of one condition object, as the server reports them.
+
+    ``acked_state``/``confirmed_state``/``enabled_state`` are the display text of
+    the ``TwoStateVariableType``/``ConditionVariableType`` Value; the matching
+    ``*_id`` is its Boolean ``Id`` property (the machine-readable state). A state
+    the condition does not expose is ``""``/``None`` and named in ``missing``.
+    """
+
+    node_id: str
+    condition_name: str = ""
+    acked_state: str = ""
+    acked_id: bool | None = None
+    confirmed_state: str = ""
+    confirmed_id: bool | None = None
+    enabled_state: str = ""
+    enabled_id: bool | None = None
+    retain: bool | None = None
+    last_severity: int | None = None
+    missing: list[str] = field(default_factory=list)
+    status: str = "Good"
+    detail: str = ""
+
+    def acked_text(self) -> str:
+        return _state_text(self.acked_state, self.acked_id)
+
+    def confirmed_text(self) -> str:
+        return _state_text(self.confirmed_state, self.confirmed_id)
+
+    def enabled_text(self) -> str:
+        return _state_text(self.enabled_state, self.enabled_id)
+
+    def retain_text(self) -> str:
+        return "not exposed" if self.retain is None else ("True" if self.retain else "False")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "condition_name": self.condition_name,
+            "acked_state": self.acked_state,
+            "acked_id": self.acked_id,
+            "confirmed_state": self.confirmed_state,
+            "confirmed_id": self.confirmed_id,
+            "enabled_state": self.enabled_state,
+            "enabled_id": self.enabled_id,
+            "retain": self.retain,
+            "last_severity": self.last_severity,
+            "missing": list(self.missing),
+            "status": self.status,
+            "detail": self.detail,
+        }
+
+
+def _state_text(text: str, value: bool | None) -> str:
+    if text:
+        return text
+    if value is None:
+        return "not exposed"
+    return "True" if value else "False"
+
+
+@dataclass(slots=True)
+class ConditionStateSnapshot:
+    """On-demand state of several condition objects, read once.
+
+    This is a read of the server's own state variables at one moment, not a
+    client-side condition model: nothing is tracked between reads and no state is
+    derived from an event.
+    """
+
+    conditions: list[ConditionState] = field(default_factory=list)
+    status: str = "Good"
+    detail: str = ""
+    duration_ms: float = 0.0
+    received_at: datetime = field(default_factory=utc_now)
+
+    def summary_text(self) -> str:
+        if not self.conditions:
+            return "No condition object was read."
+        missing = sum(1 for condition in self.conditions if condition.missing)
+        parts = [f"State of {len(self.conditions)} condition(s) read on demand"]
+        if missing:
+            parts.append(f"{missing} expose no state variable")
+        if self.detail:
+            parts.append(self.detail)
+        return "; ".join(parts) + "."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "detail": self.detail,
+            "duration_ms": self.duration_ms,
+            "conditions": [condition.to_dict() for condition in self.conditions],
+            "received_at_utc": iso_utc(self.received_at),
+        }

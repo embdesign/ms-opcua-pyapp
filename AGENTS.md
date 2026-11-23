@@ -9,10 +9,11 @@ Read this before changing code. It records only facts verified in this tree.
 - Runtime dependencies are pinned: `asyncua==2.1.0`, `PySide6==6.11.3`, `cryptography==50.0.2`. Optional extra `validation` = `lxml`.
   Dev group: `pytest`, `pytest-asyncio`, `pytest-xdist`, `lxml`.
 - Desktop OPC UA client: discovery/security/identity, lazy browser, bounded address-space download,
-  JSON/CSV/NodeSet2 export, headless NodeSet2 export (`opcua-export`), live monitoring, read-only functional
-  checks, guarded single-target write/method call, JSON/HTML reports, address-space comparison (`opcua-compare`
-  and the Compare tab), operator-written control sequences (`opcua-run-sequence` and the Sequences tab), demo
-  server. One window may host several independent sessions.
+  JSON/CSV/NodeSet2 export, headless NodeSet2 export (`opcua-export`), live monitoring, stored-event reads and an
+  on-demand alarm summary, read-only functional checks, guarded single-target write/method call, one confirmed
+  `HistoryUpdate`, JSON/HTML reports, address-space comparison (`opcua-compare` and the Compare tab),
+  operator-written control sequences (`opcua-run-sequence` and the Sequences tab), demo server. One window may
+  host several independent sessions.
 - Validation document: `docs/api-verification.md`. Never invent an asyncua API or behaviour; verify it there
   or against the installed package first.
 
@@ -20,17 +21,18 @@ Read this before changing code. It records only facts verified in this tree.
 
 ```bash
 uv sync                                   # create .venv + dev group (use --reinstall after moving the folder)
-uv run pytest -q                           # full suite, 853 passed (≈8–15 min depending on host load)
+uv run pytest -q                           # full suite, 900 passed (≈8–15 min depending on host load)
 uv run pytest -n auto --dist loadscope     # same suite in parallel (module-scoped qapp stays on one worker)
-uv run pytest tests/unit -q                # fast subset, 625 passed, ~8 s
+uv run pytest tests/unit -q                # fast subset, 661 passed, ~8 s
 uvx ruff check src tests scripts           # clean; config lives in pyproject.toml
 uv run opcua-explorer                      # launch the GUI
 uv run opcua-export --help                 # headless NodeSet2 export (Qt-free)
 uv run opcua-compare --help                # headless comparison of two servers (Qt-free, read-only)
 uv run opcua-read --help                   # headless attribute read (Qt-free)
 uv run opcua-monitor --help                # headless live data-change monitor (Qt-free)
-uv run opcua-events --help                 # headless events + ConditionRefresh/confirmed Acknowledge (Qt-free)
-uv run opcua-history --help                # headless raw-history read (Qt-free)
+uv run opcua-events --help                 # headless events + stored events + ConditionRefresh/confirmed Acknowledge (Qt-free)
+uv run opcua-conditions --help             # headless alarm summary: condition state read on demand (Qt-free)
+uv run opcua-history --help                # headless history read + confirmed HistoryUpdate (Qt-free)
 uv run opcua-write --help                  # headless guarded single write (Qt-free, needs --confirm)
 uv run opcua-check --help                  # headless functional checks + Reports tab suite (Qt-free)
 uv run opcua-status --help                 # headless ServerStatus/diagnostics read (Qt-free, read-only)
@@ -139,12 +141,24 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
 - Functional check primitives live in `opcua/check_support.py`; guarded write/method-call checks live in
   `opcua/guarded_operations.py`. `opcua/test_runner.py` keeps the read-only checks, orchestration and the
   public `FunctionalTestRunner` / `run_functional_tests` / `CheckSkipped` / `environment_info` names.
-- History is read-only: `opcua/history_service.py` is the single `HistoryRead` implementation
-  (`build_history_request` → `read_history`). It uses `session.history_read` (there is no `Client.history_read`
-  in asyncua 2.1.0), releases continuation points, and never sends `HistoryUpdate`. Raw is the default; one
-  aggregate (average/minimum/maximum/count) uses `ReadProcessedDetails` and requires both start and end
-  (`AggregateType` is a NodeId list). Do not add at-time, event-history or other aggregate paths without a
-  verified asyncua API; a server that does not support aggregates is reported with its StatusCode.
+- History lives in `opcua/history_service.py`: it is the single `HistoryRead` implementation
+  (`build_history_request` → `read_history`) **and** the single `HistoryUpdate` implementation
+  (`prepare_history_update` → `send_prepared_history_update` → `history_update`). It uses `session.history_read` /
+  `session.history_update` (there is no `Client.history_read`/`history_update` beyond that delegation in asyncua
+  2.1.0) and releases continuation points. Raw is the default; one aggregate
+  (average/minimum/maximum/count) uses `ReadProcessedDetails` and requires both start and end (`AggregateType` is
+  a NodeId list). Do not add at-time, modified-history or other aggregate paths without a verified asyncua API; a
+  server that does not support aggregates is reported with its StatusCode.
+  `HistoryUpdate` is **insert/replace/delete on one node only**: values are parsed with the server's
+  DataType/ValueRank, the send states a keyword-only `WriteAuthority` (no default), the request is sent once and
+  never retried, and the read-back is reported as evidence (which requested timestamps are present) rather than
+  as proof of persistence. `tests/unit/test_layer_boundaries.py` enforces that no other module calls
+  `history_update`. The GUI previews through `history_update_preview` and confirms with
+  `operator_text.history_update_confirmation`; `opcua-history --update` is the headless twin.
+- Stored events are read by `opcua/event_service.py::read_event_history` (one `ReadEventDetails` per page) and
+  use the **same** `build_event_filter`/`build_notification` mapping as a live subscription, so a field is never
+  named one way in the live log and another way in history. A stored row is marked *stored* in the GUI; the
+  client never keeps event history itself.
 - There is exactly **one** write/method-call/restore implementation: `opcua/write_service.py`
   (`prepare_write` → `send_prepared_write`, `prepare_call` → `send_prepared_call`, `restore_value`, and the only
   non-Value path `prepare_attribute_write` → `send_prepared_attribute_write` for `DisplayName`/`Description`). The
@@ -170,9 +184,14 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   `operator_text.condition_action_confirmation` (which says what that one method does and does not do). The
   method is resolved below the condition node by its standard browse name (`models.CONDITION_ACTION_METHODS`),
   never by a NodeId the client invents; `InputArguments` must be (ByteString, LocalizedText) or nothing is sent;
-  one action per call, never retried, and a method the condition does not expose is reported as missing. The
-  client keeps **no condition state** (`AckedState`/`ConfirmedState`/`EnabledState` are never tracked or
-  inferred), and there is no automatic acknowledgement. Event notifications stay read-only.
+  one action per call, never retried, and a method the condition does not expose is reported as missing.
+  Condition **state is read on demand, never tracked**: `opcua/condition_state.py::read_condition_states`
+  browses each condition object for its standard `AckedState`/`ConfirmedState`/`EnabledState`/`Retain`
+  components (and their Boolean `Id` properties) and reads them once. It never infers a state from an event,
+  never caches it, never calls a method and never writes; a state the condition does not expose is reported as
+  *not exposed*, never as `False`. The Events tab's alarm summary and `opcua-conditions` call the same function;
+  `tests/unit/test_layer_boundaries.py` guards that the module stays read-only. There is no automatic
+  acknowledgement and no transition history. Event notifications stay read-only.
 - The tab's **unguarded** action is **Refresh conditions**: it sends one
   `ConditionRefresh` (`i=3875`, one `UInt32` SubscriptionId) through `write_service.refresh_conditions`, with
   `WriteAuthority("operator-dialog", …)` recorded but **no dialog**, because it stores, acknowledges and changes
@@ -251,10 +270,11 @@ uv run python scripts/generate_example_comparison.py   # examples/sample-compari
   browse-path fallback only when unambiguous, values only for nodes named in the config, and a separate
   `not_comparable` bucket. Do not make it read, connect, or import asyncua/Qt; the front end does that.
 - `cli.py` (`opcua-export`), `cli_compare.py` (`opcua-compare`), `cli_read.py`, `cli_monitor.py`,
-  `cli_events.py`, `cli_history.py`, `cli_write.py`, `cli_check.py`, `cli_status.py`, `cli_nodes.py`,
-  `cli_directory.py`, `cli_certificate.py` and `cli_sequence.py` (`opcua-run-sequence`)
+  `cli_events.py`, `cli_conditions.py`, `cli_history.py`, `cli_write.py`, `cli_check.py`, `cli_status.py`,
+  `cli_nodes.py`, `cli_directory.py`, `cli_certificate.py` and `cli_sequence.py` (`opcua-run-sequence`)
   are Qt-free front ends, not second implementations: they must keep calling `OpcUaService.download()` /
-  `export_nodeset2()` / `compare_address_spaces()` / `run_sequence()` and print the existing summary texts.
+  `export_nodeset2()` / `compare_address_spaces()` / `history_update_preview()` / `write_history()` /
+  `read_condition_states()` / `run_sequence()` and print the existing summary texts.
   `cli_compare.py` and `cli_sequence.py` import the connection, traversal and certificate-approval helpers from
   `cli.py`; do not copy them. Passwords are only accepted through `--password-env` or an interactive prompt,
   never as an argument, and a secure connection still requires an explicit certificate decision (trust store,

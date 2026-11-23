@@ -15,9 +15,9 @@ covered by tests, including the device-independent sequence runner for operator-
 | NodeSet2 | Dependency closure (parents, supertypes, type definitions, encodings, type members, method argument properties), missing-dependency and unsupported-DataType reports, optional XSD validation |
 | Headless export | `opcua-export` command (Qt-free): same download/NodeSet2 pipeline as the GUI, endpoint/scope/namespace/security options, JSON manifest, explicit certificate approval, exit codes for scripting |
 | Live monitoring | One data-change subscription per session, in-place latest values, bounded notification log with `Export log…` (versioned JSON/CSV of the rows held), a trend chart of the selected node built from the notifications that arrived (receive-time axis, non-numeric values counted, bounded buffer that names what it dropped), pause/clear, add/remove while running, configurable intervals, optional `DataChangeFilter` (trigger + absolute/percent deadband), `SetMonitoringMode` (Reporting/Sampling/Disabled) and live interval changes by `ModifySubscription`/`ModifyMonitoredItems` |
-| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail and `Export log…` (versioned JSON/CSV of the rows held), add/remove sources while running, per-source StatusCode reporting, the five condition methods of the selected event (one confirmed `Acknowledge`, `Confirm`, `Enable`, `Disable` or `AddComment` call each, sent once) and one unconfirmed `ConditionRefresh` call on the running subscription (never retried) |
+| Events | One event subscription per session on explicit source nodes, server-driven field selection (BaseEventType or a named type), bounded event log with per-field detail and `Export log…` (versioned JSON/CSV of the rows held), add/remove sources while running, per-source StatusCode reporting, the five condition methods of the selected event (one confirmed `Acknowledge`, `Confirm`, `Enable`, `Disable` or `AddComment` call each, sent once), one unconfirmed `ConditionRefresh` call on the running subscription (never retried), stored-event reads (`ReadEventDetails` on one source, same filter and field mapping, rows marked *stored*, also `opcua-events --history`) and an on-demand **alarm summary** that reads each condition object's `AckedState`/`ConfirmedState`/`EnabledState`/`Retain` (also `opcua-conditions`) |
 | Server status | One batched Read of ServerStatus (state, times, uptime, shutdown fields), the ServerDiagnostics summary, ServerCapabilities limits and this session's live-monitor view; optional null values are reported as not provided. The same snapshot is available headlessly through `opcua-status` |
-| History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error |
+| History | `HistoryRead` of one variable with an optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval); continuation points are followed up to a fixed limit and released, values are decoded and sorted oldest-first, the numeric values are also drawn as a trend chart, and a non-historizing node is reported as such instead of as an error. One confirmed `HistoryUpdate` per request — insert/replace parsed values or delete a range on one node — after a preview, with a single send and a read-back that reports which requested timestamps are present (also `opcua-history --update`) |
 | Functional tests | 11 checks (discovery, session, namespaces, browse root/target, attributes, value read, subscription creation/notifications, latency, opt-in connection recovery), plus guarded single-target write and method-call checks (below); the same suite runs headlessly through `opcua-check` and writes the same JSON/HTML report |
 | Node management | One confirmed `AddNodes` (an `Object` or `Variable` below a parent, server-assigned NodeId, read back) and one confirmed `DeleteNodes` (references deleted with the node, verified by reading it again) in the **Write & call** page, and headlessly through `opcua-nodes` (also for a `DisplayName`/`Description` write); admin-only on `UserRole.Admin` servers |
 | Guarded operations | Interactive **Write & call** page (one confirmed write with read-back and optional verified restore, one confirmed `DisplayName`/`Description` write with read-back, one confirmed method call with the server's `InputArguments` and output) plus single-target write and method-call checks, DataType/ValueRank and `InputArguments` validation, explicit confirmation, optional restore, read-back verification |
@@ -34,9 +34,10 @@ src/opcua_explorer/
 ├── gui/            window shell, one workspace per session, tabs, Qt↔asyncio bridge
 ├── cli.py          opcua-export: headless NodeSet2 export (same services, no Qt)
 ├── opcua/          client service, security, browse, attributes, traversal, serialize,
-│                   monitor, events, NodeSet2 (+ validation), check support, test runner,
-│                   guarded operations, write service, type support, path support,
-│                   sequence runner, shared UA names
+│                   monitor, events (+ stored events), condition state, NodeSet2
+│                   (+ validation), check support, test runner, guarded operations,
+│                   write service, history (read + one update), type support, path
+│                   support, sequence runner, shared UA names
 ├── exporters/      JSON and CSV writers, JSON snapshot loader
 ├── models/         plain dataclasses shared by every layer (one module per feature cluster)
 ├── config.py       settings, profiles, trust store
@@ -51,7 +52,8 @@ src/opcua_explorer/
 ├── cli_compare.py  opcua-compare: headless comparison (same services, no Qt)
 ├── cli_read.py     opcua-read: headless attribute read (Qt-free)
 ├── cli_monitor.py  opcua-monitor: headless data-change monitor (Qt-free)
-├── cli_history.py  opcua-history: headless raw-history read (Qt-free)
+├── cli_history.py  opcua-history: headless history read + one confirmed HistoryUpdate (Qt-free)
+├── cli_conditions.py  opcua-conditions: headless alarm summary, condition state read on demand (Qt-free)
 ├── cli_write.py    opcua-write: headless guarded single write (Qt-free, --confirm)
 ├── cli_sequence.py opcua-run-sequence: headless run of a sequence document (Qt-free)
 ├── cli_certificate.py  opcua-certificate: local certificate / CSR creation (Qt-free)
@@ -66,8 +68,8 @@ Recent changes and verification history are in `HANDOFF.md`.
 
 ```bash
 uv sync
-uv run pytest -q                  # 853 passed, ~8–15 min
-uv run pytest tests/unit -q       # 625 passed, ~8 s
+uv run pytest -q                  # 900 passed, ~8–15 min
+uv run pytest tests/unit -q       # 661 passed, ~8 s
 uvx ruff check src tests scripts  # clean
 uv run opcua-explorer             # launch the GUI
 uv run opcua-export --help        # headless NodeSet2 export
@@ -94,18 +96,23 @@ Integration tests start in-process demo servers on free loopback ports; GUI test
 - The server directory is a lookup only: one `FindServers` call per request on a temporary unencrypted channel.
   Entries are unverified application descriptions; there is no multicast discovery, no `FindServersOnNetwork`,
   no `RegisterServer` and no automatic connection to a found application.
-- Values are point-in-time reads; history is raw or one aggregate (no read-at-time, no event
-  history, no `HistoryUpdate`), and the server's historian decides what exists and in which order it is
-  returned. The History trend chart plots exactly the numbers of one read (no second read, no interpolation);
-  non-numeric values are counted instead of plotted.
+- Values are point-in-time reads; history is raw or one aggregate (no read-at-time, no modified history),
+  and the server's historian decides what exists and in which order it is returned. Stored events are read with
+  one `ReadEventDetails` per source. `HistoryUpdate` is one node per request — insert/replace values or delete a
+  range, never a batch over nodes, never a retry, no undo — and servers usually allow it for privileged users
+  only; the read-back is evidence, not proof that the historian kept the values. The History trend chart plots
+  exactly the numbers of one read (no second read, no interpolation); non-numeric values are counted instead of
+  plotted.
 - Events are notifications; the condition methods are one-shot commands. Sources are subscription-only. One
   selected condition event can be sent to its own methods — `Acknowledge`, `Confirm`, `Enable`, `Disable` and
   `AddComment` — each one operator-confirmed method call under `operator-dialog` authority, plus one
   `ConditionRefresh` call on the running subscription (no dialog, because it stores nothing; its
   `RefreshStart`/`RefreshEnd` events are the only evidence). All of them are reachable headlessly through
   `opcua-events` (`--refresh`, `--acknowledge … --confirm`, `--condition-action ACTION --eventid … --confirm`).
-  The client keeps no condition state: it tracks no `AckedState`/`ConfirmedState`/`EnabledState`, never retries,
-  never acknowledges automatically, and has no `ConditionRefresh2`, event history or dialog creation.
+  Condition **state** is read on demand from the condition object's own variables (alarm summary,
+  `opcua-conditions`); the client tracks no transition history, never infers state from an event, never retries,
+  never acknowledges automatically, and has no `ConditionRefresh2` or dialog creation. Stored events are read from
+  the server and are not kept by the client.
 - `EventNotifier` and the other details-only attributes are read for the selected node, not downloaded; the
   JSON/CSV snapshot format is unchanged and the tree does not mark event sources.
 - Server status/diagnostics cover the standard status, summary and capability variables that the server

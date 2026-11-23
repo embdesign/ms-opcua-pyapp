@@ -40,9 +40,9 @@ Derived design rules:
 └───────────────┬──────────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────────┐
-│ cli.py · cli_read · cli_monitor · cli_events · cli_history           │
-│ cli_write · cli_check · cli_status · cli_nodes · cli_directory      │
-│ cli_compare · cli_sequence  (opcua-* console scripts, Qt-free)       │
+│ cli.py · cli_read · cli_monitor · cli_events · cli_conditions        │
+│ cli_history · cli_write · cli_check · cli_status · cli_nodes        │
+│ cli_directory · cli_compare · cli_sequence  (Qt-free console scripts)│
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ coroutines submitted / plain model objects returned
 ┌───────────────▼──────────────────────────────────────────────────────┐
@@ -54,7 +54,7 @@ Derived design rules:
 │  monitor_session.py  event_session.py  (subscription lifecycle)      │
 │  node_reader.py  node_ids.py  (session-bound browse/read helpers)    │
 │  session_setup.py  (discovery, client construction, connect flow)    │
-│  server_diagnostics.py  history_service.py  test_runner.py           │
+│  server_diagnostics.py  history_service.py  condition_state.py       │
 │  guarded_operations.py  write_service.py  type_support.py            │
 │  path_support.py  sequence_runner.py  method_support.py              │
 └───────────────┬──────────────────────────────────────────────────────┘
@@ -179,6 +179,16 @@ Event monitoring uses the same dispatch path with its own subscription (`opcua/e
   a refresh event can only arrive with a publish response. The call stores nothing, so the tab
   shows no dialog; an authority is still recorded and a missing refresh event is reported rather than claimed.
   There is no `ConditionRefresh2`, no second parent object and no retry.
+* **Stored events** use the same field mapping without a subscription: `read_event_history()` sends one
+  `HistoryRead` with `ReadEventDetails` (same filter builder, always with a filter), follows and releases
+  continuation points like the value history, decodes each `HistoryEventFieldList` through
+  `Event.from_event_fields`, and reuses `build_notification()` so a field is never named differently in the
+  live log and in a stored read. Rows read this way are marked *stored* in the table.
+* **Condition state** is read on demand by `opcua/condition_state.py`, not tracked: it browses each condition
+  object for the standard `AckedState`, `ConfirmedState`, `EnabledState` and `Retain` components (and their
+  `Id` properties), reads their Value in one batch, and reports a state the condition does not expose as
+  *not exposed* rather than guessing `False`. Nothing is inferred from an event and no state is cached between
+  reads; the alarm summary in the Events tab and `opcua-conditions` call the same function.
 
 ### Server status
 
@@ -195,10 +205,11 @@ namespace-0 variables and never writes:
   `LiveMonitor.items_snapshot()` instead, labelled as the client's own view.
 * The tab refreshes when the session connects and on **Refresh**; it owns no subscription and no timer.
 
-### History (raw reads)
+### History (reads and one update)
 
-The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one read-only
-`HistoryRead` of the selected variable, raw or one aggregate; it never calls `HistoryUpdate` and never retries:
+The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) performs one `HistoryRead` of the
+selected variable, raw or one aggregate, and — behind a preview and an explicit confirmation — one
+`HistoryUpdate`. Reads are never retried; an update is sent once and then read back:
 
 * `build_history_request()` produces `HistoryReadParameters` with `ReadRawModifiedDetails`, an open range
   (`ua.get_win_epoch()` on both ends) unless the operator sets From/To, `NumValuesPerNode` from the value cap,
@@ -212,6 +223,16 @@ The **History** tab (`opcua/history_service.py` + `gui/tabs/history_tab.py`) per
   limit ends the read, and makes a best-effort release in `finally` so no server-side cursor is left behind.
 * Results are sorted by source (then server) timestamp and trimmed to the requested cap. The server decides
   which values it keeps and which ones a page contains; the client only orders what it received.
+* **HistoryUpdate** is the only write-shaped history path and lives only in `history_service.py`:
+  `prepare_history_update()` reads the node's DataType/ValueRank and parses every `ISO=VALUE` entry with the
+  server's type (a malformed or unsupported value sends nothing), then builds `UpdateDataDetails` (or
+  `UpdateStructureDataDetails` for a structure) with `PerformInsertReplace = Insert/Replace`, or
+  `DeleteRawModifiedDetails` for a range delete. `send_prepared_history_update()` sends exactly one
+  `HistoryUpdate` under a keyword-only `WriteAuthority`, reports a service fault or per-operation StatusCode
+  instead of raising, and `history_update()` reads the affected range back. `verified` means only that the
+  requested timestamps are present (or that the deleted range is empty) — evidence, never proof of persistence.
+  The GUI previews through `OpcUaService.history_update_preview()` and confirms with
+  `operator_text.history_update_confirmation()`; `opcua-history --update … --confirm` is the Qt-free twin.
 * A Good StatusCode with no values is normal: the result records the node's `Historizing` attribute and the
   status line says whether the node reports `Historizing = false` or simply has no values in the range. A Bad
   StatusCode is reported with that StatusCode, never as an exception or as row loss.
@@ -689,7 +710,8 @@ opening a project never loads or runs a sequence.
 
 ## 12. Deliberate limitations
 
-* History is raw or one aggregate only: no read-at-time, no event history and no `HistoryUpdate`; a
+* History is raw or one aggregate, plus stored events and one confirmed `HistoryUpdate` (insert/replace/delete
+  on one node); there is no read-at-time, no modified history and no batch update. A
   point-in-time read remains the value path everywhere else.
 * Background reconnection is a session behaviour, not a test result: the `connection_recovery` check stays
   opt-in and disruptive, while the Connection tab's **Resilience** toggle retries a dropped link automatically.

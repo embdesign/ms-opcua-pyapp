@@ -27,7 +27,7 @@ Completion criteria:
 
 **Complete for the delivered scope.** Nothing is blocked and no authorization is pending.
 
-853 tests pass (625 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
+900 tests pass (661 unit), ruff reports no findings, and the tree contains no debug leftovers. Remaining gaps
 are verification-only (Windows and a manual desktop session) and are listed under *Known issues and review
 findings* and *Next actions*.
 
@@ -75,6 +75,20 @@ A Good-but-empty result is normal and is reported with the node's `Historizing` 
 (`gui/tabs/history_tab.py`) exposes the raw read; `opcua-demo-server --history` historizes Temperature and Speed
 in asyncua's in-memory historian. There is **no** `Client.history_read` in asyncua 2.1.0 and no processed,
 aggregate, at-time or event-history helper — see `docs/api-verification.md`.
+
+**Alarm summary, stored events and HistoryUpdate — delivered (2026-11-22).**
+`opcua/condition_state.py` reads a condition object's `AckedState`/`ConfirmedState`/`EnabledState`/`Retain`
+components (and their Boolean `Id` properties) on demand and never tracks or infers state; the Events tab's
+**Read states** button and the Qt-free `opcua-conditions` command call it. `opcua/event_service.py` gained
+`read_event_history()` (one `ReadEventDetails` per page, the same filter builder and `build_notification()`
+mapping as the live path; rows are marked *stored* in the tab, `opcua-events --history` is the CLI twin).
+`opcua/history_service.py` gained the only `HistoryUpdate` path (`prepare_history_update` →
+`send_prepared_history_update` → `history_update`): insert/replace parsed `DataValue`s or delete a raw range on
+one node, a keyword-only `WriteAuthority`, one send, then a read-back that reports which timestamps are present.
+The History tab's **Update history ▸** and `opcua-history --update … --confirm` are the two surfaces. Verified
+asyncua facts (state variables are components, `PerformUpdateType` has no Delete member, the demo refuses updates)
+are in `docs/api-verification.md`; tests are `tests/unit/test_condition_state.py`,
+`tests/unit/test_event_history.py`, `tests/unit/test_history_update.py`, and their `tests/integration/` twins.
 
 **Server directory (FindServers) — delivered.** `OpcUaService.discover_servers()` sends one `FindServers` request
 on a temporary `SecurityPolicyNone` channel (the same channel-level pattern as GetEndpoints, inside
@@ -212,8 +226,8 @@ Latest run: 2026-11-22 (release 0.1.2), Python 3.11.2, Linux, PySide6 6.11.3.
 | Check | Command | Result |
 |---|---|---|
 | Environment | `uv sync --reinstall` | ok — also repairs a `.venv/bin/pytest` with a stale shebang (see `AGENTS.md`) |
-| Unit tests | `uv run pytest tests/unit -q` | **625 passed** |
-| Full suite | `uv run pytest -q` | **853 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
+| Unit tests | `uv run pytest tests/unit -q` | **661 passed** |
+| Full suite | `uv run pytest -q` | **900 passed** (≈8 min on an idle host; up to ~15 min on a loaded one) |
 | Lint | `uvx ruff check src tests scripts` | **All checks passed** |
 | Repository hygiene | `git check-ignore -v` on secret/artefact paths | ignored: `.env`, `.env.local`, `*.pem`, `*.der`, `*.key`, `*.p12`, `*.log`, `*.pcap`, `dist/`, `build/`, `*.egg-info/`, `.mypy_cache/`, `htmlcov/`, `.coverage`, `.cache/`, `.vscode/settings.json`; trackable: `examples/*.json`, `uv.lock`, `.vscode/extensions.json` |
 | Debug leftovers | `grep -rn -E "TODO\|FIXME\|XXX\|HACK\|breakpoint\(" src tests scripts` | no matches; `print()` in `src/` is only user-facing output (`cli.py`, `cli_compare.py`, `cli_sequence.py`) and the demo-server banner |
@@ -227,7 +241,7 @@ changes.
 
 Verified:
 
-- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 853 tests
+- **Full-suite runtime varies with host load**: ≈3.5 min idle, up to ~15 min on a loaded machine. All 900 tests
   pass; the variance is scheduling/IO contention, not failures.
 - **128 broad `except Exception` handlers** in `src/` (`client_service.py` 10, `write_service.py` 8,
   `type_support.py` 8, `attributes.py` 8, `test_runner.py` 7, `nodeset2.py` 7, `event_service.py` 7, …).

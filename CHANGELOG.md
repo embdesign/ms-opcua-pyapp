@@ -10,6 +10,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Alarm summary and stored events.** The Events tab now reads a source's stored events with one bounded
+  `ReadEventDetails` (`Event history ▸ Read stored events`, rows marked *stored*) and fills an **Alarm summary**
+  table by reading each seen condition object's own `AckedState`, `ConfirmedState`, `EnabledState` and `Retain`
+  on demand through the new read-only `opcua/condition_state.py`. Nothing is inferred from an event, no
+  transition history is kept, no state is cached between reads, and a state the condition does not expose is
+  shown as *not exposed* rather than as `False`. The stored-event reader reuses the live filter and field
+  mapping, so a field has one name everywhere. Headless twins: `opcua-events --history` (no subscription) and
+  the new `opcua-conditions` command (`--condition NODEID`, or discovery from condition events for
+  `--seconds`), both Qt-free and read-only.
+- **One confirmed `HistoryUpdate` on the History tab and in `opcua-history`.** Insert or replace stored values
+  (`ISO=VALUE` entries, parsed with the server's DataType/ValueRank) or delete a From/To range on one node,
+  after a type preview and the confirmation text from `operator_text.history_update_confirmation`. The single
+  implementation lives in `opcua/history_service.py`, sends once under a keyword-only `WriteAuthority`, never
+  retries, reports a service fault or per-operation StatusCode instead of raising, and reads the affected range
+  back: `verified` only means the requested timestamps are present (or the deleted range is empty), never that
+  the historian is guaranteed to keep them. `opcua-history --update insert|replace|delete … --confirm` is the
+  headless twin (exit `3` for failed/unknown).
 - **The client certificate is checked before connecting.** Only the *server* certificate was parsed so far, so
   an expired client certificate, a missing application URI in `subjectAltName` or a private key that does not
   belong to the certificate only appeared as the server's `BadSecurityChecksFailed`. `security.check_client_

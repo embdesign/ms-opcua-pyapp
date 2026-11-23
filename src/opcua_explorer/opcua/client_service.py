@@ -42,13 +42,18 @@ from ..models import (
     BrowseOptions,
     ChildEntry,
     ConditionRefreshResult,
+    ConditionStateSnapshot,
     ConnectionInfo,
     DiscoveryResult,
     EventConfig,
+    EventHistoryConfig,
+    EventHistoryResult,
     EventSourceInfo,
     EventStart,
     HistoryConfig,
     HistoryResult,
+    HistoryUpdateConfig,
+    HistoryUpdateOutcome,
     MonitorConfig,
     MonitoredItemInfo,
     MonitorStart,
@@ -72,8 +77,13 @@ from ..models import (
     WriteAuthority,
     condition_action_label,
 )
+from .condition_state import read_condition_states as read_condition_states_impl
 from .event_service import event_id_bytes
+from .event_service import read_event_history as read_event_history_impl
 from .event_session import EventSession
+from .history_service import PrepareHistoryError
+from .history_service import history_update as history_update_impl
+from .history_service import prepare_history_update as history_update_prepare_impl
 from .history_service import read_history as read_history_impl
 from .monitor_session import MonitorSession
 from .node_ids import normalise_node_id as _normalise_node_id
@@ -323,9 +333,70 @@ class OpcUaService:
 
     # -- raw history -------------------------------------------------------
     async def read_history(self, node_id: Any, config: HistoryConfig) -> HistoryResult:
-        """Read raw history of one variable; no HistoryUpdate and no retry."""
+        """Read raw or one aggregate of one variable; no update and no retry."""
         session = self._require_session()
         return await read_history_impl(session, node_id, config)
+
+    async def history_update_preview(self, config: HistoryUpdateConfig) -> Inspection:
+        """Resolve the node's type and parse the values without sending anything."""
+        client = self._require_client()
+        try:
+            prepared = await history_update_prepare_impl(client, config)
+        except PrepareHistoryError as exc:
+            return Inspection(ok=False, detail=str(exc))
+        if prepared.config.action == "delete":
+            detail = (
+                f"would delete the stored values of {prepared.node_id} between "
+                f"{prepared.config.start} and {prepared.config.end}"
+            )
+            return Inspection(ok=True, detail=detail)
+        label = prepared.value_type.label() if prepared.value_type is not None else "value"
+        detail = (
+            f"would {prepared.config.action} {prepared.sent_value_count} value(s) in "
+            f"{prepared.node_id} ({label}) and read the range back"
+        )
+        return Inspection(
+            ok=True,
+            detail=detail,
+            preview=prepared.config.describe_entries(),
+            data_type_label=label,
+            value_rank=int(getattr(prepared.value_type, "value_rank", -1)),
+        )
+
+    async def write_history(
+        self, config: HistoryUpdateConfig, *, reference: str = ""
+    ) -> HistoryUpdateOutcome:
+        """Send one confirmed ``HistoryUpdate`` and read the affected range back.
+
+        One node, one request, never retried. The operator dialog is the
+        authority; a cancelled or refused preparation sends nothing.
+        """
+        client = self._require_client()
+        self._require_session()
+        authorization = WriteAuthority(
+            AUTHORITY_OPERATOR_DIALOG,
+            reference or f"history {config.action} {config.node_id}".strip(),
+        )
+        return await history_update_impl(client, config, authorization=authorization)
+
+    # -- stored events and condition state ---------------------------------
+    async def read_event_history(
+        self, node_id: Any, config: EventHistoryConfig
+    ) -> EventHistoryResult:
+        """Read the stored events of one source node; read-only, one bounded request per page."""
+        session = self._require_session()
+        return await read_event_history_impl(session, node_id, config)
+
+    async def read_condition_states(self, condition_node_ids: list[Any]) -> ConditionStateSnapshot:
+        """Read the state variables of the given condition objects, once.
+
+        Nothing is inferred from an event and nothing is cached: every call reads
+        the server's own ``AckedState``/``ConfirmedState``/``EnabledState``/``Retain``
+        values again, and a missing state is reported as missing.
+        """
+        session = self._require_session()
+        ids = [_normalise_node_id(node_id) for node_id in condition_node_ids]
+        return await read_condition_states_impl(session, ids)
 
     # -- browsing and reading ----------------------------------------------
     async def browse_children(

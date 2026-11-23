@@ -85,3 +85,25 @@ async def test_cli_history_csv_contains_a_header_and_all_rows(historized_model, 
     assert lines[0].startswith("source_timestamp,")
     assert len(lines) == 4  # header + three values
     assert [float(line.rsplit(",", 1)[1]) for line in lines[1:]] == pytest.approx([21.5, 22.0, 22.5])
+
+
+async def test_cli_history_update_reports_the_demo_refusal(historized_model, tmp_path, capsys) -> None:
+    code = await asyncio.to_thread(
+        cli_history.main,
+        _argv(
+            tmp_path,
+            historized_model,
+            "--update",
+            "insert",
+            "--entry",
+            "2026-11-21T10:00:00Z=21.5",
+            "--confirm",
+            "--json",
+        ),
+    )
+
+    assert code == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["format"] == "opcua-history-update"
+    assert payload["result"]["sent"] is True
+    assert payload["result"]["status_code"] != "Good"

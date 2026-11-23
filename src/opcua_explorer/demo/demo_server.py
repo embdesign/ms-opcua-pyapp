@@ -333,13 +333,17 @@ async def start_demo_server(
     update_values: bool = True,
     event_interval: float | None = None,
     history: bool = False,
+    event_history: bool = False,
 ) -> DemoModel:
     """Start a demo server and return its model (``model.endpoint`` is usable).
 
     ``event_interval`` (seconds) publishes a demo event on the Server object at
     that rate; it is off by default so ordinary runs stay deterministic.
     ``history`` historizes Temperature and Speed in the server's in-memory
-    history store so raw HistoryRead can be exercised.
+    history store so raw HistoryRead can be exercised. ``event_history``
+    historizes the events of the Server object as well; it publishes a demo
+    event every 500 ms when ``event_interval`` is not given, because a history
+    with nothing generated stays empty.
     """
     chosen_port = find_free_port(host) if port in (None, 0) else int(port)
     endpoint = f"opc.tcp://{host}:{chosen_port}"
@@ -357,12 +361,19 @@ async def start_demo_server(
     if update_values:
         task = asyncio.create_task(_update_values(model))
         model.server._demo_update_task = task
-    if event_interval and float(event_interval) > 0:
+    interval = float(event_interval) if event_interval and float(event_interval) > 0 else 0.0
+    if event_history and interval <= 0:
+        interval = 0.5
+    if interval > 0:
         model.event_generator = await model.server.get_event_generator(
             ua.ObjectIds.BaseEventType, ua.ObjectIds.Server
         )
-        event_task = asyncio.create_task(_emit_events(model, interval=float(event_interval)))
+        event_task = asyncio.create_task(_emit_events(model, interval=interval))
         model.server._demo_event_task = event_task
+    if event_history:
+        # The generator above adds the GeneratesEvent reference historian setup
+        # needs, so it must exist before the node is historized.
+        await model.server.historize_node_event(model.server.nodes.server, count=2_000)
     _logger.info("Demo server listening on %s", endpoint)
     return model
 
@@ -406,6 +417,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="historize Temperature and Speed in memory so raw HistoryRead can be exercised",
     )
+    parser.add_argument(
+        "--event-history",
+        action="store_true",
+        help=(
+            "historize events of the Server object so stored-event reads (ReadEventDetails) can be "
+            "exercised; publishes a demo event every 500 ms unless --event-interval is given"
+        ),
+    )
     parser.add_argument("--cert", help="server certificate (.der or .pem) to enable Basic256Sha256/SignAndEncrypt")
     parser.add_argument("--key", help="server private key (.pem)")
     parser.add_argument("--verbose", "-v", action="store_true", help="debug logging")
@@ -433,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
             update_values=not args.no_updates,
             event_interval=args.event_interval or None,
             history=args.history,
+            event_history=args.event_history,
         )
         print(f"Demo server running at {model.endpoint}")
         print(f"  namespaces: {DEMO_NAMESPACE} (index {model.namespace_index}), {DEMO_EXTRA_NAMESPACE}")
@@ -443,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  events:     one demo event every {args.event_interval:g} s on the Server object (i=2253)")
         if args.history:
             print("  history:    Temperature and Speed are historized (raw HistoryRead only)")
+        if args.event_history:
+            print("  event data: Server events are historized (ReadEventDetails can be exercised)")
         print("Press Ctrl+C to stop.")
         try:
             while True:

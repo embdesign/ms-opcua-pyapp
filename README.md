@@ -6,12 +6,13 @@ running operator sequences against an OPC UA server — with deliberate, explici
 Python 3.11+ · [asyncua 2.1.0](https://pypi.org/project/asyncua/) · PySide6 6.11.3 · managed with `uv` · native
 Windows and Linux, no Docker.
 
-> **Status — complete and maintained (2026-11-18)**
+> **Status — complete and maintained (2026-11-22)**
 > Implemented and tested: connection & security with automatic reconnect, multi-session window, a FindServers
 > directory lookup, address-space
 > browser and bounded download, JSON/CSV/NodeSet2 export with validation, headless NodeSet2 export
 > (`opcua-export`), live data-change monitoring with a merged view, live event subscriptions with a per-field
-> detail view, server status & diagnostics, history reads with a trend chart, a live trend of the selected monitored
+> detail view, stored-event reads and an on-demand alarm summary, server status & diagnostics, history reads with
+> a trend chart and one confirmed `HistoryUpdate`, a live trend of the selected monitored
 > node, functional tests with JSON/HTML reports, guarded single-target write/method-call checks with explicit
 > confirmation, an
 > interactive **Write & call** page (confirmed write with read-back and optional verified restore, confirmed method
@@ -19,7 +20,7 @@ Windows and Linux, no Docker.
 > connection profiles and versioned project files, a headless comparison of two address spaces
 > (`opcua-compare`, also available as a Compare tab and usable with saved JSON exports), and operator-written
 > control sequences with a gate, dry run and run timeline (Sequences tab and `opcua-run-sequence`). The automated
-> suite has 853 tests (625 unit + 228 integration). See
+> suite has 900 tests (661 unit + 239 integration). See
 > [Limitations](#10-limitations) for what is deliberately *not* claimed, [PLAN.md](PLAN.md) for the
 > delivered scope and [HANDOFF.md](HANDOFF.md) for maintenance guidance.
 
@@ -42,8 +43,8 @@ session's client.
 | **Server** | **ServerStatus** and **ServerDiagnostics**: state, current/start time, uptime, shutdown fields, the diagnostics-summary counters, ServerCapabilities limits this client depends on, and this session's live-monitor items (client view); one batched Read per **Refresh**, no write and no method call |
 | **Address space** | Lazy tree from Root/Objects or any NodeId with a **browse filter** (reference type, `Forward`/`Inverse`/`Both`, include subtypes, `NodeClassMask`), attributes panel with every standard attribute of the selected NodeClass (including **EventNotifier**, WriteMask/UserWriteMask, Historizing, MinimumSamplingInterval, IsAbstract/Symmetric/InverseName, DataTypeDefinition) and decoded bit-field names, references panel with direction, explicit value read with **IndexRange**, **MaxAge** and **TimestampsToReturn**, copy NodeId, a local **filter over the loaded rows** (hides rows of the browsed branches only, never browses), search inside a downloaded snapshot; rows of nodes in this session's live monitor are marked with **●** while the subscription runs and **○** when added but not subscribed (bold, session-local) |
 | **Live monitor** | One data-change subscription on NodeIds you add explicitly (also via **Monitor node** in the Address space tab); per-node table with the **latest value updated in place** (value, StatusCode, source timestamp, notification count) plus an append-only notification log and a **trend chart of the selected node** (the numbers it received, on the client's receive-time axis — non-numeric values are counted, the buffer follows *Keep rows* and says how many older points are not drawn); optional **DataChangeFilter** (trigger `Status`/`StatusValue`/`StatusValueTimestamp`, absolute or percent deadband), pause/clear, add/remove monitored items while running, configurable publishing/sampling intervals with **Apply intervals** on the live subscription, server-side **Reporting/Sampling/Disabled** monitoring mode, bounded row retention, and **Export log…** (the rows the table holds, as a versioned JSON document or CSV — no second read) |
-| **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be sent to the condition's own methods — **Acknowledge…**, **Confirm…**, **Enable…**, **Disable…** and **Add comment…** — each one operator-confirmed method call on that event's EventId, sent once and never retried; **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived; **Export log…** writes the event rows the table holds as a versioned JSON document or CSV |
-| **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error |
+| **Events** | One event subscription on the source nodes you add explicitly (the Server object by default, any node with an `EventNotifier`, also via **Use browser selection**); fields come from the server's event type (`BaseEventType` or a custom type you name); bounded event log with received time, source, event type, severity and message, a per-field detail view for the selected event, server-side filtering (extra EventType fields and a minimum severity), add/remove sources while running, and a clear rejection report per source; condition events from a `ConditionType` subscription can be sent to the condition's own methods — **Acknowledge…**, **Confirm…**, **Enable…**, **Disable…** and **Add comment…** — each one operator-confirmed method call on that event's EventId, sent once and never retried; **Refresh conditions** sends one `ConditionRefresh` call on the running subscription and reports whether the server's `RefreshStart`/`RefreshEnd` events arrived; **Event history ▸ Read stored events** performs one bounded `ReadEventDetails` on one source and marks those rows as *stored*; **Read states** fills the **Alarm summary** table by reading each seen condition object's own `AckedState`, `ConfirmedState`, `EnabledState` and `Retain` on demand (nothing inferred from an event, missing states shown as not exposed); **Export log…** writes the event rows the table holds as a versioned JSON document or CSV |
+| **History** | **HistoryRead** of one variable (also via **Use browser selection**): optional From/To range, a value cap, raw values or one aggregate (average/minimum/maximum/count with a processing interval), a table of source/server timestamps, StatusCode and value, and a **trend chart** of the numeric values with a hover readout; continuation points are followed up to a fixed cap and released, results are sorted oldest-first, and a node that does not historize is reported as such instead of as an error. **Update history ▸** sends one confirmed `HistoryUpdate` on the same node — insert or replace `ISO=VALUE` entries, or delete the From/To range — after a type preview and a confirmation, then reads the affected range back and states which requested timestamps are present |
 | **Write & call** | Interactive single-target operations, each after a confirmation showing the exact endpoint, node, value or arguments: write one variable value (parsed with the server's DataType/ValueRank, sent once, read back and compared, with an optional *restore the previous value* that is one further verified write), write one **metadata attribute** (`DisplayName` or `Description`, read back and compared), call one method (the arguments come from the server's `InputArguments`, `Executable` is checked, the call is sent once and its output arguments are shown) and **node management**: create one `Object` or `Variable` below a parent (the server assigns the NodeId, the new node is read back) or delete one node (one `DeleteNodes`, verified by reading it again). **Read node** shows NodeClass, DataType, ValueRank, access level and the current value |
 | **Tests** | Functional checks (discovery, session/identity, namespaces, browsing, attributes, value reads with StatusCodes, subscription creation and monitored-item notifications, bounded latency, opt-in connection recovery) plus optional **guarded** single-target write and method-call checks behind an explicit confirmation; JSON and HTML reports |
 | **Sequences** | Run an operator-written sequence document (`*.opcua-sequence.json`): `preconditions` that run before anything else (typically `assert` / verification checks; an `optional` `ensure` may set a prerequisite and therefore writes), an optional gate (acquire / keepalive / release) and a body of `write`, `expect`, `assert`, `ensure`, `call`, `delay`, `wait_until`; inputs via `${name}`; **Dry run** resolves every target, DataType and method signature and sends nothing; **Run** sends each step once, reads values back where the document asks, and reports the gate release |
@@ -609,9 +610,9 @@ uv run python scripts/generate_example_comparison.py
 The comparison is evidence for the scope that was browsed with that identity. It is not a statement that both
 servers behave identically under load, and it sends no write or method call.
 
-### Headless commands: `opcua-read`, `opcua-monitor`, `opcua-events`, `opcua-history`, `opcua-write`, `opcua-check`, `opcua-status`, `opcua-nodes`, `opcua-directory`
+### Headless commands: `opcua-read`, `opcua-monitor`, `opcua-events`, `opcua-conditions`, `opcua-history`, `opcua-write`, `opcua-check`, `opcua-status`, `opcua-nodes`, `opcua-directory`
 
-Nine Qt-free front ends over the same services as the GUI — one per page that does something an
+Ten Qt-free front ends over the same services as the GUI — one per page that does something an
 operator or a script needs, so nothing the tool can do is GUI-only:
 
 ```bash
@@ -624,7 +625,11 @@ opcua-events --endpoint opc.tcp://plc:4840 --seconds 30 --refresh --json
 opcua-events --endpoint opc.tcp://plc:4840 --acknowledge 0102ff --condition ns=2;s=Pump --confirm
 opcua-events --endpoint opc.tcp://plc:4840 --condition-action comment --eventid 0102ff \
              --condition ns=2;s=Pump --comment "seen, valve replaced" --confirm
+opcua-events --endpoint opc.tcp://plc:4840 --history --from 2026-11-21T00:00:00Z --json
+opcua-conditions --endpoint opc.tcp://plc:4840 --condition ns=2;s=PumpCondition --json
 opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --csv
+opcua-history --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --update insert \
+               --entry 2026-11-21T10:00:00Z=21.5 --confirm
 opcua-write --endpoint opc.tcp://plc:4840 --node ns=2;s=Temperature --value 42.5 --confirm
 opcua-check --endpoint opc.tcp://plc:4840 --variable ns=2;s=Temperature --report checks.html
 opcua-status --endpoint opc.tcp://plc:4840 --json
@@ -644,14 +649,23 @@ versioned document (`.json`) or CSV (`.csv`) when the run ends. `opcua-history` 
 `HistoryRead` for one variable (`--from` / `--to` ISO-8601, `--max-values`) and prints summary + values, a
 versioned JSON document or CSV; `--aggregate average|minimum|maximum|count` with `--interval MS` requests a
 processed read instead (both `--from` and `--to` are then required, and the server may not support aggregates),
-and `--sparkline` adds a one-line text trend of the numeric values. `opcua-events` creates one event subscription
+and `--sparkline` adds a one-line text trend of the numeric values. `--update insert|replace|delete` prepares one
+`HistoryUpdate` (insert/replace `--entry ISO=VALUE`, repeatable; delete takes `--from`/`--to`), sends it only with
+`--confirm`, and prints the read-back evidence; it changes the server's historian, not the live value, and exits
+`3` when the update failed or its result is unknown. `opcua-events` creates one event subscription
 (default source: the Server object) with the same server-side filtering as the Events tab (`--event-type`,
 `--select`, `--min-severity`), prints each event until `--count` or `--seconds`, and offers the tab's condition
 actions: `--refresh` sends one `ConditionRefresh` and reports whether `RefreshStart`/`RefreshEnd` arrived;
 `--acknowledge EVENTID --condition NODEID --confirm` sends one `Acknowledge` call, and
 `--condition-action acknowledge|confirm|enable|disable|comment --eventid EVENTID --condition NODEID --confirm`
 reaches the same five methods as the tab (without `--confirm` either form exits `2` and sends nothing; the JSON
-output carries the EventId and condition NodeId of every event, and one action per run is sent). `opcua-write`
+output carries the EventId and condition NodeId of every event, and one action per run is sent). `--history`
+reads one source's **stored events** instead of subscribing (`--from`/`--to`, `--max-events`, `--json`), with the
+same event-type/field/severity filter; it sends nothing. `opcua-conditions` prints an **alarm summary**: with
+`--condition NODEID` (repeatable) it reads those condition objects, otherwise it listens to the condition event
+type for `--seconds` and reads every condition those events name. It reads `AckedState`, `ConfirmedState`,
+`EnabledState` and `Retain` from the condition's own variables on demand, reports a state the condition does not
+expose as *not exposed*, and never acknowledges anything. `opcua-write`
 always previews (server DataType/ValueRank and the parsed value),
 sends only with `--confirm`, sends exactly one write, reads it back and optionally restores the previous value
 with `--restore`; without `--confirm` it exits `2` and sends nothing. `opcua-check` runs the **same suite as the
@@ -862,9 +876,14 @@ The implemented scope is complete; the following are **not** claimed:
   default. This is separate from the session-level **Keep reconnecting when the link drops** toggle (Connection
   tab → *Resilience*, on by default), which retries a dropped link in the background without operator action.
 * **The suite covers one session, one browse root and one variable** — not every node or DataType.
-* **History is a read-only point-in-time view.** The **History** tab reads stored values with `HistoryRead`:
-  raw modified details by default, or one aggregate (average/minimum/maximum/count) with a processing interval
-  when both From and To are set. There is still no read-at-time, no event history and no `HistoryUpdate`. The
+* **History is read on demand, with one guarded update path.** The **History** tab reads stored values with
+  `HistoryRead`: raw modified details by default, or one aggregate (average/minimum/maximum/count) with a
+  processing interval when both From and To are set. There is still no read-at-time and no modified history;
+  event history lives on the **Events** tab (`ReadEventDetails`). **Update history** sends exactly one
+  `HistoryUpdate` — insert or replace stored values, or delete a range — on one node, after a preview and a
+  confirmation, and reads the affected range back; it changes the server's historian, not the variable's live
+  value, there is no undo or batch, servers usually allow it for privileged users only, and a refusal is
+  reported with its StatusCode. A read-back is evidence, never proof that the historian kept the values. The
   trend chart draws the numeric values of exactly that one result — no second read, no interpolation and no
   resampling — and states how many values it could not plot; it is a view of the table, not an analysis.
   Whether values exist, which ones, whether the server supports aggregates and their accuracy is entirely
@@ -891,20 +910,25 @@ The implemented scope is complete; the following are **not** claimed:
   `opcua-compare` compare what each session could browse and read with one identity, from one point in time.
   Neither compares behaviour under load, internal limits, or anything that requires a write.
 * **Events are notifications, and the condition methods are one-shot calls.** The **Events** tab subscribes to a
-  source's `EventNotifier` and shows the selected fields. One selected condition event can be sent to the
-  condition's own methods: `Acknowledge`, `Confirm`, `Enable`, `Disable` and `AddComment` are five separate
-  commands, each exactly one method call, after its own explicit confirmation, through the single write path with
-  `operator-dialog` authority. The client keeps **no condition state of its own**: it does not track
-  `AckedState`/`ConfirmedState`/`EnabledState`, does not decide which method is legal next (the server refuses),
-  and the confirmation text says what that one method does — an acknowledgement is not proof that the process
-  condition has gone away, a confirmation is not an acknowledgement, and a disabled condition still exists.
+  source's `EventNotifier` and shows the selected fields; **Event history** reads one source's stored events
+  with one bounded `ReadEventDetails` (the server decides what it kept and the rows are marked *stored*). One
+  selected condition event can be sent to the condition's own methods: `Acknowledge`, `Confirm`, `Enable`,
+  `Disable` and `AddComment` are five separate commands, each exactly one method call, after its own explicit
+  confirmation, through the single write path with `operator-dialog` authority. **Condition state is read, not
+  tracked**: the **Alarm summary** reads `AckedState`/`ConfirmedState`/`EnabledState`/`Retain` from each condition
+  object on demand (and reports a state it does not expose as *not exposed*); nothing is inferred from an event,
+  no transition history exists, no state is cached between reads, and the client does not decide which method is
+  legal next (the server refuses). The confirmation text says what that one method does — an acknowledgement is
+  not proof that the process condition has gone away, a confirmation is not an acknowledgement, and a disabled
+  condition still exists.
   Every action needs a condition-type subscription (`ConditionType` or a subtype such as
   `AcknowledgeableConditionType`) so the event carries a condition identity and an EventId, and a method the
   condition does not expose is reported as missing instead of being invented. **Refresh conditions** is one
   `ConditionRefresh` call on the running subscription; it needs no confirmation because it stores, acknowledges
   and changes nothing, and the server's `RefreshStart`/`RefreshEnd` events are reported as the only evidence that
-  it arrived. Nothing is retried, there is no `ConditionRefresh2`, no event history, no automatic
-  acknowledgement and no dialog-condition creation. A source that cannot publish events
+  it arrived. Nothing is retried, there is no `ConditionRefresh2`, no automatic acknowledgement and no
+  dialog-condition creation. Stored events are read from the server (they are not kept by the client), and no
+  condition transition history is kept. A source that cannot publish events
   (no `EventNotifier`, unknown NodeId, unsupported service) is reported per source with its StatusCode. Event
   sources are session state, not project state: a project does not store them.
 * **`EventNotifier` is read on demand, not downloaded.** The Address space panel reads it for the selected node
@@ -919,8 +943,9 @@ The implemented scope is complete; the following are **not** claimed:
   the separate **History** tab.
 * **History is server data, not client state.** The demo server's historian is in memory (it disappears on
   restart, applies the cap to the newest values and never returns a continuation point); a real server may page,
-  sort and trim differently. The client follows continuation points up to 50 pages and releases them, but it
-  never writes or deletes history and does not cache results beyond the table.
+  sort and trim differently. The client follows continuation points up to 50 pages and releases them. It writes
+  history only through the one confirmed `HistoryUpdate` path on the History tab and caches no result beyond
+  the table; it does not merge, version or backfill history.
 * **A server directory only lists what it was told.** **Find servers…** sends one `FindServers` request to the
   discovery endpoint you type (an LDS, a GDS, or any server — most servers list themselves) with an optional
   application-URI prefix filter. The entries are `ApplicationDescription` values exactly as the directory

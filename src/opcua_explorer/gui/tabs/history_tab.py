@@ -1,9 +1,11 @@
-"""History tab: read-only HistoryRead for one variable (raw or one aggregate).
+"""History tab: HistoryRead of one variable and one confirmed HistoryUpdate.
 
-One node, one range, one bounded read. No HistoryUpdate, no event history and no
-retry; an aggregate requires both From and To and the server may not support it.
-The values are shown as a table and - when they are single numbers - as a trend
-chart that plots what the server returned and nothing else.
+Reads: one node, one range, one bounded read (raw or one aggregate); an aggregate
+requires both From and To and the server may not support it. Updates: insert,
+replace or delete stored values on the same node, after a preview, an explicit
+confirmation and one send, followed by a read-back of the affected range. The
+values are shown as a table and - when they are single numbers - as a trend chart
+that plots what the server returned and nothing else.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from PySide6.QtCore import QDateTime, Qt
@@ -26,6 +28,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -35,12 +39,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...defaults import DEFAULT_HISTORY_MAX_VALUES, MAX_HISTORY_MAX_VALUES
+from ...defaults import (
+    DEFAULT_HISTORY_MAX_VALUES,
+    MAX_HISTORY_MAX_VALUES,
+    MAX_HISTORY_UPDATE_ENTRIES,
+)
 from ...errors import InvalidNodeIdError
 from ...formatting import flatten_for_csv
-from ...models import HISTORY_AGGREGATES, HistoryConfig, HistoryResult
+from ...models import (
+    HISTORY_AGGREGATES,
+    HISTORY_UPDATE_ACTIONS,
+    HistoryConfig,
+    HistoryResult,
+    HistoryUpdateConfig,
+    HistoryUpdateEntry,
+    HistoryUpdateOutcome,
+)
 from ...opcua.browse import parse_node_id
 from ...opcua.client_service import OpcUaService
+from ...operator_text import history_update_confirmation
 from ...trend import build_trend_series
 from ..async_runner import AsyncRunner
 from ..selection_marker import SelectionMarker
@@ -53,6 +70,19 @@ _logger = logging.getLogger(__name__)
 
 HISTORY_PAYLOAD = Qt.UserRole + 21
 _MAX_VALUE_CELL_CHARS = 300
+_UPDATE_ACTION_LABELS = {"insert": "Insert", "replace": "Replace", "delete": "Delete range"}
+
+
+def ask_confirmation(parent: QWidget, title: str, text: str) -> bool:
+    """Modal yes/no with the exact operation text; a function so tests can stub it."""
+    answer = QMessageBox.question(
+        parent,
+        title,
+        text,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    return answer == QMessageBox.StandardButton.Yes
 
 
 class HistoryTab(SessionTab):
@@ -90,12 +120,14 @@ class HistoryTab(SessionTab):
         layout.addWidget(title)
         layout.addWidget(
             TabNotice(
-                "One HistoryRead: raw or one aggregate over a range, shown as a table and a trend. Read-only.",
+                "HistoryRead of one variable (raw or one aggregate), plus one confirmed HistoryUpdate.",
                 "HistoryRead for one variable: an optional time range and a maximum number of values, "
-                "optionally one aggregate (average/minimum/maximum/count) over that range. Read-only — no "
-                "HistoryUpdate and no event history. The server decides whether a node has history and whether "
-                "it computes aggregates; an empty result is not an error. Single numeric values are also drawn "
-                "as a trend: nothing is interpolated, and non-numeric values are counted instead of plotted.",
+                "optionally one aggregate (average/minimum/maximum/count) over that range. The server decides "
+                "whether a node has history and whether it computes aggregates; an empty result is not an "
+                "error. Single numeric values are also drawn as a trend: nothing is interpolated, and "
+                "non-numeric values are counted instead of plotted. 'Update history' is one confirmed "
+                "HistoryUpdate (insert, replace or delete stored values) on the same node; it changes the "
+                "server's historian, not the live value, and the affected range is read back afterwards.",
             )
         )
 
@@ -140,6 +172,7 @@ class HistoryTab(SessionTab):
         # Secondary read settings stay out of the working area; the toggle names
         # whatever is in effect, so a collapsed row can never be forgotten.
         self.options = OptionsRow("Options")
+        self.update_options = OptionsRow("Update history")
 
         range_row.addWidget(self.from_check)
         range_row.addWidget(self.from_edit)
@@ -148,6 +181,8 @@ class HistoryTab(SessionTab):
         range_row.addWidget(self.to_edit)
         range_row.addSpacing(12)
         range_row.addWidget(self.options.toggle)
+        range_row.addSpacing(12)
+        range_row.addWidget(self.update_options.toggle)
         range_row.addSpacing(12)
         range_row.addWidget(self.read_btn)
         range_row.addWidget(self.clear_btn)
@@ -181,6 +216,34 @@ class HistoryTab(SessionTab):
         self.options.add_widget(self.max_spin)
         self.options.add_stretch(1)
         layout.addWidget(self.options.widget)
+
+        self.update_action_combo = QComboBox()
+        for action in HISTORY_UPDATE_ACTIONS:
+            self.update_action_combo.addItem(_UPDATE_ACTION_LABELS[action], action)
+        self.update_action_combo.setToolTip(
+            "Insert or replace stored values, or delete the stored range from/to. This changes the server's "
+            "historian, not the live value."
+        )
+        self.update_action_combo.currentIndexChanged.connect(self._update_controls)
+        self.update_entries_edit = QPlainTextEdit()
+        self.update_entries_edit.setPlaceholderText(
+            "One value per line: 2026-11-21T10:00:00Z=21.5"
+        )
+        self.update_entries_edit.setFixedHeight(54)
+        self.update_entries_edit.setFont(mono_font(9))
+        self.history_write_btn = QPushButton("Write history…")
+        self.history_write_btn.setToolTip(
+            "Validate the values, ask for confirmation, send one HistoryUpdate and read the range back."
+        )
+        self.history_write_btn.clicked.connect(self._on_history_write)
+        self.update_hint_label = QLabel("Delete range uses From/To.")
+        self.update_hint_label.setObjectName("hintLabel")
+        self.update_options.add_widget(QLabel("Action:"))
+        self.update_options.add_widget(self.update_action_combo)
+        self.update_options.add_widget(self.update_entries_edit, 2)
+        self.update_options.add_widget(self.history_write_btn)
+        self.update_options.add_widget(self.update_hint_label, 1)
+        layout.addWidget(self.update_options.widget)
 
         self.values_table = QTableWidget(0, 5)
         self.values_table.setHorizontalHeaderLabels(
@@ -250,6 +313,129 @@ class HistoryTab(SessionTab):
             aggregate=self.aggregate_combo.currentData() or None,
             processing_interval_ms=float(self.interval_spin.value()),
         ).normalised()
+
+    def _parse_update_entries(self) -> list[HistoryUpdateEntry]:
+        """Parse ``ISO=VALUE`` lines; a malformed line means nothing is sent."""
+        entries: list[HistoryUpdateEntry] = []
+        for number, line in enumerate(self.update_entries_edit.toPlainText().splitlines(), start=1):
+            text = line.strip()
+            if not text or text.startswith("#"):
+                continue
+            stamp_text, separator, value_text = text.partition("=")
+            if not separator:
+                raise ValueError(f"Line {number} is not ISO=VALUE: {text!r}.")
+            cleaned = stamp_text.strip()
+            if cleaned.endswith("Z"):
+                cleaned = cleaned[:-1] + "+00:00"
+            try:
+                moment = datetime.fromisoformat(cleaned)
+            except ValueError as exc:
+                raise ValueError(f"Line {number} has no ISO-8601 timestamp: {stamp_text!r}.") from exc
+            entries.append(
+                HistoryUpdateEntry(
+                    source_timestamp=moment if moment.tzinfo else moment.replace(tzinfo=UTC),
+                    value_text=value_text.strip(),
+                )
+            )
+        if len(entries) > MAX_HISTORY_UPDATE_ENTRIES:
+            raise ValueError(
+                f"At most {MAX_HISTORY_UPDATE_ENTRIES} values can be sent in one HistoryUpdate."
+            )
+        return entries
+
+    def _history_update_config(self) -> HistoryUpdateConfig:
+        action = str(self.update_action_combo.currentData() or "insert")
+        start = self.from_edit.dateTime().toUTC().toPython() if self.from_check.isChecked() else None
+        end = self.to_edit.dateTime().toUTC().toPython() if self.to_check.isChecked() else None
+        entries = [] if action == "delete" else self._parse_update_entries()
+        if action == "delete" and (start is None or end is None):
+            raise ValueError("Set both From and To for a history delete.")
+        if action != "delete" and not entries:
+            raise ValueError("Enter at least one ISO=VALUE line to insert or replace stored values.")
+        return HistoryUpdateConfig(
+            action=action,
+            node_id=self.node_edit.text().strip(),
+            entries=entries,
+            start=start if isinstance(start, datetime) else None,
+            end=end if isinstance(end, datetime) else None,
+        ).normalised()
+
+    def _on_history_write(self) -> None:
+        """Preview, confirm, send once and read the affected range back."""
+        if self._busy or not self._connected:
+            return
+        try:
+            canonical = parse_node_id(self.node_edit.text().strip()).to_string()
+            config = self._history_update_config()
+        except (InvalidNodeIdError, ValueError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        config = HistoryUpdateConfig(
+            action=config.action,
+            node_id=canonical,
+            entries=config.entries,
+            start=config.start,
+            end=config.end,
+        )
+        self._busy = True
+        self._update_controls()
+        self._set_status(f"Checking the history {config.action} of {canonical}…")
+
+        def preview_done(inspection: Any) -> None:
+            self._busy = False
+            if self._closed:
+                return
+            if not inspection.ok:
+                self._set_status(f"The history update was not sent: {inspection.detail}", error=True)
+                self._update_controls()
+                return
+            text = history_update_confirmation(
+                endpoint_url=self._endpoint_url,
+                action=config.action,
+                node_id=canonical,
+                count=len(config.entries),
+                entries_preview=config.describe_entries(),
+                start=config.start.isoformat() if config.start else "",
+                end=config.end.isoformat() if config.end else "",
+            )
+            if not ask_confirmation(self, "Confirm history update", text):
+                self._set_status("The history update was cancelled; nothing was sent.")
+                self._update_controls()
+                return
+            self._busy = True
+            self._update_controls()
+            self._set_status(f"Sending one history {config.action} to {canonical}…")
+            self._runner.submit(
+                lambda: self._service.write_history(config, reference="history-tab update"),
+                on_done=self._on_history_update_done,
+                on_error=lambda message: self._on_history_update_failed(message),
+            )
+
+        self._runner.submit(
+            lambda: self._service.history_update_preview(config),
+            on_done=preview_done,
+            on_error=lambda message: self._on_history_update_failed(message),
+        )
+
+    def _on_history_update_done(self, outcome: HistoryUpdateOutcome) -> None:
+        self._busy = False
+        if self._closed:
+            return
+        if outcome.verification is not None:
+            self._fill(outcome.verification)
+            self.summary_label.setText(
+                f"{outcome.summary_text()} {outcome.verification.summary_text()}"
+            )
+        self._set_status(outcome.summary_text(), error=not outcome.ok)
+        self._update_controls()
+
+    def _on_history_update_failed(self, message: str) -> None:
+        self._busy = False
+        if self._closed:
+            return
+        _logger.warning("The history update reported: %s", message)
+        self._set_status(f"The history update failed: {message}", error=True)
+        self._update_controls()
 
     # -- read --------------------------------------------------------------
     def _on_read(self) -> None:
@@ -368,7 +554,11 @@ class HistoryTab(SessionTab):
 
     def _update_controls(self) -> None:
         connected = self._connected
+        action = str(self.update_action_combo.currentData() or "insert")
         self.options.set_active(self._options_summary())
+        self.update_options.set_active(
+            "" if action == "insert" else _UPDATE_ACTION_LABELS.get(action, action)
+        )
         self.node_edit.setEnabled(connected and not self._busy)
         self.use_selection_btn.setEnabled(connected and not self._busy)
         self.from_edit.setEnabled(self.from_check.isChecked() and connected and not self._busy)
@@ -380,3 +570,11 @@ class HistoryTab(SessionTab):
         self.interval_spin.setEnabled(connected and not self._busy and bool(self.aggregate_combo.currentData()))
         self.read_btn.setEnabled(connected and not self._busy)
         self.clear_btn.setEnabled(not self._busy)
+        self.update_action_combo.setEnabled(connected and not self._busy)
+        self.update_entries_edit.setEnabled(connected and not self._busy and action != "delete")
+        self.history_write_btn.setEnabled(connected and not self._busy)
+        self.update_hint_label.setText(
+            "Delete range uses From/To."
+            if action == "delete"
+            else f"At most {MAX_HISTORY_UPDATE_ENTRIES} lines."
+        )

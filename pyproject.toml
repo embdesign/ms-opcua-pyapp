@@ -58,8 +58,10 @@ opcua-read = "opcua_explorer.cli_read:main"
 opcua-monitor = "opcua_explorer.cli_monitor:main"
 # Headless event subscription, with ConditionRefresh and a confirmed Acknowledge (Qt-free).
 opcua-events = "opcua_explorer.cli_events:main"
-# Headless raw-history read (Qt-free).
+# Headless history read and one confirmed HistoryUpdate (Qt-free).
 opcua-history = "opcua_explorer.cli_history:main"
+# Headless alarm summary: condition state read on demand (Qt-free, read-only).
+opcua-conditions = "opcua_explorer.cli_conditions:main"
 # Headless guarded single write (Qt-free, needs --confirm).
 opcua-write = "opcua_explorer.cli_write:main"
 # Headless functional/interoperability checks with the Tests-tab suite (Qt-free).

@@ -202,6 +202,52 @@ UaSession.read(ua.ReadParameters)          -> list[ua.DataValue]
   not a write and needs no confirmation dialog, but the project still records a `WriteAuthority`
   (`operator-dialog`) for it and sends it through `write_service.refresh_conditions`.
 
+## Condition state objects (verified 2026-11-22)
+
+* The A&C state variables are **components of the condition object** (`AckedState`,
+  `ConfirmedState`, `EnabledState`, `Retain`), not properties: a browse with `HierarchicalReferences`
+  (forward, subtypes) finds them; a `HasProperty`-only browse does not. The standard BrowseNames are in
+  namespace 0, and there are **no `ua.ObjectIds` constants** for them (`AckedState` etc. are absent), so they
+  must be resolved by browse name, never by an invented NodeId.
+* A TwoState/Condition variable's machine-readable state is its own `Id` property (`HasProperty`, namespace 0):
+  `Id` is a Boolean while `Value` is a LocalizedText. `Retain` is a plain Boolean variable. A condition that
+  does not expose a state (a plain `ConditionType` has no `AckedState`) must be reported as missing.
+* `ConditionName` (String) and `LastSeverity` (UInt16) are ordinary properties of the condition object and can
+  be read in the same batch as the states. The client reads Value attributes through `read_attributes_bulk`.
+* The asyncua demo server has **no condition object**: its `Condition` event type carries
+  `EnabledState/Id` etc. as event fields, so condition-state reads must be tested against a hand-built
+  condition object (the integration test creates one with `add_object` + `add_variable` + `add_property`).
+
+## Stored events (verified 2026-11-22)
+
+* `Session.history_read` with `ua.ReadEventDetails` (`StartTime`, `EndTime`, `NumValuesPerNode`, `Filter`)
+  returns `HistoryData` of type `ua.HistoryEvent` whose `Events` is a list of `ua.HistoryEventFieldList`.
+  Each `EventFields` list holds raw `ua.Variant`s in `SelectClauses` order (`EventType`/`SourceNode` are NodeId,
+  `EventId` ByteString, `Time`/`ReceiveTime` DateTime, `Severity` UInt16, `Message` LocalizedText).
+* `asyncua.common.events.Event.from_event_fields(select_clauses, fields)` rebuilds an `Event` with
+  `data_types`, so the live and stored paths share one notification builder. `ReadEventDetails` always needs a
+  `Filter` (unlike live subscriptions, where `None` is allowed).
+* asyncua's server answers `ReadEventDetails` only when the source is historized:
+  `Server.historize_node_event(node, period, count)` registers it through a `GeneratesEvent` reference lookup;
+  create the event generator **before** calling it, or no event type is found. The in-memory store returns
+  **newest-first** and never returns a continuation point.
+
+## HistoryUpdate (verified 2026-11-22)
+
+* `Session.history_update(params)` takes `ua.HistoryUpdateParameters` with a list of `HistoryUpdateDetails` and
+  returns one `ua.HistoryUpdateResult` per detail (`StatusCode` + `OperationResults`). There is no
+  `Client.history_update` helper beyond the session delegation.
+* `ua.UpdateDataDetails` / `ua.UpdateStructureDataDetails` carry `NodeId`, `PerformInsertReplace` and
+  `UpdateValues` (a list of `ua.DataValue`; `SourceTimestamp` identifies the stored point).
+  `ua.PerformUpdateType` is **Insert=1, Replace=2, Update=3, Remove=4** — there is no Delete member; deleting a
+  raw range is `ua.DeleteRawModifiedDetails` (`NodeId`, `StartTime`, `EndTime`, `IsDeleteModified=False`).
+* asyncua's server has two refusal shapes: `HistoryManager.update_history()` returns `BadNotWritable` per detail
+  for an administrator, while the service-level permission check sends a **ServiceFault `BadUserAccessDenied`**
+  for a `User` role, which the client raises as `ua.UaStatusCodeError`. Both must be reported, never raised.
+* A structure value uses `UpdateStructureDataDetails` and the same `ExtensionObject` encoding as a write; the
+  demo server refuses every update (no history-write support), so the success path is unit-tested with a fake
+  session and the refusal path against the demo server.
+
 ## Server status and diagnostics (verified 2026-11-17)
 
 * Standard namespace-0 variables read by the Server tab: State 2259, CurrentTime 2258, StartTime 2257,

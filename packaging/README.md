@@ -19,8 +19,8 @@ locally, and `dist/` and `build/` are already ignored by `.gitignore`.
 `opcua-demo-server` is **not** bundled. It is a development aid that starts an
 in-process demo server; use `uv run opcua-demo-server` from a checkout.
 
-`opcua-run-sequence`, `opcua-read`, `opcua-monitor`, `opcua-history`, `opcua-write` and
-`opcua-certificate` are also **not** bundled
+`opcua-run-sequence`, `opcua-read`, `opcua-monitor`, `opcua-events`, `opcua-conditions`, `opcua-history`,
+`opcua-write`, `opcua-status`, `opcua-nodes`, `opcua-directory` and `opcua-certificate` are also **not** bundled
 yet: they run from a `uv` checkout (`uv run <command> --help`).
 Adding more specs is deliberately left until a build has been verified on both CI platforms.
 

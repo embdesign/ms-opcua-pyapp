@@ -1,16 +1,17 @@
-"""Events tab: one event subscription on explicitly added source nodes.
+"""Events tab: one event subscription, stored events and the alarm summary.
 
 Nothing is subscribed implicitly. The operator adds one or more source NodeIds
 (usually the Server object), starts one subscription, and sees the events the
 server publishes as a bounded log. Every selected event can be inspected field
-by field.
+by field. The same page can read a source's stored events (``ReadEventDetails``)
+and read the state of the conditions it has seen on demand.
 
 The tab never writes a variable. It has exactly two condition actions, both
-sent once through ``write_service``: an operator-confirmed ``Acknowledge``
-method call on a condition event, and a ``ConditionRefresh`` call on the running
-subscription that asks the server to publish its retained conditions again. It
-never calls ``Confirm``, ``Enable`` or anything else and never changes a
-monitoring mode.
+sent once through ``write_service``: an operator-confirmed condition method call
+(Acknowledge, Confirm, Enable, Disable, AddComment) on a condition event, and a
+``ConditionRefresh`` call on the running subscription that asks the server to
+publish its retained conditions again. Condition state is read from the
+condition object's own variables and never inferred from an event.
 """
 
 from __future__ import annotations
@@ -21,10 +22,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
+    QDateTimeEdit,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
@@ -46,6 +49,8 @@ from PySide6.QtWidgets import (
 from ...defaults import (
     DEFAULT_EVENT_KEEP_ROWS,
     DEFAULT_EVENT_PUBLISHING_INTERVAL_MS,
+    DEFAULT_HISTORY_MAX_VALUES,
+    MAX_HISTORY_MAX_VALUES,
     MAX_KEEP_ROWS,
     MAX_PUBLISHING_INTERVAL_MS,
     MIN_EVENT_PUBLISHING_INTERVAL_MS,
@@ -57,7 +62,10 @@ from ...models import (
     CONDITION_ACTION_LABELS,
     CONDITION_ACTIONS,
     STATUS_PASSED,
+    ConditionStateSnapshot,
     EventConfig,
+    EventHistoryConfig,
+    EventHistoryResult,
     EventNotification,
     EventSourceInfo,
     EventStart,
@@ -71,6 +79,7 @@ from ...operator_text import (
     condition_action_confirmation,
     condition_action_result_text,
     condition_refresh_text,
+    condition_state_text,
 )
 from ..async_runner import AsyncRunner
 from ..selection_marker import SelectionMarker
@@ -83,6 +92,7 @@ _logger = logging.getLogger(__name__)
 SOURCE_NODE_ID = Qt.UserRole + 11
 SOURCE_HANDLE = Qt.UserRole + 12
 EVENT_PAYLOAD = Qt.UserRole + 13
+EVENT_SOURCE = Qt.UserRole + 14
 
 _MAX_MESSAGE_CELL_CHARS = 300
 _MAX_TIME_CELL_CHARS = 32
@@ -121,6 +131,7 @@ class EventsTab(SessionTab):
         self._total_events = 0
         self._selected_notification: EventNotification | None = None
         self._condition_busy = False
+        self._stored_events = 0
 
         self._build_ui()
         self.set_connected(False)
@@ -136,15 +147,17 @@ class EventsTab(SessionTab):
         layout.addWidget(title)
         layout.addWidget(
             TabNotice(
-                "One event subscription on the sources you add; a selected condition can be sent to its "
-                "own methods.",
+                "One event subscription on the sources you add, stored events and an on-demand alarm "
+                "summary.",
                 "One event subscription on the source nodes you add explicitly (usually the Server object). The "
                 "server decides what it publishes; the fields come from the selected event type. For condition "
                 "events choose an event type such as ConditionType (i=2782) or AcknowledgeableConditionType "
                 "(i=2881), then one selected event can be sent to the condition's own methods: Acknowledge, "
                 "Confirm, Enable, Disable and AddComment - one confirmed method call each, sent once, never "
                 "retried. Refresh conditions asks the server once to publish the conditions it already retains "
-                "for this subscription. No variable is written.",
+                "for this subscription. 'Event history' reads stored events; 'Read states' reads each condition "
+                "object's AckedState/ConfirmedState/EnabledState/Retain on demand, never inferred from an event. "
+                "No variable is written.",
             )
         )
 
@@ -211,6 +224,7 @@ class EventsTab(SessionTab):
         # The server-side filter is fixed when the subscription starts; it lives in a
         # hidden row whose toggle names whatever is in effect.
         self.options = OptionsRow("Filter")
+        self.history_options = OptionsRow("Event history")
 
         controls.addWidget(QLabel("Event type:"))
         controls.addWidget(self.event_type_edit, 1)
@@ -226,6 +240,7 @@ class EventsTab(SessionTab):
         controls.addWidget(self.max_rows_spin)
         controls.addSpacing(12)
         controls.addWidget(self.options.toggle)
+        controls.addWidget(self.history_options.toggle)
         layout.addLayout(controls)
 
         self.fields_edit = QLineEdit()
@@ -247,6 +262,40 @@ class EventsTab(SessionTab):
         self.options.add_widget(QLabel("Min severity:"))
         self.options.add_widget(self.min_severity_spin)
         layout.addWidget(self.options.widget)
+
+        # Stored events: one source node, one optional range, one bounded read.
+        self.history_from_check = QCheckBox("From")
+        self.history_from_check.toggled.connect(self._update_controls)
+        self.history_from_edit = QDateTimeEdit()
+        self.history_from_edit.setCalendarPopup(True)
+        self.history_from_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.history_from_edit.setDateTime(QDateTime.currentDateTime())
+        self.history_to_check = QCheckBox("To")
+        self.history_to_check.toggled.connect(self._update_controls)
+        self.history_to_edit = QDateTimeEdit()
+        self.history_to_edit.setCalendarPopup(True)
+        self.history_to_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.history_to_edit.setDateTime(QDateTime.currentDateTime())
+        self.history_max_spin = QSpinBox()
+        self.history_max_spin.setRange(1, MAX_HISTORY_MAX_VALUES)
+        self.history_max_spin.setValue(DEFAULT_HISTORY_MAX_VALUES)
+        self.history_max_spin.setToolTip("Hard cap on the stored events one read returns.")
+        self.read_history_btn = QPushButton("Read stored events")
+        self.read_history_btn.setToolTip(
+            "One ReadEventDetails on the selected source (or the only one in the list). "
+            "Rows are marked 'stored'; the server decides what it kept."
+        )
+        self.read_history_btn.clicked.connect(self._on_read_event_history)
+        self.history_options.add_widget(QLabel("Read one source:"))
+        self.history_options.add_widget(self.history_from_check)
+        self.history_options.add_widget(self.history_from_edit)
+        self.history_options.add_widget(self.history_to_check)
+        self.history_options.add_widget(self.history_to_edit)
+        self.history_options.add_widget(QLabel("Max:"))
+        self.history_options.add_widget(self.history_max_spin)
+        self.history_options.add_widget(self.read_history_btn)
+        self.history_options.add_stretch(1)
+        layout.addWidget(self.history_options.widget)
 
         splitter = QSplitter(Qt.Vertical)
 
@@ -297,6 +346,11 @@ class EventsTab(SessionTab):
         details_header = QHBoxLayout()
         details_header.addWidget(QLabel("Selected event — every field the subscription selected"))
         details_header.addStretch(1)
+        self.read_states_btn = QPushButton("Read states")
+        self.read_states_btn.setToolTip(condition_state_text())
+        self.read_states_btn.clicked.connect(self._on_read_condition_states)
+        self.read_states_btn.setEnabled(False)
+        details_header.addWidget(self.read_states_btn)
         self.refresh_conditions_btn = QPushButton("Refresh conditions")
         self.refresh_conditions_btn.setToolTip(
             "Calls ConditionRefresh once on this subscription so the server publishes the conditions it "
@@ -342,9 +396,31 @@ class EventsTab(SessionTab):
         details_layout.addWidget(self.details_view, 1)
         splitter.addWidget(details_box)
 
+        state_box = QWidget()
+        state_layout = QVBoxLayout(state_box)
+        state_layout.setContentsMargins(0, 0, 0, 0)
+        state_layout.addWidget(
+            QLabel("Alarm summary — condition state read on demand (never inferred from an event)")
+        )
+        self.state_table = QTableWidget(0, 8)
+        self.state_table.setHorizontalHeaderLabels(
+            ["Condition", "Name", "Acked", "Confirmed", "Enabled", "Retain", "Last severity", "Status"]
+        )
+        self.state_table.verticalHeader().setVisible(False)
+        self.state_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.state_table.setAlternatingRowColors(True)
+        self.state_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        state_header = self.state_table.horizontalHeader()
+        for column in range(7):
+            state_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        state_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        state_layout.addWidget(self.state_table, 1)
+        splitter.addWidget(state_box)
+
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 3)
         splitter.setStretchFactor(2, 2)
+        splitter.setStretchFactor(3, 1)
         layout.addWidget(splitter, 1)
 
         self.status_label = QLabel("Not connected.")
@@ -370,8 +446,10 @@ class EventsTab(SessionTab):
             self._condition_busy = False
             self.sources_table.setRowCount(0)
             self.events_table.setRowCount(0)
+            self.state_table.setRowCount(0)
             self.details_view.clear()
             self._total_events = 0
+            self._stored_events = 0
             self._set_status("Not connected. Use the Connection tab to open a session.")
             self._update_counters()
             self.sources_changed.emit()
@@ -685,7 +763,10 @@ class EventsTab(SessionTab):
     def _on_event(self, notification: EventNotification) -> None:
         self._total_events += 1
         self.event_received.emit(notification)
+        self._append_event_row(notification, stored=False)
 
+    def _append_event_row(self, notification: EventNotification, *, stored: bool) -> None:
+        """Append one row; a stored event is marked as such, never as live."""
         table = self.events_table
         bar = table.verticalScrollBar()
         follow = bar.value() >= bar.maximum() - 2
@@ -700,8 +781,13 @@ class EventsTab(SessionTab):
 
         row = table.rowCount()
         table.insertRow(row)
+        received = (
+            "stored"
+            if stored
+            else notification.received_at.astimezone().strftime("%H:%M:%S.%f")[:-3]
+        )
         cells = [
-            notification.received_at.astimezone().strftime("%H:%M:%S.%f")[:-3],
+            received,
             event_time,
             "" if notification.severity is None else str(notification.severity),
             notification.event_type,
@@ -712,6 +798,9 @@ class EventsTab(SessionTab):
             item = QTableWidgetItem(text)
             if column == 0:
                 item.setData(EVENT_PAYLOAD, notification)
+                item.setData(EVENT_SOURCE, "stored" if stored else "live")
+                if stored:
+                    item.setToolTip("Read from the server's stored events (ReadEventDetails).")
             if column == 5:
                 item.setToolTip(notification.message)
             table.setItem(row, column, item)
@@ -731,11 +820,166 @@ class EventsTab(SessionTab):
 
     def _on_clear_events(self) -> None:
         self.events_table.setRowCount(0)
+        self.state_table.setRowCount(0)
         self.details_view.clear()
         self._selected_notification = None
         self._total_events = 0
+        self._stored_events = 0
         self._update_condition_buttons()
         self._update_counters()
+
+    # -- stored events -----------------------------------------------------
+    def _history_source_id(self) -> str:
+        """The one source a stored-event read targets."""
+        rows = {index.row() for index in self.sources_table.selectedIndexes()}
+        if len(rows) > 1:
+            raise ValueError("Select exactly one event source for a stored-event read.")
+        if len(rows) == 1:
+            item = self.sources_table.item(min(rows), 0)
+            value = item.data(SOURCE_NODE_ID) if item is not None else None
+            if value:
+                return str(value)
+        if self.sources_table.rowCount() == 1:
+            item = self.sources_table.item(0, 0)
+            value = item.data(SOURCE_NODE_ID) if item is not None else None
+            if value:
+                return str(value)
+        if self.sources_table.rowCount() > 1:
+            raise ValueError("Select one event source in the table for the stored-event read.")
+        text = self.source_edit.text().strip() or SERVER_OBJECT_NODE_ID
+        return parse_node_id(text).to_string()
+
+    def _event_history_config(self) -> EventHistoryConfig:
+        start = (
+            self.history_from_edit.dateTime().toUTC().toPython()
+            if self.history_from_check.isChecked()
+            else None
+        )
+        end = (
+            self.history_to_edit.dateTime().toUTC().toPython()
+            if self.history_to_check.isChecked()
+            else None
+        )
+        return EventHistoryConfig(
+            start=start,
+            end=end,
+            max_values=int(self.history_max_spin.value()),
+            event_type_node_id=self.event_type_edit.text().strip(),
+            select_fields=[part.strip() for part in self.fields_edit.text().split(",") if part.strip()],
+            min_severity=int(self.min_severity_spin.value()) or None,
+        ).normalised()
+
+    def _on_read_event_history(self) -> None:
+        """Read one source's stored events; read-only, one bounded request per page."""
+        if self._busy or not self._connected:
+            return
+        try:
+            source = self._history_source_id()
+        except (ValueError, InvalidNodeIdError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        config = self._event_history_config()
+        if config.start and config.end and config.start > config.end:
+            self._set_status("The stored-event start must not be after its end.", error=True)
+            return
+        self._busy = True
+        self._update_controls()
+        self._set_status(f"Reading stored events of {source}…")
+
+        def done(result: EventHistoryResult) -> None:
+            self._busy = False
+            if self._closed:
+                return
+            for notification in result.events:
+                self._stored_events += 1
+                self._append_event_row(notification, stored=True)
+            self._set_status(result.summary_text(), error=result.status != "Good")
+            self._update_controls()
+            self._update_counters()
+
+        def failed(message: str) -> None:
+            self._busy = False
+            if self._closed:
+                return
+            _logger.warning("Reading stored events of %s failed: %s", source, message)
+            self._set_status(f"Reading stored events failed: {message}", error=True)
+            self._update_controls()
+
+        self._runner.submit(
+            lambda: self._service.read_event_history(source, config),
+            on_done=done,
+            on_error=failed,
+        )
+
+    # -- alarm summary -----------------------------------------------------
+    def _condition_node_ids(self) -> list[str]:
+        """Condition nodes seen in the event table, first appearance first."""
+        ids: list[str] = []
+        seen: set[str] = set()
+        for row in range(self.events_table.rowCount()):
+            item = self.events_table.item(row, 0)
+            payload = item.data(EVENT_PAYLOAD) if item is not None else None
+            if isinstance(payload, EventNotification) and payload.condition_node_id:
+                node_id = payload.condition_node_id
+                if node_id not in seen:
+                    seen.add(node_id)
+                    ids.append(node_id)
+        return ids
+
+    def _on_read_condition_states(self) -> None:
+        if self._busy or not self._connected:
+            return
+        node_ids = self._condition_node_ids()
+        if not node_ids:
+            self._set_status(
+                "No condition event is in the log; add a source with ConditionType events first.",
+                error=True,
+            )
+            return
+        self._busy = True
+        self._update_controls()
+        self._set_status(f"Reading the state of {len(node_ids)} condition(s)…")
+
+        def done(snapshot: ConditionStateSnapshot) -> None:
+            self._busy = False
+            if self._closed:
+                return
+            self._fill_condition_states(snapshot)
+            self._set_status(snapshot.summary_text())
+            self._update_controls()
+
+        def failed(message: str) -> None:
+            self._busy = False
+            if self._closed:
+                return
+            _logger.warning("Reading condition states failed: %s", message)
+            self._set_status(f"Reading condition states failed: {message}", error=True)
+            self._update_controls()
+
+        self._runner.submit(
+            lambda: self._service.read_condition_states(node_ids),
+            on_done=done,
+            on_error=failed,
+        )
+
+    def _fill_condition_states(self, snapshot: ConditionStateSnapshot) -> None:
+        table = self.state_table
+        table.setRowCount(len(snapshot.conditions))
+        for row, condition in enumerate(snapshot.conditions):
+            cells = [
+                condition.node_id,
+                condition.condition_name,
+                condition.acked_text(),
+                condition.confirmed_text(),
+                condition.enabled_text(),
+                condition.retain_text(),
+                "" if condition.last_severity is None else str(condition.last_severity),
+                condition.status if not condition.missing else "partial: " + ", ".join(condition.missing),
+            ]
+            for column, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setToolTip(condition.detail or text)
+                table.setItem(row, column, item)
 
     def _on_export_log(self) -> None:
         """Write the rows the event table currently shows; nothing is re-read."""
@@ -828,6 +1072,12 @@ class EventsTab(SessionTab):
             button.setEnabled(can_call)
         self.refresh_conditions_btn.setEnabled(
             self._connected and self._running and not self._condition_busy and not self._busy
+        )
+        self.read_states_btn.setEnabled(
+            self._connected
+            and not self._condition_busy
+            and not self._busy
+            and bool(self._condition_node_ids())
         )
 
     def _on_refresh_conditions(self) -> None:
@@ -1003,12 +1253,24 @@ class EventsTab(SessionTab):
         self.min_severity_spin.setEnabled(not self._running)
         self.start_btn.setEnabled(connected and has_sources and not self._running and not self._busy)
         self.stop_btn.setEnabled(self._running and not self._busy)
+        self.read_history_btn.setEnabled(connected and not self._busy)
+        self.history_from_check.setEnabled(connected and not self._busy)
+        self.history_to_check.setEnabled(connected and not self._busy)
+        self.history_from_edit.setEnabled(
+            connected and not self._busy and self.history_from_check.isChecked()
+        )
+        self.history_to_edit.setEnabled(
+            connected and not self._busy and self.history_to_check.isChecked()
+        )
+        self.history_max_spin.setEnabled(connected and not self._busy)
         self._update_condition_buttons()
 
     def _update_counters(self) -> None:
         sources = self.sources_table.rowCount()
         self.export_log_btn.setEnabled(self.events_table.rowCount() > 0)
         parts = [f"{self._total_events} event(s)", f"{sources} source(s)"]
+        if self._stored_events:
+            parts.append(f"{self._stored_events} stored")
         if self._subscription_id is not None:
             parts.append(f"subscription {self._subscription_id}")
         self.counters_label.setText(" · ".join(parts))
